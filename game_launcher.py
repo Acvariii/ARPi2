@@ -1,7 +1,7 @@
-from launcher import run_launcher
+from launcher import run_pygame
 
 def run_launcher_shim():
-    run_launcher()
+    run_pygame()
 
 if __name__ == "__main__":
-    run_launcher()
+    run_pygame()
