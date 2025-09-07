@@ -323,6 +323,7 @@ class MonopolyGame:
             except Exception:
                 pass
 
+    @staticmethod
     def _fit_text_to_rect(text, rect, min_font=8, max_font=22, color=(0,0,0), pad=4):
         """
         Returns a list of (surface, position) for wrapped text that fits inside rect.
