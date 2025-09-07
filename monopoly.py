@@ -5,7 +5,7 @@ import pygame
 import pygame.freetype
 from typing import List, Dict, Tuple, Optional
 
-from ui_elements import PlayerSelectionUI, HOVER_TIME_THRESHOLD, HoverButton
+from ui_elements import PlayerSelectionUI, HOVER_TIME_THRESHOLD
 from ui_components import draw_circular_progress
 from constants import (
     PLAYER_COLORS, PROPERTIES, RAILROADS, UTILITIES,
@@ -85,13 +85,15 @@ class MonopolyGame:
         self.button_hover_pos: Dict[str, Tuple[int, int]] = {}
         self.popup_hover: Dict[str, float] = {}
         self.properties_open: Dict[int, bool] = {i: False for i in range(8)}
+        
         self.buy_prompt: Dict = {}
+        self.buy_prompt_hover: Dict[str, float] = {}
+        self.buy_prompt_hover_pos: Dict[str, Tuple[int, int]] = {}
 
         self.dice_state: Dict = {"rolling": False, "start": 0.0, "end": 0.0, "d1": 0, "d2": 0, "pid": None}
         self.last_roll = (0, 0)
         self._last_button_rects: Dict[int, Dict[str, pygame.Rect]] = {}
         self._board_geom = self._get_board_geom()
-        self.popup_font = pygame.font.SysFont(None, 32)
 
     def _compute_board_rect(self) -> pygame.Rect:
         w, h = self.screen.get_size()
@@ -165,7 +167,7 @@ class MonopolyGame:
             btn_h = max(28, rect.height - ypad * 2)
             start_x = rect.left + xpad + (total_w - (btn_w * 3 + gap * 2)) // 2
             yy = rect.top + ypad
-            for i, key in enumerate(["roll", "props", "buy"]):
+            for i, key in enumerate(["roll", "props", "mortgage"]):
                 bx = start_x + i * (btn_w + gap)
                 rects[key] = pygame.Rect(bx, yy, btn_w, btn_h)
         else:
@@ -176,9 +178,17 @@ class MonopolyGame:
             yy = rect.top + gap
             rects["roll"] = pygame.Rect(xx, yy, btn_w, btn_h)
             rects["props"] = pygame.Rect(xx, yy + btn_h + gap, btn_w, btn_h)
-            rects["buy"] = pygame.Rect(xx, yy + 2 * (btn_h + gap), btn_w, btn_h)
+            rects["mortgage"] = pygame.Rect(xx, yy + 2 * (btn_h + gap), btn_w, btn_h)
         self._last_button_rects[pid] = rects
         return rects
+
+    def _get_panel_orientation(self, pid: int) -> int:
+        w, h = self.screen.get_size()
+        x, y = self.selection_ui.positions[pid]
+        if y == 0: return 180
+        if x == 0: return 270
+        if x == w: return 90
+        return 0
 
     def update(self, fingertip_meta: List[Dict]):
         now = time.time()
@@ -186,10 +196,27 @@ class MonopolyGame:
         if self.buy_prompt:
             pid = self.buy_prompt.get("pid")
             prop_idx = self.buy_prompt.get("prop_idx")
-            yes_btn = self.buy_prompt.get("yes_btn")
-            no_btn = self.buy_prompt.get("no_btn")
-
-            if yes_btn and yes_btn.clicked:
+            
+            action = None
+            for meta in fingertip_meta:
+                pos, hand = meta.get("pos"), meta.get("hand")
+                if not pos: continue
+                for key_name, r in self.buy_prompt["buttons"].items():
+                    hkey = f"buy:{pid}:{key_name}:{hand}"
+                    if r.collidepoint(pos):
+                        if hkey not in self.buy_prompt_hover:
+                            self.buy_prompt_hover[hkey] = now
+                            self.buy_prompt_hover_pos[hkey] = pos
+                        else:
+                            self.buy_prompt_hover_pos[hkey] = pos
+                            if (now - self.buy_prompt_hover[hkey]) >= HOVER_TIME_THRESHOLD:
+                                action = key_name
+                    else:
+                        if hkey in self.buy_prompt_hover:
+                            self.buy_prompt_hover.pop(hkey, None)
+                            self.buy_prompt_hover_pos.pop(hkey, None)
+            
+            if action == "yes":
                 player = self.players[pid]
                 prop = self.properties[prop_idx]
                 price = prop.get("price", 0)
@@ -198,10 +225,13 @@ class MonopolyGame:
                     player.properties.append(prop_idx)
                     self.owners[prop_idx] = pid
                 self.buy_prompt = {}
+                self.buy_prompt_hover.clear()
+                self.buy_prompt_hover_pos.clear()
                 return
-            
-            if no_btn and no_btn.clicked:
+            elif action == "no":
                 self.buy_prompt = {}
+                self.buy_prompt_hover.clear()
+                self.buy_prompt_hover_pos.clear()
                 return
 
         self.selection_ui.update_with_fingertips(fingertip_meta)
@@ -225,7 +255,7 @@ class MonopolyGame:
                 continue
 
             rects = self._player_button_rects(pid)
-            allowed = {"props"} if pid != self.current else {"roll", "props", "buy"}
+            allowed = {"props", "mortgage"} if pid != self.current else {"roll", "props", "mortgage"}
             for meta in fingertip_meta:
                 pos, hand = meta.get("pos"), meta.get("hand")
                 if not pos: continue
@@ -245,7 +275,7 @@ class MonopolyGame:
                                 if key_name == "roll" and pid == self.current and not self.dice_state["rolling"]:
                                     dur = random.uniform(1.5, 2.5)
                                     self.dice_state.update({"rolling": True, "start": now, "end": now + dur, "pid": pid})
-                                elif key_name == "buy": self.properties_open[pid] = True
+                                elif key_name == "mortgage": self.properties_open[pid] = True
                                 elif key_name == "props": self.properties_open[pid] = True
                                 for k in list(self.button_hover.keys()):
                                     if k.startswith(f"{pid}:"): self.button_hover.pop(k, None); self.button_hover_pos.pop(k, None)
@@ -284,38 +314,61 @@ class MonopolyGame:
                     spec = self.properties[prop_idx]
                     can_afford = p.money >= spec.get("price", 9999)
                     panel_rect = self.selection_ui.slot_rect(p.idx)
+                    
                     btn_w, btn_h = 100, 40
                     gap = 20
                     yes_x = panel_rect.centerx - btn_w - gap // 2
                     no_x = panel_rect.centerx + gap // 2
                     btn_y = panel_rect.centery + 20
+                    
                     self.buy_prompt = {
                         "pid": p.idx, "prop_idx": prop_idx,
-                        "yes_btn": HoverButton((yes_x, btn_y, btn_w, btn_h), "Yes", self.popup_font),
-                        "no_btn": HoverButton((no_x, btn_y, btn_w, btn_h), "No", self.popup_font),
+                        "buttons": {
+                            "yes": pygame.Rect(yes_x, btn_y, btn_w, btn_h),
+                            "no": pygame.Rect(no_x, btn_y, btn_w, btn_h)
+                        },
                         "can_afford": can_afford
                     }
+
+    def _draw_rotated_text(self, text, font, color, center, angle):
+        text_surf = font.render(text, True, color)
+        rotated_surf = pygame.transform.rotate(text_surf, angle)
+        self.screen.blit(rotated_surf, rotated_surf.get_rect(center=center))
 
     def _draw_properties_popup_in_panel(self, pid: int, panel_rect: pygame.Rect):
         inner = panel_rect.inflate(-8, -8)
         pygame.draw.rect(self.screen, (28, 28, 28), inner, border_radius=8)
         pygame.draw.rect(self.screen, (180, 180, 180), inner, width=2, border_radius=8)
-        font = pygame.font.SysFont(None, max(12, int(panel_rect.height * 0.18)))
+        
+        angle = self._get_panel_orientation(pid)
+        is_vertical = angle in (90, 270)
+        
+        font_size = max(12, int(panel_rect.height * 0.12 if is_vertical else panel_rect.height * 0.18))
+        font = pygame.font.SysFont(None, font_size)
+        
         x0, y0 = inner.left + 12, inner.top + 10
-        self.screen.blit(font.render(f"Player {pid + 1}", True, (255, 255, 255)), (x0, y0))
-        self.screen.blit(font.render(f"Money: ${self.players[pid].money}", True, (255, 255, 255)), (x0, y0 + 24))
+        
+        self._draw_rotated_text(f"Player {pid + 1}", font, (255, 255, 255), (panel_rect.centerx, y0 + font.get_height() / 2), angle)
+        self._draw_rotated_text(f"Money: ${self.players[pid].money}", font, (255, 255, 255), (panel_rect.centerx, y0 + 24 + font.get_height() / 2), angle)
+        
         y = y0 + 52
-        row_h = max(20, int(panel_rect.height * 0.22))
+        row_h = max(20, int(panel_rect.height * 0.15))
+        prop_font = pygame.font.SysFont(None, max(12, int(font_size * 0.9)))
+
         for prop_idx in self.players[pid].properties[:5]:
             if prop_idx < len(self.properties):
                 p = self.properties[prop_idx]
-                color = p.get("color")
-                if color is None:
-                    color = (50, 50, 50) if p.get("rent_steps") else (210, 210, 210)
+                color = p.get("color") or ((150,150,150) if "Railroad" in p["name"] else (200,200,200))
                 name = p.get("name", "")
-                pygame.draw.rect(self.screen, color, pygame.Rect(x0, y, 20, 14))
-                self.screen.blit(font.render(name, True, (255, 255, 255)), (x0 + 26, y - 2))
+                
+                color_rect_pos = (x0, y)
+                text_pos = (x0 + 26, y - 2 + row_h / 2)
+                
+                # This part is not rotated to keep the color swatch aligned with the panel edge
+                pygame.draw.rect(self.screen, color, pygame.Rect(color_rect_pos[0], color_rect_pos[1], 20, 14))
+                self._draw_rotated_text(name, prop_font, (255, 255, 255), text_pos, angle)
                 y += row_h
+        
         now = time.time()
         for k, start in list(self.popup_hover.items()):
             try:
@@ -336,18 +389,32 @@ class MonopolyGame:
         pygame.draw.rect(self.screen, (255, 215, 0), inner, width=2, border_radius=8)
         
         prop = self.properties[self.buy_prompt["prop_idx"]]
+        angle = self._get_panel_orientation(pid)
+        
         title_font = pygame.font.SysFont(None, 36)
         price_font = pygame.font.SysFont(None, 30)
+        btn_font = pygame.font.SysFont(None, 28)
         
-        title_surf = title_font.render(f"Buy {prop['name']}?", True, (255, 255, 255))
-        price_surf = price_font.render(f"Price: ${prop['price']}", True, (200, 200, 200))
-        
-        self.screen.blit(title_surf, title_surf.get_rect(centerx=panel_rect.centerx, y=panel_rect.top + 20))
-        self.screen.blit(price_surf, price_surf.get_rect(centerx=panel_rect.centerx, y=panel_rect.top + 60))
+        self._draw_rotated_text(f"Buy {prop['name']}?", title_font, (255, 255, 255), (panel_rect.centerx, panel_rect.top + 40), angle)
+        self._draw_rotated_text(f"Price: ${prop['price']}", price_font, (200, 200, 200), (panel_rect.centerx, panel_rect.top + 80), angle)
 
-        fingertip_meta = self.hand_to_screen(self.screen.get_width(), self.screen.get_height())
-        self.buy_prompt["yes_btn"].draw(self.screen, fingertip_meta, enabled=self.buy_prompt["can_afford"])
-        self.buy_prompt["no_btn"].draw(self.screen, fingertip_meta)
+        can_afford = self.buy_prompt["can_afford"]
+        for name, rect in self.buy_prompt["buttons"].items():
+            is_yes = name == "yes"
+            enabled = can_afford if is_yes else True
+            color = (100,180,250) if enabled else (80,80,80)
+            txt_color = (255,255,255) if enabled else (160,160,160)
+            
+            pygame.draw.rect(self.screen, (10,10,10), rect.move(4,6), border_radius=12)
+            pygame.draw.rect(self.screen, color, rect, border_radius=12)
+            self._draw_rotated_text(name.capitalize(), btn_font, txt_color, rect.center, angle)
+
+        now = time.time()
+        for key, start_time in list(self.buy_prompt_hover.items()):
+            pos = self.buy_prompt_hover_pos.get(key)
+            if not pos: continue
+            progress = min(1.0, max(0.0, (now - start_time) / HOVER_TIME_THRESHOLD))
+            draw_circular_progress(self.screen, (pos[0] + 28, pos[1] - 28), 20, progress)
 
     def _draw_text_in_space(self, text: str, rect: pygame.Rect, angle: int):
         font_name = pygame.font.get_default_font()
@@ -462,35 +529,36 @@ class MonopolyGame:
         font = pygame.font.SysFont(None, max(12, int(sh * 0.03)))
         for pid in list(self.players_selected):
             rect = self.selection_ui.slot_rect(pid)
-            x, y = self.selection_ui.positions[pid]
             base_col = self.players[pid].color
             washed = tuple(min(255, int(c * 0.75 + 180 * 0.25)) for c in base_col)
             pygame.draw.rect(self.screen, washed, rect.inflate(8, 8), border_radius=8)
             if pid == self.current:
                 pygame.draw.rect(self.screen, (255, 215, 0), rect.inflate(6, 6), width=max(2, int(sw * 0.0025)), border_radius=8)
-                lbl = font.render("CURRENT", True, (0, 0, 0))
-                self.screen.blit(lbl, (rect.centerx - lbl.get_width() // 2, rect.top + 6))
+                self._draw_rotated_text("CURRENT", font, (0,0,0), (rect.centerx, rect.top + 12), self._get_panel_orientation(pid))
+
             if self.properties_open.get(pid):
                 self._draw_properties_popup_in_panel(pid, rect)
                 continue
             if self.buy_prompt.get("pid") == pid:
                 continue
+                
             rects = self._player_button_rects(pid)
             for key_name, brect in rects.items():
-                col = tuple(min(255, int(c * 0.7 + 220 * 0.3)) for c in base_col) if key_name == "roll" and pid == self.current else tuple(min(255, int(c * 0.8 + 200 * 0.2)) for c in base_col)
-                pygame.draw.rect(self.screen, col, brect, border_radius=8)
+                is_roll = key_name == "roll"
+                enabled = pid == self.current if is_roll else True
+                color = tuple(min(255, int(c * 0.7 + 220 * 0.3)) for c in base_col) if enabled else (80,80,80)
+                pygame.draw.rect(self.screen, color, brect, border_radius=8)
                 pygame.draw.rect(self.screen, (60, 60, 60), brect, width=1, border_radius=8)
-                label_text = "Roll" if key_name == "roll" else ("Properties" if key_name == "props" else "Mortgage")
-                txtsurf = font.render(label_text, True, (0, 0, 0))
-                angle_text = 0 if y == sh else (180 if y == 0 else (270 if x == 0 else 90))
-                if angle_text != 0: txtsurf = pygame.transform.rotate(txtsurf, angle_text)
-                self.screen.blit(txtsurf, txtsurf.get_rect(center=brect.center))
+                label_text = key_name.capitalize()
+                self._draw_rotated_text(label_text, font, (0,0,0), brect.center, self._get_panel_orientation(pid))
+
         now = time.time()
         for key, start in list(self.button_hover.items()):
             pos = self.button_hover_pos.get(key)
             if not pos: continue
             progress = min(1.0, max(0.0, (now - start) / HOVER_TIME_THRESHOLD))
             draw_circular_progress(self.screen, (pos[0] + 28, pos[1] - 28), 20, progress, thickness=max(3, int(self._board_geom["short"] * 0.06)))
+        
         board_rect = self._board_geom["board_rect"]
         cx, cy = board_rect.centerx, board_rect.centery
         die_size = max(28, int(self._board_geom["short"] * 0.9))
@@ -520,6 +588,8 @@ class MonopolyGame:
             for v in getattr(self.selection_ui, "hover_pos", {}).values():
                 if v: pts.add((int(v[0]), int(v[1])))
             for v in self.button_hover_pos.values():
+                if v: pts.add((int(v[0]), int(v[1])))
+            for v in self.buy_prompt_hover_pos.values():
                 if v: pts.add((int(v[0]), int(v[1])))
             for (px, py) in pts:
                 pygame.draw.circle(self.screen, (255, 255, 255), (px, py), 20)
