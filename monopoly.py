@@ -384,20 +384,33 @@ class MonopolyGame:
                 else:
                     bar = pygame.Rect(rr.left + 2, rr.top + 2, thickness, rr.height - 4)
                 pygame.draw.rect(self.screen, gcolor, bar, border_radius=2)
-            # --- Text rendering logic inside the loop ---
             name = spec.get("name", "")
             if idx == 0:
                 name = "Go"
             angle = 0 if gy == 9 else (90 if gx == 0 else (180 if gy == 0 else 270))
             surfaces = self._fit_text_to_rect(name, rr, min_font=8, max_font=22, color=(0,0,0), pad=6)
             for surf, pos in surfaces:
-                if angle != 0:
+                # For left/right, rotate each line and adjust position to stack vertically
+                if angle in (90, 270):
                     surf = pygame.transform.rotate(surf, angle)
-                    if angle == 180:
-                        surf = pygame.transform.flip(surf, True, True)
-                    elif angle == 270:
-                        surf = pygame.transform.flip(surf, True, False)
-                self.screen.blit(surf, pos)
+                    surf_rect = surf.get_rect()
+                    # Stack vertically, centered horizontally
+                    if angle == 90:
+                        # Right edge: stack from top to bottom
+                        surf_rect.midleft = (rr.left + rr.width // 2, pos[1])
+                    else:
+                        # Left edge: stack from bottom to top
+                        surf_rect.midright = (rr.right - rr.width // 2, pos[1])
+                    self.screen.blit(surf, surf_rect.topleft)
+                else:
+                    # Top/bottom: normal stacking
+                    if angle != 0:
+                        surf = pygame.transform.rotate(surf, angle)
+                        if angle == 180:
+                            surf = pygame.transform.flip(surf, True, True)
+                        elif angle == 270:
+                            surf = pygame.transform.flip(surf, True, False)
+                    self.screen.blit(surf, pos)
 
     def draw_tokens(self):
         static_by_space: Dict[int, List[Player]] = {}
