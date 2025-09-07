@@ -4,6 +4,18 @@ from typing import List, Tuple, Dict
 
 HOVER_TIME_THRESHOLD = 0.9
 
+# Define 8 distinct player colors (RGB) used by PlayerSelectionUI
+PLAYER_COLORS = [
+    (200,  30,  30),
+    (30, 200,  30),
+    (30,  30, 200),
+    (200, 200,  30),
+    (200,  30, 200),
+    (30, 200, 200),
+    (150, 100,  50),
+    (100,  30, 150),
+]
+
 
 class HoverButton:
     def __init__(self, rect: Tuple[int, int, int, int], text: str, font: pygame.font.Font, radius: int = 12):
@@ -143,9 +155,7 @@ class PlayerSelectionUI:
         inner = pygame.Rect(int(w*0.02), int(h*0.02), int(w*0.96), int(h*0.96))
         pygame.draw.rect(self.screen, (32, 96, 36), inner, border_radius=12)
         font = pygame.font.SysFont(None, 28)
-        colors = [
-            (255, 77, 77),(77, 255, 77),(77, 77, 255),(255, 200, 77),
-            (200, 77, 255),(77, 255, 200),(255, 120, 120),(180, 180, 80)]
+        colors = PLAYER_COLORS
         for idx, pos in enumerate(self.positions):
             rect = self.slot_rect(idx)
             sel = self.selected[idx]
@@ -167,3 +177,21 @@ class PlayerSelectionUI:
             else: angle = 90
             lbl = pygame.transform.rotate(label, angle)
             self.screen.blit(lbl, lbl.get_rect(center=rect.center))
+
+    def closest_player_color(self, point: Tuple[int, int]):
+        """
+        Return the nearest player's color for the provided screen point.
+        Used by the launcher to color fingertip cursors.
+        """
+        min_d = float("inf")
+        idx_min = 0
+        for i in range(len(self.positions)):
+            rect = self.slot_rect(i)
+            cx, cy = rect.center
+            dx = cx - point[0]
+            dy = cy - point[1]
+            d = dx*dx + dy*dy
+            if d < min_d:
+                min_d = d
+                idx_min = i
+        return PLAYER_COLORS[idx_min]
