@@ -84,3 +84,7 @@ CHANCE_CARDS = [
     {"id": "ch_chairman",  "text": "Pay each player $50.", "action": ("pay_each_player", 50)},
     {"id": "ch_loan",      "text": "Collect $150.", "action": ("money", 150)}
 ]
+
+PROPERTY_SPACE_INDICES = [
+    1, 3, 6, 8, 9, 11, 13, 14, 16, 18, 19, 21, 23, 24, 26, 27, 29, 31, 32, 34, 37, 39
+]
