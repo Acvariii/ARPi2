@@ -7,6 +7,7 @@ from monopoly import MonopolyGame
 
 WINDOW_SIZE = (1280, 720)
 FPS = 60
+MENU_LOCKOUT_SECONDS = 0.6  # ignore menu clicks for this period after startup
 
 def run_launcher():
     pygame.init()
@@ -17,6 +18,9 @@ def run_launcher():
 
     # start websocket hand receiver thread
     start_ws_thread()
+
+    # ignore menu clicks for a short time on startup to avoid accidental auto-advance
+    menu_lockout_until = time.time() + MENU_LOCKOUT_SECONDS
 
     # UI elements
     center = (WINDOW_SIZE[0]//2, WINDOW_SIZE[1]//2)
@@ -53,21 +57,28 @@ def run_launcher():
             # show slot previews (non-interactive preview)
             selection_ui.draw_slots()
 
-            if btn_monopoly.clicked:
-                state = "monopoly_select"
-                btn_monopoly.reset()
-            if btn_blackjack.clicked:
-                state = "blackjack"
-                btn_blackjack.reset()
+            # only accept menu clicks after the initial lockout to avoid auto-advance
+            if time.time() > menu_lockout_until:
+                if btn_monopoly.clicked:
+                    # reset hover state for selection screen to avoid immediate toggles
+                    selection_ui.hover_start.clear()
+                    selection_ui.hover_pos.clear()
+                    start_btn.reset()
+                    back_btn.reset()
+                    btn_monopoly.reset()
+                    state = "monopoly_select"
+                if btn_blackjack.clicked:
+                    btn_blackjack.reset()
+                    state = "blackjack"
 
         elif state == "monopoly_select":
             # Player selection screen: update selection via hover, show progress, show Start
             selection_ui.update_with_fingertips(fingertip_meta)
             selection_ui.draw_slots()
-
+ 
             # draw monopoly preview under selection
             monopoly_game.draw_board()
-
+ 
             # Draw and handle Start button
             selected_count = selection_ui.selected_count()
             start_enabled = (selected_count >= selection_ui.min_players)
@@ -76,10 +87,11 @@ def run_launcher():
             if back_btn.clicked:
                 state = "menu"
                 back_btn.reset()
-
+ 
             # draw Start (disabled until enough players)
+            # draw start after board to ensure visibility; pass enabled flag
             start_btn.draw(screen, fingertip_points, enabled=start_enabled)
-
+ 
             # only allow starting when enough players selected
             hint_font = pygame.font.SysFont(None, 22)
             hint = hint_font.render(f"{selected_count} selected (min {selection_ui.min_players})", True, (200,200,200))
