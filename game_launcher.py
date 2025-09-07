@@ -157,6 +157,7 @@ class PlayerSelection:
 
 def run_pygame():
     pygame.init()
+    pygame.mouse.set_visible(True)
     screen = pygame.display.set_mode(WINDOW_SIZE)
     clock = pygame.time.Clock()
     font = pygame.font.SysFont(None, 48)
@@ -176,20 +177,21 @@ def run_pygame():
 
     running = True
     while running:
-        fingertip_points = []
+        fingertip_points = []      # used for collision checks
+        fingertip_meta = []        # used for rendering (hand id, name, color)
         # fetch latest hands
         with shared_lock:
             hands = shared_hands.get("hands", [])
-            sw = shared_hands.get("w", WINDOW_SIZE[0])
-            sh = shared_hands.get("h", WINDOW_SIZE[1])
+        screen_w, screen_h = screen.get_size()
         for h in hands:
-            # fingertips are in hand['fingertips'] with normalized coords
+            hand_id = h.get("hand_id", 0)
             fps = h.get("fingertips", {})
-            for k, v in fps.items():
+            for name, v in fps.items():
                 x, y = v[0], v[1]
-                sx = int(x * WINDOW_SIZE[0])
-                sy = int(y * WINDOW_SIZE[1])
+                sx = int(x * screen_w)
+                sy = int(y * screen_h)
                 fingertip_points.append((sx, sy))
+                fingertip_meta.append({"pos": (sx, sy), "hand": hand_id, "name": name})
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -197,10 +199,20 @@ def run_pygame():
 
         screen.fill(GRAY)
 
-        # draw fingertips
-        for p in fingertip_points:
-            pygame.draw.circle(screen, (255,255,255), p, 8)
-            pygame.draw.circle(screen, (0,0,0), p, 4)
+        # draw fingertips (large, visible cursors)
+        for meta in fingertip_meta:
+            px, py = meta["pos"]
+            # nearest player color
+            col = selection.closest_player_color((px, py))
+            # outer ring
+            pygame.draw.circle(screen, (255, 255, 255), (px, py), 18)
+            # inner color (player)
+            pygame.draw.circle(screen, col, (px, py), 12)
+            # small center
+            pygame.draw.circle(screen, (0,0,0), (px, py), 4)
+            # hand label
+            label = pygame.font.SysFont(None, 20).render(f"H{meta['hand']}:{meta['name']}", True, (255,255,255))
+            screen.blit(label, (px + 12, py - 8))
 
         if state == "menu":
             btn_monopoly.draw(screen, fingertip_points)
@@ -216,7 +228,8 @@ def run_pygame():
             selection.draw(fingertip_points)
 
             # color fingertips based on nearest player
-            for p in fingertip_points:
+            for meta in fingertip_meta:
+                p = meta["pos"]
                 col = selection.closest_player_color(p)
                 pygame.draw.circle(screen, col, p, 10)
 

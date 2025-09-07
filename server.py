@@ -2,7 +2,7 @@ import asyncio
 import json
 import time
 import logging
-from typing import Set
+from typing import Set, Any
 
 import cv2
 import numpy as np
@@ -22,10 +22,10 @@ hands_detector = mp_hands.Hands(
 )
 
 # connected viewers (receive JSON hand data)
-VIEWERS: Set[websockets.WebSocketServerProtocol] = set()
+VIEWERS: Set[Any] = set()
 
 # optional: camera clients set (not strictly needed)
-CAMERAS: Set[websockets.WebSocketServerProtocol] = set()
+CAMERAS: Set[Any] = set()
 
 FINGERTIP_INDICES = {
     "thumb": 4,
@@ -38,18 +38,47 @@ FINGERTIP_INDICES = {
 async def broadcast(data_str: str):
     if not VIEWERS:
         return
-    await asyncio.gather(
-        *[ws.send(data_str) for ws in list(VIEWERS) if not ws.closed],
-        return_exceptions=True,
-    )
+
+    async def send_safe(ws, data):
+        try:
+            await ws.send(data)
+        except Exception:
+            # remove viewers that raised (closed/invalid)
+            VIEWERS.discard(ws)
+
+    tasks = []
+    for ws in list(VIEWERS):
+        # prefer not to access attributes that may not exist on all connection types
+        is_closed = getattr(ws, "closed", None)
+        is_open = getattr(ws, "open", None)
+        # If we can determine it's closed, skip; otherwise try sending (send_safe will drop invalids)
+        if is_closed is True:
+            VIEWERS.discard(ws)
+            continue
+        if is_open is False:
+            VIEWERS.discard(ws)
+            continue
+        tasks.append(send_safe(ws, data_str))
+
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 def process_frame_jpeg(jpeg_bytes: bytes, frame_id: int = 0):
+    # Decode JPEG
     arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
         return None
     h, w = img.shape[:2]
-    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+    # Pad to square to avoid the NORM_RECT without IMAGE_DIMENSIONS warning.
+    pad_size = max(w, h)
+    pad_x = (pad_size - w) // 2
+    pad_y = (pad_size - h) // 2
+    square = np.zeros((pad_size, pad_size, 3), dtype=img.dtype)
+    square[pad_y:pad_y + h, pad_x:pad_x + w] = img
+
+    img_rgb = cv2.cvtColor(square, cv2.COLOR_BGR2RGB)
     results = hands_detector.process(img_rgb)
 
     payload = {
@@ -61,17 +90,31 @@ def process_frame_jpeg(jpeg_bytes: bytes, frame_id: int = 0):
         "hands": [],
     }
 
-    if results.multi_hand_landmarks:
+    def clamp01(v):
+        return max(0.0, min(1.0, v))
+
+    if results and results.multi_hand_landmarks:
         for i, (landmarks, handedness) in enumerate(
             zip(results.multi_hand_landmarks, results.multi_handedness)
         ):
             lm = []
-            for pt in landmarks.landmark:
-                lm.append([pt.x, pt.y, pt.z])
             fingertips = {}
+            for pt in landmarks.landmark:
+                # pt.x/pt.y are relative to the padded square
+                # convert to pixels in padded space, then to pixels in original image,
+                # then normalize relative to original width/height.
+                px = pt.x * pad_size - pad_x
+                py = pt.y * pad_size - pad_y
+                nx = clamp01(px / w)
+                ny = clamp01(py / h)
+                lm.append([nx, ny, pt.z])
             for name, idx in FINGERTIP_INDICES.items():
                 p = landmarks.landmark[idx]
-                fingertips[name] = [p.x, p.y, p.z]
+                px = p.x * pad_size - pad_x
+                py = p.y * pad_size - pad_y
+                nx = clamp01(px / w)
+                ny = clamp01(py / h)
+                fingertips[name] = [nx, ny, p.z]
             hand_info = {
                 "hand_id": i,
                 "handedness": handedness.classification[0].label if handedness else None,
@@ -82,8 +125,13 @@ def process_frame_jpeg(jpeg_bytes: bytes, frame_id: int = 0):
             payload["hands"].append(hand_info)
     return payload
 
-async def handler(ws: websockets.WebSocketServerProtocol, path):
-    logger.info("Client connected: %s", ws.remote_address)
+async def handler(connection):
+    """WebSocket handler compatible with websockets 11+.
+
+    The library now calls handlers with a single connection object.
+    """
+    ws = connection
+    logger.info("Client connected: %s", getattr(ws, 'remote_address', None))
     try:
         async for message in ws:
             # binary frames from camera clients
@@ -117,7 +165,7 @@ async def handler(ws: websockets.WebSocketServerProtocol, path):
 
 async def main():
     logger.info("Starting WebSocket server on :8765")
-    async with websockets.serve(handler, "0.0.0.0", 8765, max_size=None, max_queue=None):
+    async with websockets.serve(handler, "192.168.1.79", 8765, max_size=None, max_queue=None):
         await asyncio.Future()  # run forever
 
 if __name__ == "__main__":
