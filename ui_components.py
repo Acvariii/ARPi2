@@ -20,8 +20,33 @@ class HoverButton:
         self.clicked = False
         self.radius = radius
 
-    def draw(self, surf, fingertip_points, enabled=True):
-        mouse_near = any(self.rect.collidepoint(p) for p in fingertip_points)
+    def draw(self, surf, fingertip_meta, enabled=True):
+        mouse_near = False
+        now = time.time()
+        active_keys = set()
+        for meta in fingertip_meta:
+            pos = meta.get("pos")
+            if pos and self.rect.collidepoint(pos):
+                mouse_near = True
+                hand = meta.get("hand")
+                name = meta.get("name", "")
+                key = f"{hand}:{name}" if hand is not None else f"coord:{pos[0]}_{pos[1]}"
+                active_keys.add(key)
+                if key not in self.hover_start:
+                    self.hover_start[key] = now
+                else:
+                    if (now - self.hover_start[key]) >= HOVER_TIME_THRESHOLD:
+                        self.clicked = True
+            else:
+                # Remove hover timer for this key if not colliding
+                hand = meta.get("hand")
+                name = meta.get("name", "")
+                key = f"{hand}:{name}" if hand is not None else f"coord:{pos[0]}_{pos[1]}"
+                self.hover_start.pop(key, None)
+        # Remove stale keys
+        for k in list(self.hover_start.keys()):
+            if k not in active_keys:
+                self.hover_start.pop(k, None)
         color = (100,180,250) if mouse_near and enabled else (60,120,200)
         txt_color = (255,255,255) if enabled else (160,160,160)
         shadow_rect = self.rect.move(4, 6)
@@ -29,17 +54,6 @@ class HoverButton:
         pygame.draw.rect(surf, color, self.rect, border_radius=self.radius)
         txt = self.font.render(self.text, True, txt_color)
         surf.blit(txt, txt.get_rect(center=self.rect.center))
-
-        now = time.time()
-        for p in fingertip_points:
-            key = f"{p[0]}_{p[1]}"
-            if self.rect.collidepoint(p):
-                if key not in self.hover_start:
-                    self.hover_start[key] = now
-                elif (now - self.hover_start[key]) >= HOVER_TIME_THRESHOLD:
-                    self.clicked = True
-            else:
-                self.hover_start.pop(key, None)
 
     def reset(self):
         self.clicked = False

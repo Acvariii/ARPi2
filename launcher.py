@@ -127,17 +127,20 @@ def run_pygame():
 
             # Draw buttons and track hover progress
             for btn in buttons:
-                btn.draw(screen, fingertip_points)
+                btn.draw(screen, fingertip_meta)
                 # Draw circular progress for any hovered button
-                for p in fingertip_points:
-                    if btn.rect.collidepoint(p):
-                        key = f"{p[0]}_{p[1]}"
+                for meta in fingertip_meta:
+                    pos = meta.get("pos")
+                    hand = meta.get("hand")
+                    name = meta.get("name", "")
+                    key = f"{hand}:{name}" if hand is not None else f"coord:{pos[0]}_{pos[1]}"
+                    if pos and btn.rect.collidepoint(pos):
                         start = btn.hover_start.get(key)
                         if start:
                             elapsed = time.time() - start
                             progress = min(1.0, max(0.0, elapsed / HOVER_TIME_THRESHOLD))
                             off_x, off_y = 28, -28
-                            draw_circular_progress(screen, (p[0]+off_x, p[1]+off_y), 20, progress, ACCENT, thickness=6)
+                            draw_circular_progress(screen, (pos[0]+off_x, pos[1]+off_y), 20, progress, ACCENT, thickness=6)
                 if btn.clicked:
                     selected_game = btn.text
                     state = "player_select"
@@ -158,17 +161,20 @@ def run_pygame():
 
             # Start button logic
             start_btn = HoverButton(pygame.Rect(WINDOW_SIZE[0]//2-140, WINDOW_SIZE[1]//2-45, 280, 90), "Start", font)
-            start_btn.draw(screen, fingertip_points, enabled=sum(selection.selected) >= 2)
+            start_btn.draw(screen, fingertip_meta, enabled=sum(selection.selected) >= 2)
             # Draw circular progress for start button
-            for p in fingertip_points:
-                if start_btn.rect.collidepoint(p):
-                    key = f"{p[0]}_{p[1]}"
+            for meta in fingertip_meta:
+                pos = meta.get("pos")
+                hand = meta.get("hand")
+                name = meta.get("name", "")
+                key = f"{hand}:{name}" if hand is not None else f"coord:{pos[0]}_{pos[1]}"
+                if pos and start_btn.rect.collidepoint(pos):
                     start = start_btn.hover_start.get(key)
                     if start:
                         elapsed = time.time() - start
                         progress = min(1.0, max(0.0, elapsed / HOVER_TIME_THRESHOLD))
                         off_x, off_y = 28, -28
-                        draw_circular_progress(screen, (p[0]+off_x, p[1]+off_y), 20, progress, ACCENT, thickness=6)
+                        draw_circular_progress(screen, (pos[0]+off_x, pos[1]+off_y), 20, progress, ACCENT, thickness=6)
 
             selected_count = sum(selection.selected)
             label_small = pygame.font.SysFont(None, 26).render(f"{selected_count} players selected", True, WHITE)
