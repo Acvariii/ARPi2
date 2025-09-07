@@ -3,7 +3,7 @@ import math
 import random
 import pygame
 from typing import List, Dict, Tuple, Optional
-from ui_elements import PlayerSelectionUI
+from ui_elements import PlayerSelectionUI, HOVER_TIME_THRESHOLD
 
 # full property list for 40 spaces (name + display color for properties; None for non-property)
 PROPERTY_SPACES = [
@@ -89,6 +89,8 @@ class MonopolyGame:
         self.dice_state: Dict = {"rolling": False, "start": 0.0, "end": 0.0, "d1": 0, "d2": 0, "pid": None}
         # hover timers for per-player buttons (keyed by "pid:button:hand")
         self.button_hover: Dict[str, float] = {}
+        # remember last fingertip pos for each hover key so the progress indicator follows the finger
+        self.button_hover_pos: Dict[str, Tuple[int,int]] = {}
         # cached last computed button rects (computed in helper)
         self._last_button_rects: Dict[int, Dict[str, pygame.Rect]] = {}
 
@@ -297,29 +299,36 @@ class MonopolyGame:
                     continue
                 # roll button hover handling (only allow current player to roll)
                 for key_name, r in rects.items():
+                    hkey = f"{pid}:{key_name}:{hand}"
                     if r.collidepoint(pos):
-                        hkey = f"{pid}:{key_name}:{hand}"
+                        # start or update hover timer and remember last pos for progress indicator
                         if hkey not in self.button_hover:
                             self.button_hover[hkey] = now
+                            self.button_hover_pos[hkey] = pos
                         else:
-                            if (now - self.button_hover[hkey]) >= 1.0:
-                                # trigger action
+                            # update follow position
+                            self.button_hover_pos[hkey] = pos
+                            elapsed = now - self.button_hover[hkey]
+                            if elapsed >= HOVER_TIME_THRESHOLD:
+                                # trigger action once
                                 if key_name == "roll" and pid == self.current and not self.dice_state["rolling"]:
-                                    # start dice animation for 2-4s
                                     dur = random.uniform(2.0, 4.0)
                                     self.dice_state.update({"rolling": True, "start": now, "end": now + dur, "d1": 0, "d2": 0, "pid": pid})
                                 elif key_name == "buy":
-                                    # open property overlay for current player if on a property
                                     if pid == self.current:
                                         self.properties_open[pid] = True
                                 elif key_name == "props":
                                     if pid == self.current:
                                         self.properties_open[pid] = True
+                                # clear this hover key so it won't retrigger immediately
+                                self.button_hover.pop(hkey, None)
+                                self.button_hover_pos.pop(hkey, None)
                     else:
-                        # clear any hover for that hand/key if moved away
-                        hkey = f"{pid}:{key_name}:{hand}"
+                        # finger moved away: clear stored hover state + pos
                         if hkey in self.button_hover:
                             self.button_hover.pop(hkey, None)
+                        if hkey in self.button_hover_pos:
+                            self.button_hover_pos.pop(hkey, None)
 
         # handle dice finish
         if self.dice_state.get("rolling"):
@@ -420,6 +429,33 @@ class MonopolyGame:
                 if angle_text != 0:
                     txtsurf = pygame.transform.rotate(txtsurf, angle_text)
                 self.screen.blit(txtsurf, txtsurf.get_rect(center=brect.center))
+
+        # draw hover progress arcs for button hovers (so finger sees the same circular progress)
+        now = time.time()
+        ACCENT = (240, 200, 80)
+        for key, start in list(self.button_hover.items()):
+            pos = self.button_hover_pos.get(key)
+            if not pos:
+                continue
+            elapsed = now - start
+            progress = min(1.0, max(0.0, elapsed / HOVER_TIME_THRESHOLD))
+            px, py = pos
+            # offset slightly
+            arc_rect = pygame.Rect(px + 28 - 20, py - 28 - 20, 40, 40)
+            pygame.draw.circle(self.screen, (60, 60, 60), arc_rect.center, 20)
+            start_ang = -math.pi / 2
+            end_ang = start_ang + progress * 2 * math.pi
+            pygame.draw.arc(self.screen, ACCENT, arc_rect, start_ang, end_ang, 6)
+
+        # also draw any lingering selection-slot hover progress (if any)
+        for h in self.selection_ui.get_hover_progress():
+            px, py = h["pos"]
+            progress = h["progress"]
+            arc_rect = pygame.Rect(px + 28 - 20, py - 28 - 20, 40, 40)
+            pygame.draw.circle(self.screen, (60, 60, 60), arc_rect.center, 20)
+            start_ang = -math.pi / 2
+            end_ang = start_ang + progress * 2 * math.pi
+            pygame.draw.arc(self.screen, ACCENT, arc_rect, start_ang, end_ang, 6)
 
         # if dice rolling show animated dice near center
         if self.dice_state.get("rolling"):
