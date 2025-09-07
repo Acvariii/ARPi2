@@ -11,7 +11,7 @@ from ui_elements import PlayerSelectionUI           # use the same selection UI 
 
 # CONFIG
 SERVER_WS = "ws://192.168.1.79:8765"
-WINDOW_SIZE = (1280, 720)
+WINDOW_SIZE = (1920, 1080)
 FPS = 60
 HOVER_TIME_THRESHOLD = 0.9
 TOGGLE_COOLDOWN = 0.8
