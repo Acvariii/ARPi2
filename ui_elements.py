@@ -26,42 +26,62 @@ class HoverButton:
         self.clicked = False
         self.radius = radius
 
-    def draw(self, surf: pygame.Surface, fingertip_points: List[Tuple[int, int]], enabled: bool = True):
+    def draw(self, surf: pygame.Surface, fingertip_meta: List[Dict], enabled: bool = True):
         """
-        Draw the button. If enabled is False the button is drawn in a disabled style and
-        hovering will not trigger clicks.
+        Draw the button and handle hover by hand identity.
+        - fingertip_meta: list of dicts containing at least {'pos': (x,y), 'hand': id, 'name': str}
+        - enabled: when False, the button is shown disabled and hover timers are cleared
+        Hover state is keyed by '{hand}:{name}' if available, otherwise by hand id only.
         """
-        mouse_near = any(self.rect.collidepoint(p) for p in fingertip_points) if enabled else False
+        # compute whether any fingertip is inside the rect (for visuals)
+        mouse_near = False
+        for m in fingertip_meta:
+            pos = m.get("pos")
+            if pos and self.rect.collidepoint(pos):
+                mouse_near = True
+                break
+
         if not enabled:
-            color = (80, 80, 80)               # disabled background
-            txt_color = (160, 160, 160)        # disabled text
+            color = (80, 80, 80)
+            txt_color = (160, 160, 160)
         else:
             color = (100, 180, 250) if mouse_near else (60, 120, 200)
             txt_color = (255, 255, 255)
 
-        # shadow
+        # drop shadow + background
         shadow_rect = self.rect.move(4, 6)
         pygame.draw.rect(surf, (10, 10, 10), shadow_rect, border_radius=self.radius)
         pygame.draw.rect(surf, color, self.rect, border_radius=self.radius)
         txt = self.font.render(self.text, True, txt_color)
         surf.blit(txt, txt.get_rect(center=self.rect.center))
 
-        # only update hover timers when enabled
+        # don't track hover timers while disabled
         if not enabled:
-            # clear any hover timers so no stale keys remain
             self.hover_start.clear()
             return
 
         now = time.time()
-        for p in fingertip_points:
-            key = f"{p[0]}_{p[1]}"
-            if self.rect.collidepoint(p):
-                if key not in self.hover_start:
-                    self.hover_start[key] = now
-                elif (now - self.hover_start[key]) >= HOVER_TIME_THRESHOLD:
-                    self.clicked = True
+        active_keys = set()
+        for m in fingertip_meta:
+            pos = m.get("pos")
+            if not pos:
+                continue
+            if not self.rect.collidepoint(pos):
+                continue
+            hand = m.get("hand", None)
+            name = m.get("name", "")
+            key = f"{hand}:{name}" if hand is not None else f"coord:{pos[0]}_{pos[1]}"
+            active_keys.add(key)
+            if key not in self.hover_start:
+                self.hover_start[key] = now
             else:
-                self.hover_start.pop(key, None)
+                if (now - self.hover_start[key]) >= HOVER_TIME_THRESHOLD:
+                    self.clicked = True
+
+        # remove stale hover keys (fingers moved away)
+        for k in list(self.hover_start.keys()):
+            if k not in active_keys:
+                self.hover_start.pop(k, None)
 
     def reset(self):
         self.clicked = False

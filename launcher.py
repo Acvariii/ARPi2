@@ -54,9 +54,9 @@ def run_launcher():
             title = pygame.font.SysFont(None, 64).render("Game Launcher", True, (255,255,255))
             screen.blit(title, (panel.centerx - title.get_width()//2, panel.top + 24))
 
-            # draw menu buttons
-            btn_monopoly.draw(screen, fingertip_points)
-            btn_blackjack.draw(screen, fingertip_points)
+            # draw menu buttons (pass full fingertip_meta so hover uses hand ids)
+            btn_monopoly.draw(screen, fingertip_meta)
+            btn_blackjack.draw(screen, fingertip_meta)
             # show slot previews (non-interactive preview)
             selection_ui.draw_slots()
 
@@ -95,7 +95,7 @@ def run_launcher():
             selected_count = selection_ui.selected_count()
             start_enabled = (selected_count >= selection_ui.min_players)
             # draw Back button
-            back_btn.draw(screen, fingertip_points)
+            back_btn.draw(screen, fingertip_meta)
             if back_btn.clicked:
                 state = "menu"
                 back_btn.reset()
@@ -103,7 +103,7 @@ def run_launcher():
             # draw Start (disabled until enough players)
             # draw start after board to ensure visibility; pass enabled flag
             # draw it last (just before hover indicators) so it's clearly visible
-            start_btn.draw(screen, fingertip_points, enabled=start_enabled)
+            start_btn.draw(screen, fingertip_meta, enabled=start_enabled)
 
             # only allow starting when enough players selected
             hint_font = pygame.font.SysFont(None, 22)
