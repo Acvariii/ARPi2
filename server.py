@@ -28,11 +28,7 @@ VIEWERS: Set[Any] = set()
 CAMERAS: Set[Any] = set()
 
 FINGERTIP_INDICES = {
-    "thumb": 4,
     "index": 8,
-    "middle": 12,
-    "ring": 16,
-    "pinky": 20,
 }
 
 async def broadcast(data_str: str):
