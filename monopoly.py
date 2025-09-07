@@ -89,24 +89,46 @@ class MonopolyGame:
         self.dice_state: Dict = {"rolling": False, "start": 0.0, "end": 0.0, "d1": 0, "d2": 0, "pid": None}
         self.last_roll = (0, 0)
         self._last_button_rects: Dict[int, Dict[str, pygame.Rect]] = {}
+        self._board_geom = self._get_board_geom()
 
     def _compute_board_rect(self) -> pygame.Rect:
         w, h = self.screen.get_size()
-        top_h = int(h * 0.10) + 16
-        bot_h = int(h * 0.10) + 16
-        side_w = int(w * 0.12) + 16
-        avail_x = side_w
-        avail_y = top_h
-        avail_w = w - side_w * 2
-        avail_h = h - top_h - bot_h
+        
+        # This geometry must leave space for the panels defined in PlayerSelectionUI
+        top_panel_h = int(h * 0.10)
+        side_panel_w = int(w * 0.12)
+        
+        padding = 16
+        
+        avail_x = side_panel_w + padding
+        avail_y = top_panel_h + padding
+        avail_w = w - 2 * side_panel_w - 2 * padding
+        avail_h = h - 2 * top_panel_h - 2 * padding
+        
         size = max(0, min(avail_w, avail_h))
-        bx = avail_x + (avail_w - size) // 2
-        by = avail_y + (avail_h - size) // 2
-        return pygame.Rect(int(bx), int(by), int(size), int(size))
+        
+        board_x = avail_x + (avail_w - size) // 2
+        board_y = avail_y + (avail_h - size) // 2
+        
+        return pygame.Rect(int(board_x), int(board_y), int(size), int(size))
 
-    def _grid_cell(self) -> float:
-        board = self._compute_board_rect()
-        return board.width / 11.0
+    def _get_board_geom(self):
+        board_rect = self._compute_board_rect()
+        # A standard board has 9 properties between two corners.
+        # The corners are squares with side length equal to the long side of a property.
+        ratio = 1.6  # Aspect ratio of a property space
+        num_side_props = 9
+        total_units = num_side_props + 2 * ratio
+        
+        short_side = board_rect.width / total_units
+        long_side = short_side * ratio
+        
+        return {
+            "board_rect": board_rect,
+            "short": short_side,
+            "long": long_side,
+            "corner": long_side,
+        }
 
     def _index_to_grid(self, idx: int) -> Tuple[int, int]:
         if 0 <= idx <= 10:
@@ -120,34 +142,38 @@ class MonopolyGame:
         return 0, 0
 
     def _space_rect_for(self, idx: int) -> pygame.Rect:
-        board = self._compute_board_rect()
-        cell = self._grid_cell()
-        long_side = cell * 1.6
+        geom = self._board_geom
+        board = geom["board_rect"]
+        short = geom["short"]
+        long = geom["long"]
+        corner = geom["corner"]
+
         gx, gy = self._index_to_grid(idx)
 
         is_corner = (gx in (0, 10) and gy in (0, 10))
+        is_top_bottom = gy in (0, 10) and not is_corner
+        is_left_right = gx in (0, 10) and not is_corner
 
         if is_corner:
-            left = board.left + gx * cell
-            top = board.top + gy * cell
-            return pygame.Rect(left, top, cell, cell)
-        
-        if gy == 10:  # Bottom row
-            left = board.left + gx * cell
-            top = board.top + 10 * cell
-            return pygame.Rect(left, top, cell, long_side)
-        elif gx == 0:  # Left row
-            left = board.left
-            top = board.top + gy * cell
-            return pygame.Rect(left, top, long_side, cell)
-        elif gy == 0:  # Top row
-            left = board.left + gx * cell
-            top = board.top
-            return pygame.Rect(left, top, cell, long_side)
-        else:  # Right row (gx == 10)
-            left = board.left + 10 * cell
-            top = board.top + gy * cell
-            return pygame.Rect(left, top, long_side, cell)
+            w, h = corner, corner
+            if gx == 0: x = board.left
+            else: x = board.right - corner
+            if gy == 0: y = board.top
+            else: y = board.bottom - corner
+        elif is_top_bottom:
+            w, h = short, long
+            x = board.left + corner + (gx - 1) * short
+            if gy == 0: y = board.top
+            else: y = board.bottom - long
+        elif is_left_right:
+            w, h = long, short
+            y = board.top + corner + (gy - 1) * short
+            if gx == 0: x = board.left
+            else: x = board.right - long
+        else:
+            return pygame.Rect(0,0,0,0)
+
+        return pygame.Rect(x, y, w, h)
 
     def _space_coords_for(self, idx: int) -> Tuple[int, int]:
         r = self._space_rect_for(idx)
@@ -326,75 +352,73 @@ class MonopolyGame:
                 px, py = hover_pos if hover_pos else inner.center
                 progress = min(1.0, max(0.0, (now - start) / HOVER_TIME_THRESHOLD))
                 center = (px + 24, py - 24)
-                draw_circular_progress(self.screen, center, radius=18, progress=progress, thickness=max(3, int(panel_rect.height * 0.08)))
+                draw_circular_progress(self.screen, center, radius=18, progress=progress, thickness=max(3, int(rect.height * 0.08)))
             except Exception:
                 pass
 
     def _draw_text_in_space(self, text: str, rect: pygame.Rect, angle: int):
         font_name = pygame.font.get_default_font()
-        pad = 4
         color = (0, 0, 0)
+        padding = 5
 
-        is_vertical = angle in (90, 270)
-        wrap_width = rect.height - pad * 2 if is_vertical else rect.width - pad * 2
-        wrap_height = rect.width - pad * 2 if is_vertical else rect.height - pad * 2
-        
-        lines = []
-        best_font = pygame.freetype.SysFont(font_name, 8)
-        
-        for font_size in range(20, 7, -1):
-            font = pygame.freetype.SysFont(font_name, font_size)
-            
-            current_lines = []
+        is_vertical = angle in [90, 270]
+        max_w = rect.height - 2 * padding if is_vertical else rect.width - 2 * padding
+        max_h = rect.width - 2 * padding if is_vertical else rect.height - 2 * padding
+
+        best_font_size = 8
+        wrapped_lines = []
+        for size in range(20, 7, -1):
+            font = pygame.font.Font(font_name, size)
+            lines = []
             words = text.split(' ')
-            current_line = ""
+            current_line = ''
             for word in words:
-                test_line = current_line + (" " if current_line else "") + word
-                if font.get_rect(test_line).width > wrap_width:
-                    if current_line: current_lines.append(current_line)
-                    current_line = word
-                else:
+                test_line = current_line + ' ' + word if current_line else word
+                if font.size(test_line)[0] <= max_w:
                     current_line = test_line
-            if current_line: current_lines.append(current_line)
+                else:
+                    if current_line: lines.append(current_line)
+                    current_line = word
+            if current_line: lines.append(current_line)
             
-            line_height = font.get_sized_height()
-            total_height = len(current_lines) * line_height
-            
-            if total_height <= wrap_height:
-                lines = current_lines
-                best_font = font
+            if len(lines) * font.get_linesize() <= max_h:
+                best_font_size = size
+                wrapped_lines = lines
                 break
         
-        if not lines:
-            lines = text.split(' ')[:2] # Fallback
+        if not wrapped_lines:
+            wrapped_lines = text.split(' ')
 
-        line_height = best_font.get_sized_height()
-        text_surf_height = len(lines) * line_height
-        try:
-            text_surf_width = max(best_font.get_rect(line).width for line in lines) if lines else 0
-        except ValueError:
-            text_surf_width = 0
-
-        text_surf = pygame.Surface((text_surf_width, text_surf_height), pygame.SRCALPHA)
+        font = pygame.font.Font(font_name, best_font_size)
         
-        y = 0
-        for line in lines:
-            line_img, _ = best_font.render(line, color)
-            text_surf.blit(line_img, ((text_surf_width - line_img.get_width()) / 2, y))
-            y += line_height
+        line_height = font.get_linesize()
+        text_block_h = len(wrapped_lines) * line_height
+        try:
+            text_block_w = max(font.size(line)[0] for line in wrapped_lines)
+        except ValueError:
+            text_block_w = 0
+        
+        text_surface = pygame.Surface((text_block_w, text_block_h), pygame.SRCALPHA)
+        
+        for i, line in enumerate(wrapped_lines):
+            line_surf = font.render(line, True, color)
+            x_pos = (text_block_w - line_surf.get_width()) / 2
+            y_pos = i * line_height
+            text_surface.blit(line_surf, (x_pos, y_pos))
 
-        rotated_text_surf = pygame.transform.rotate(text_surf, angle)
-        dest_rect = rotated_text_surf.get_rect(center=rect.center)
-        self.screen.blit(rotated_text_surf, dest_rect)
+        rotated_surface = pygame.transform.rotate(text_surface, angle)
+        dest_rect = rotated_surface.get_rect(center=rect.center)
+        self.screen.blit(rotated_surface, dest_rect)
 
     def draw_board(self):
         sw, sh = self.screen.get_size()
         pygame.draw.rect(self.screen, (20, 80, 30), pygame.Rect(0, 0, sw, sh))
-        board_rect = self._compute_board_rect()
-        pygame.draw.rect(self.screen, (200, 225, 210), board_rect)
         
-        inner_rect = board_rect.inflate(-self._grid_cell()*1.6, -self._grid_cell()*1.6)
-        pygame.draw.rect(self.screen, (24, 24, 24), inner_rect, border_radius=6)
+        board_rect = self._board_geom["board_rect"]
+        inner_rect = board_rect.inflate(-self._board_geom["long"], -self._board_geom["long"])
+        
+        pygame.draw.rect(self.screen, (200, 225, 210), board_rect)
+        pygame.draw.rect(self.screen, (24, 24, 24), inner_rect, border_radius=8)
 
         for idx, spec in enumerate(self.properties):
             r = self._space_rect_for(idx)
@@ -408,7 +432,7 @@ class MonopolyGame:
             is_corner = (gx in (0, 10) and gy in (0, 10))
             
             if gcolor and not is_corner:
-                thickness = max(3, int(self._grid_cell() * 0.25))
+                thickness = max(3, int(self._board_geom["short"] * 0.25))
                 if gy == 10: # Bottom
                     bar = pygame.Rect(r.left, r.top, r.width, thickness)
                 elif gx == 0: # Left
@@ -423,9 +447,9 @@ class MonopolyGame:
             
             if is_corner:
                 angle = 45 if idx in (10, 30) else -45
-            elif gy == 0 or gy == 10: # Horizontal
+            elif gy == 0 or gy == 10:
                 angle = 180 if gy == 0 else 0
-            else: # Vertical
+            else:
                 angle = 270 if gx == 0 else 90
 
             self._draw_text_in_space(name, r, angle)
@@ -443,18 +467,19 @@ class MonopolyGame:
         for space, plist in static_by_space.items():
             cx, cy = self._space_coords_for(space)
             n = len(plist)
+            token_radius = self._board_geom["short"] * 0.1
             if n == 1:
                 p = plist[0]
-                pygame.draw.circle(self.screen, (0, 0, 0), (cx + 2, cy + 3), max(6, int(self._grid_cell() * 0.12)))
-                pygame.draw.circle(self.screen, p.color, (cx, cy), max(4, int(self._grid_cell() * 0.08)))
+                pygame.draw.circle(self.screen, (0, 0, 0), (cx + 2, cy + 3), token_radius * 1.2)
+                pygame.draw.circle(self.screen, p.color, (cx, cy), token_radius)
             else:
-                radius = max(10, int(self._grid_cell() * 0.18))
+                placement_radius = self._board_geom["short"] * 0.25
                 for k, p in enumerate(plist):
                     ang = 2 * math.pi * k / n
-                    px = int(cx + math.cos(ang) * radius)
-                    py = int(cy + math.sin(ang) * radius)
-                    pygame.draw.circle(self.screen, (0, 0, 0), (px + 2, py + 3), max(6, int(self._grid_cell() * 0.10)))
-                    pygame.draw.circle(self.screen, p.color, (px, py), max(4, int(self._grid_cell() * 0.07)))
+                    px = int(cx + math.cos(ang) * placement_radius)
+                    py = int(cy + math.sin(ang) * placement_radius)
+                    pygame.draw.circle(self.screen, (0, 0, 0), (px + 2, py + 3), token_radius * 1.1)
+                    pygame.draw.circle(self.screen, p.color, (px, py), token_radius * 0.9)
         for p in moving_players:
             elapsed = time.time() - p.move_start
             per = p.move_per_space
@@ -468,11 +493,12 @@ class MonopolyGame:
                 next_space = p.move_path[step]
                 sx, sy = self._space_coords_for(prev_space)
                 ex, ey = self._space_coords_for(next_space)
-                jump = math.sin(frac * math.pi) * max(6, int(self._grid_cell() * 0.12))
+                jump = math.sin(frac * math.pi) * self._board_geom["short"] * 0.2
                 px = int(sx * (1 - frac) + ex * frac)
                 py = int(sy * (1 - frac) + ey * frac - jump)
-            pygame.draw.circle(self.screen, (0, 0, 0), (px + 2, py + 3), max(8, int(self._grid_cell() * 0.14)))
-            pygame.draw.circle(self.screen, p.color, (px, py), max(6, int(self._grid_cell() * 0.10)))
+            token_radius = self._board_geom["short"] * 0.12
+            pygame.draw.circle(self.screen, (0, 0, 0), (px + 2, py + 3), token_radius * 1.2)
+            pygame.draw.circle(self.screen, p.color, (px, py), token_radius)
 
     def draw_player_boards_and_buttons(self):
         sw, sh = self.screen.get_size()
@@ -517,10 +543,11 @@ class MonopolyGame:
             off_x = int(min(48, sw * 0.03))
             off_y = -int(min(48, sh * 0.03))
             center = (px + off_x, py + off_y)
-            draw_circular_progress(self.screen, center, radius=20, progress=progress, thickness=max(3, int(self._grid_cell() * 0.06)))
-        board_rect = self._compute_board_rect()
+            draw_circular_progress(self.screen, center, radius=20, progress=progress, thickness=max(3, int(self._board_geom["short"] * 0.06)))
+        
+        board_rect = self._board_geom["board_rect"]
         cx, cy = board_rect.centerx, board_rect.centery
-        die_size = max(28, int(self._grid_cell() * 0.9))
+        die_size = max(28, int(self._board_geom["short"] * 0.9))
         font_small = pygame.font.SysFont(None, max(10, int(die_size * 0.45)))
         if self.dice_state.get("rolling"):
             for i in range(2):
