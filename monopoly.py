@@ -384,18 +384,21 @@ class MonopolyGame:
                 else:
                     bar = pygame.Rect(rr.left + 2, rr.top + 2, thickness, rr.height - 4)
                 pygame.draw.rect(self.screen, gcolor, bar, border_radius=2)
-            # --- HARD CODE "Go" if missing ---
-            name = spec.get("name", "")
-            if idx == 0:
-                name = "Go"
-            angle = 0 if gy == 9 else (90 if gx == 0 else (180 if gy == 0 else 270))
-            # Fit and wrap text inside the space
-            surfaces = self._fit_text_to_rect(name, rr, min_font=8, max_font=22, color=(0,0,0), pad=6)
-            for surf, pos in surfaces:
-                # Rotate each line as needed
-                if angle != 0:
-                    surf = pygame.transform.rotate(surf, angle)
-                self.screen.blit(surf, pos)
+        name = spec.get("name", "")
+        if idx == 0:
+            name = "Go"
+        angle = 0 if gy == 9 else (90 if gx == 0 else (180 if gy == 0 else 270))
+        surfaces = self._fit_text_to_rect(name, rr, min_font=8, max_font=22, color=(0,0,0), pad=6)
+        for surf, pos in surfaces:
+            # Rotate and flip as needed
+            if angle != 0:
+                surf = pygame.transform.rotate(surf, angle)
+                # Flip for upside-down and left-side text
+                if angle == 180:
+                    surf = pygame.transform.flip(surf, True, True)
+                elif angle == 270:
+                    surf = pygame.transform.flip(surf, True, False)
+            self.screen.blit(surf, pos)
 
     def draw_tokens(self):
         static_by_space: Dict[int, List[Player]] = {}
