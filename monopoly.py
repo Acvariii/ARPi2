@@ -220,6 +220,21 @@ class MonopolyGame:
             y = max(16, min(sh - oh - 16, slot.centery - oh // 2))
         return pygame.Rect(int(x), int(y), int(ow), int(oh))
 
+    def _space_rect_for(self, idx: int) -> pygame.Rect:
+        """Return the screen-space rect for board space `idx` (0..39)."""
+        board = self._compute_board_rect()
+        cell = self._grid_cell()
+        gx, gy = self._index_to_grid(idx)
+        left = board.left + gx * cell
+        top = board.top + gy * cell
+        # Use integer pixels and ensure we cover the full cell to avoid 1px gaps
+        return pygame.Rect(int(round(left)), int(round(top)), int(math.ceil(cell)), int(math.ceil(cell)))
+
+    def _space_coords_for(self, idx: int) -> Tuple[int, int]:
+        """Return the pixel center (x, y) for space `idx` (used for tokens)."""
+        r = self._space_rect_for(idx)
+        return r.centerx, r.centery
+
     # ---- update loop: fingertip hover -> open/close popups, trigger roll -> animate dice & movement
     def update(self, fingertip_meta: List[Dict]):
         # update selection UI fingertip tracking for slot hover indicators
