@@ -105,11 +105,20 @@ class MonopolyGame:
     # ---- geometry: responsive 10x10 layout ----
     def _compute_board_rect(self) -> pygame.Rect:
         w, h = self.screen.get_size()
-        margin = int(min(w, h) * 0.08)
-        size = min(w - 2 * margin, h - 2 * margin)
-        bx = (w - size) // 2
-        by = (h - size) // 2
-        return pygame.Rect(bx, by, size, size)
+        # Reserve space for player panels: same proportions as PlayerSelectionUI.slot_rect
+        top_h = int(h * 0.10) + 16
+        bot_h = int(h * 0.10) + 16
+        side_w = int(w * 0.12) + 16
+        # Available box for the board inside margins
+        avail_x = side_w
+        avail_y = top_h
+        avail_w = w - side_w * 2
+        avail_h = h - top_h - bot_h
+        size = max(0, min(avail_w, avail_h))
+        # Keep board anchored inside the available box (no re-centering over panels)
+        bx = avail_x + (avail_w - size) // 2
+        by = avail_y + (avail_h - size) // 2
+        return pygame.Rect(int(bx), int(by), int(size), int(size))
 
     def _grid_cell(self) -> float:
         board = self._compute_board_rect()
@@ -180,44 +189,23 @@ class MonopolyGame:
         self._last_button_rects[pid] = rects
         return rects
 
-    def _properties_overlay_rect(self, pid: int, ow: Optional[int] = None, oh: Optional[int] = None) -> pygame.Rect:
-        sw, sh = self.screen.get_size()
-        if ow is None:
-            ow = min(int(sw * 0.36), 560)
-        if oh is None:
-            oh = min(int(sh * 0.48), 520)
-        slot = self.selection_ui.slot_rect(pid)
-        if slot.top == 0:
-            x = max(16, min(sw - ow - 16, slot.centerx - ow // 2))
-            y = slot.bottom + 8
-        elif slot.bottom == sh:
-            x = max(16, min(sw - ow - 16, slot.centerx - ow // 2))
-            y = slot.top - oh - 8
-        elif slot.left == 0:
-            x = slot.right + 8
-            y = max(16, min(sh - oh - 16, slot.centery - oh // 2))
-        else:
-            x = slot.left - ow - 8
-            y = max(16, min(sh - oh - 16, slot.centery - oh // 2))
-        return pygame.Rect(int(x), int(y), int(ow), int(oh))
-
     # ---- update loop ----
     def update(self, fingertip_meta: List[Dict]):
         # keep selection UI updated for hover/cursor consistency (no toggles in-game)
         self.selection_ui.update_with_fingertips(fingertip_meta)
         now = time.time()
 
-        # handle popups first; while open for pid, ignore buttons
+        # handle popups first; while open for pid, treat panel rect as popup bounds
         for pid in list(self.players_selected):
             if self.properties_open.get(pid):
-                orect = self._properties_overlay_rect(pid)
+                panel_rect = self.selection_ui.slot_rect(pid)
                 for meta in fingertip_meta:
                     pos = meta.get("pos")
                     hand = meta.get("hand")
                     if not pos:
                         continue
                     key = f"popup:{pid}:{hand}"
-                    if orect.collidepoint(pos):
+                    if panel_rect.collidepoint(pos):
                         if key not in self.popup_hover:
                             self.popup_hover[key] = now
                         else:
@@ -331,6 +319,46 @@ class MonopolyGame:
         trect = txt.get_rect(center=rect.center)
         surf.blit(txt, trect)
 
+    def _draw_properties_popup_in_panel(self, pid: int, panel_rect: pygame.Rect):
+        # Draw properties info inside the player's panel (replaces the three buttons)
+        inner = panel_rect.inflate(-8, -8)
+        pygame.draw.rect(self.screen, (28, 28, 28), inner, border_radius=8)
+        pygame.draw.rect(self.screen, (180, 180, 180), inner, width=2, border_radius=8)
+        font = pygame.font.SysFont(None, max(12, int(panel_rect.height * 0.18)))
+        x0, y0 = inner.left + 12, inner.top + 10
+        self.screen.blit(font.render(f"Player {pid + 1}", True, (255, 255, 255)), (x0, y0))
+        self.screen.blit(font.render(f"Money: ${self.players[pid].money}", True, (255, 255, 255)), (x0, y0 + 24))
+
+        # List properties owned
+        y = y0 + 52
+        row_h = max(20, int(panel_rect.height * 0.22))
+        for prop_idx in self.players[pid].properties[:5]:  # limited by panel height
+            if prop_idx < len(self.properties):
+                p = self.properties[prop_idx]
+                pygame.draw.rect(self.screen, p["color"] or (120, 120, 120), pygame.Rect(x0, y, 20, 14))
+                self.screen.blit(font.render(p["name"], True, (255, 255, 255)), (x0 + 26, y - 2))
+                y += row_h
+
+        # Draw close progress indicator near the last hover position on this panel
+        now = time.time()
+        for k, start in list(self.popup_hover.items()):
+            try:
+                prefix, spid, hand = k.split(":")
+                if prefix != "popup" or int(spid) != pid:
+                    continue
+                # Use the last known hover pos from selection hover progress if available
+                hover_pos = None
+                for meta in self.selection_ui.get_hover_progress():
+                    if meta.get("slot") == pid:
+                        hover_pos = meta.get("pos")
+                        break
+                px, py = hover_pos if hover_pos else inner.center
+                progress = min(1.0, max(0.0, (now - start) / HOVER_TIME_THRESHOLD))
+                center = (px + 24, py - 24)
+                draw_circular_progress(self.screen, center, radius=18, progress=progress, thickness=max(3, int(panel_rect.height * 0.08)))
+            except Exception:
+                pass
+
     # ---- rendering ----
     def draw_board(self):
         sw, sh = self.screen.get_size()
@@ -355,16 +383,18 @@ class MonopolyGame:
             gx, gy = self._index_to_grid(idx)
             thickness = max(3, int(self._grid_cell() * 0.16))
             if gcolor:
-                if gy == 9:  # bottom
+                # bars at the edge of each outer cell matching real board
+                if gy == 9:  # bottom row
                     bar = pygame.Rect(rr.left + 2, rr.top + 2, rr.width - 4, thickness)
-                elif gx == 0:  # left
+                elif gx == 0:  # left column
                     bar = pygame.Rect(rr.right - thickness - 2, rr.top + 2, thickness, rr.height - 4)
-                elif gy == 0:  # top
+                elif gy == 0:  # top row
                     bar = pygame.Rect(rr.left + 2, rr.bottom - thickness - 2, rr.width - 4, thickness)
-                else:  # right (gx==9)
+                else:  # right column (gx == 9)
                     bar = pygame.Rect(rr.left + 2, rr.top + 2, thickness, rr.height - 4)
                 pygame.draw.rect(self.screen, gcolor, bar, border_radius=2)
 
+            # Space label text rotated toward the board center
             name = spec.get("name", "")
             angle = 0 if gy == 9 else (90 if gx == 0 else (180 if gy == 0 else 270))
             max_chars = max(8, int(rr.width / 8))
@@ -410,9 +440,9 @@ class MonopolyGame:
             else:
                 radius = max(10, int(self._grid_cell() * 0.18))
                 for k, p in enumerate(plist):
-                    angle = 2 * math.pi * k / n
-                    px = int(cx + math.cos(angle) * radius)
-                    py = int(cy + math.sin(angle) * radius)
+                    ang = 2 * math.pi * k / n
+                    px = int(cx + math.cos(ang) * radius)
+                    py = int(cy + math.sin(ang) * radius)
                     pygame.draw.circle(self.screen, (0, 0, 0), (px + 2, py + 3), max(6, int(self._grid_cell() * 0.10)))
                     pygame.draw.circle(self.screen, p.color, (px, py), max(4, int(self._grid_cell() * 0.07)))
 
@@ -450,6 +480,12 @@ class MonopolyGame:
                 lbl = font.render("CURRENT", True, (0, 0, 0))
                 self.screen.blit(lbl, (rect.centerx - lbl.get_width() // 2, rect.top + 6))
 
+            # If properties popup is open for this player, draw it inside their panel
+            if self.properties_open.get(pid):
+                self._draw_properties_popup_in_panel(pid, rect)
+                continue
+
+            # Otherwise, draw the three action buttons
             rects = self._player_button_rects(pid)
             for key_name, brect in rects.items():
                 if key_name == "roll":
@@ -506,45 +542,6 @@ class MonopolyGame:
                 ftxt = font_small.render(str(val), True, (0, 0, 0))
                 self.screen.blit(ftxt, ftxt.get_rect(center=dr.center))
 
-    def draw_properties_overlay(self, pid: int):
-        sw, sh = self.screen.get_size()
-        ow = min(int(sw * 0.36), 520)
-        oh = min(int(sh * 0.48), 480)
-        r = self._properties_overlay_rect(pid, ow=ow, oh=oh)
-        pygame.draw.rect(self.screen, (28, 28, 28), r, border_radius=8)
-        pygame.draw.rect(self.screen, (180, 180, 180), r, width=max(1, int(sw * 0.0015)), border_radius=8)
-        font = pygame.font.SysFont(None, max(12, int(sh * 0.03)))
-        x0, y0 = r.left + 16, r.top + 16
-        self.screen.blit(font.render(f"Player {pid + 1}", True, (255, 255, 255)), (x0, y0))
-        self.screen.blit(font.render(f"Money: ${self.players[pid].money}", True, (255, 255, 255)), (x0, y0 + 28))
-        y = y0 + 60
-        for prop_idx in self.players[pid].properties:
-            if prop_idx < len(self.properties):
-                p = self.properties[prop_idx]
-                pygame.draw.rect(self.screen, p["color"] or (120, 120, 120), pygame.Rect(x0, y, 24, 16))
-                self.screen.blit(font.render(p["name"], True, (255, 255, 255)), (x0 + 32, y))
-                y += 28
-
-        # hover-close indicator using shared circular progress
-        now = time.time()
-        for k, start in list(self.popup_hover.items()):
-            try:
-                prefix, spid, hand = k.split(":")
-                if prefix != "popup" or int(spid) != pid:
-                    continue
-                # attempt to follow the hand that is hovering (use last selection_ui hover pos if available)
-                hover_pos = None
-                for meta in self.selection_ui.get_hover_progress():
-                    if meta.get("slot") == pid:
-                        hover_pos = meta.get("pos")
-                        break
-                px, py = hover_pos if hover_pos else r.center
-                progress = min(1.0, max(0.0, (now - start) / HOVER_TIME_THRESHOLD))
-                center = (px + 28, py - 28)
-                draw_circular_progress(self.screen, center, radius=20, progress=progress, thickness=max(3, int(self._grid_cell() * 0.06)))
-            except Exception:
-                pass
-
     def draw(self):
         # board and tokens
         self.draw_board()
@@ -552,10 +549,7 @@ class MonopolyGame:
         # action boards and buttons at edges (same as selection layout)
         self.draw_player_boards_and_buttons()
 
-        # overlays (on top)
-        for pid in range(len(self.players)):
-            if self.properties_open.get(pid):
-                self.draw_properties_overlay(pid)
+        # NOTE: properties overlay is integrated into panels; no table popups drawn here.
 
         # game button hover arcs are already drawn; render fingertips last (colored by nearest slot)
         try:
