@@ -325,22 +325,16 @@ class MonopolyGame:
 
     @staticmethod
     def _fit_text_to_rect(text, rect, min_font=8, max_font=22, color=(0,0,0), pad=4):
-        """
-        Returns a list of (surface, position) for wrapped text that fits inside rect.
-        Uses pygame.freetype for flexible font sizing.
-        """
         font_name = pygame.font.get_default_font()
         width, height = rect.width - pad*2, rect.height - pad*2
-        # Try decreasing font size until text fits
         for font_size in range(max_font, min_font-1, -1):
             font = pygame.freetype.SysFont(font_name, font_size)
-            # Wrap text into lines
             words = text.split()
             lines = []
             current = ""
             for word in words:
                 test = current + (" " if current else "") + word
-                rect_test, _ = font.get_rect(test)
+                rect_test = font.get_rect(test)
                 if rect_test.width > width and current:
                     lines.append(current)
                     current = word
@@ -348,10 +342,8 @@ class MonopolyGame:
                     current = test
             if current:
                 lines.append(current)
-            # Check if all lines fit vertically
-            total_height = sum(font.get_rect(line)[1] for line in lines)
-            if total_height <= height and all(font.get_rect(line)[0] <= width for line in lines):
-                # Render surfaces
+            total_height = sum(font.get_rect(line).height for line in lines)
+            if total_height <= height and all(font.get_rect(line).width <= width for line in lines):
                 surfaces = []
                 y = rect.top + pad + (height - total_height)//2
                 for line in lines:
@@ -361,7 +353,6 @@ class MonopolyGame:
                     surfaces.append((surf, surf_rect.topleft))
                     y += surf.get_height()
                 return surfaces
-        # Fallback: just render at min_font, possibly clipped
         font = pygame.freetype.SysFont(font_name, min_font)
         surf, _ = font.render(text, color)
         surf_rect = surf.get_rect(center=rect.center)
