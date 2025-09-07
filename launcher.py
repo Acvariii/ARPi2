@@ -224,7 +224,8 @@ class PlayerSelection:
         pygame.draw.rect(self.screen, (32, 96, 36), inner, border_radius=12)
 
         # draw player slots with same dimensions, flush to edges
-        font = pygame.font.SysFont(None, max(16, int(screen.get_height() * 0.03)))
+        # font size scales with screen height (use local h)
+        font = pygame.font.SysFont(None, max(16, int(h * 0.03)))
         for idx, pos in enumerate(self.positions):
             rect = self.slot_rect(idx)
             sel = self.selected[idx]
