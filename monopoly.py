@@ -2,6 +2,7 @@ import time
 import math
 import random
 import pygame
+import pygame.freetype
 from typing import List, Dict, Tuple, Optional
 
 from ui_elements import PlayerSelectionUI, HOVER_TIME_THRESHOLD
@@ -322,6 +323,49 @@ class MonopolyGame:
             except Exception:
                 pass
 
+    def _fit_text_to_rect(text, rect, min_font=8, max_font=22, color=(0,0,0), pad=4):
+        """
+        Returns a list of (surface, position) for wrapped text that fits inside rect.
+        Uses pygame.freetype for flexible font sizing.
+        """
+        font_name = pygame.font.get_default_font()
+        width, height = rect.width - pad*2, rect.height - pad*2
+        # Try decreasing font size until text fits
+        for font_size in range(max_font, min_font-1, -1):
+            font = pygame.freetype.SysFont(font_name, font_size)
+            # Wrap text into lines
+            words = text.split()
+            lines = []
+            current = ""
+            for word in words:
+                test = current + (" " if current else "") + word
+                rect_test, _ = font.get_rect(test)
+                if rect_test.width > width and current:
+                    lines.append(current)
+                    current = word
+                else:
+                    current = test
+            if current:
+                lines.append(current)
+            # Check if all lines fit vertically
+            total_height = sum(font.get_rect(line)[1] for line in lines)
+            if total_height <= height and all(font.get_rect(line)[0] <= width for line in lines):
+                # Render surfaces
+                surfaces = []
+                y = rect.top + pad + (height - total_height)//2
+                for line in lines:
+                    surf, _ = font.render(line, color)
+                    surf_rect = surf.get_rect(centerx=rect.centerx)
+                    surf_rect.top = y
+                    surfaces.append((surf, surf_rect.topleft))
+                    y += surf.get_height()
+                return surfaces
+        # Fallback: just render at min_font, possibly clipped
+        font = pygame.freetype.SysFont(font_name, min_font)
+        surf, _ = font.render(text, color)
+        surf_rect = surf.get_rect(center=rect.center)
+        return [(surf, surf_rect.topleft)]
+
     def draw_board(self):
         sw, sh = self.screen.get_size()
         pygame.draw.rect(self.screen, (20, 80, 30), pygame.Rect(0, 0, sw, sh))
@@ -329,7 +373,6 @@ class MonopolyGame:
         pygame.draw.rect(self.screen, (200, 200, 200), board_rect, width=max(2, int(sw * 0.002)), border_radius=8)
         inner = board_rect.inflate(-max(8, int(sw * 0.01)), -max(8, int(sh * 0.01)))
         pygame.draw.rect(self.screen, (24, 24, 24), inner, border_radius=6)
-        font_small = pygame.font.SysFont(None, max(8, int(inner.height * 0.025)))
         for idx, spec in enumerate(self.properties):
             r = self._space_rect_for(idx)
             pad = max(2, int(self._grid_cell() * 0.06))
@@ -349,12 +392,18 @@ class MonopolyGame:
                 else:
                     bar = pygame.Rect(rr.left + 2, rr.top + 2, thickness, rr.height - 4)
                 pygame.draw.rect(self.screen, gcolor, bar, border_radius=2)
+            # --- HARD CODE "Go" if missing ---
             name = spec.get("name", "")
+            if idx == 0:
+                name = "Go"
             angle = 0 if gy == 9 else (90 if gx == 0 else (180 if gy == 0 else 270))
-            # Truncate or wrap long names
-            if len(name) > 14:
-                name = name[:12] + "…"
-            self._draw_rotated_text(self.screen, name, rr, angle, font_small, color=(0, 0, 0))
+            # Fit and wrap text inside the space
+            surfaces = self._fit_text_to_rect(name, rr, min_font=8, max_font=22, color=(0,0,0), pad=6)
+            for surf, pos in surfaces:
+                # Rotate each line as needed
+                if angle != 0:
+                    surf = pygame.transform.rotate(surf, angle)
+                self.screen.blit(surf, pos)
 
     def draw_tokens(self):
         static_by_space: Dict[int, List[Player]] = {}
