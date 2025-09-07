@@ -94,6 +94,7 @@ class MonopolyGame:
         self.last_roll = (0, 0)
         self._last_button_rects: Dict[int, Dict[str, pygame.Rect]] = {}
         self._board_geom = self._get_board_geom()
+        self.turn_phase = "AWAITING_ROLL" # AWAITING_ROLL, POST_ROLL, AWAITING_BUY_DECISION, TURN_OVER
 
     def _compute_board_rect(self) -> pygame.Rect:
         w, h = self.screen.get_size()
@@ -161,13 +162,14 @@ class MonopolyGame:
         xpad = max(6, int(rect.width * 0.06))
         ypad = max(6, int(rect.height * 0.06))
         rects: Dict[str, pygame.Rect] = {}
+        button_keys = ["end_turn", "props", "mortgage"]
         if y == 0 or y == h:
             total_w = rect.width - xpad * 2
             btn_w = max(48, (total_w - gap * 2) // 3)
             btn_h = max(28, rect.height - ypad * 2)
             start_x = rect.left + xpad + (total_w - (btn_w * 3 + gap * 2)) // 2
             yy = rect.top + ypad
-            for i, key in enumerate(["roll", "props", "mortgage"]):
+            for i, key in enumerate(button_keys):
                 bx = start_x + i * (btn_w + gap)
                 rects[key] = pygame.Rect(bx, yy, btn_w, btn_h)
         else:
@@ -176,9 +178,8 @@ class MonopolyGame:
             btn_h = max(26, total_btn_h // 3)
             xx = rect.left + xpad
             yy = rect.top + gap
-            rects["roll"] = pygame.Rect(xx, yy, btn_w, btn_h)
-            rects["props"] = pygame.Rect(xx, yy + btn_h + gap, btn_w, btn_h)
-            rects["mortgage"] = pygame.Rect(xx, yy + 2 * (btn_h + gap), btn_w, btn_h)
+            for i, key in enumerate(button_keys):
+                rects[key] = pygame.Rect(xx, yy + i * (btn_h + gap), btn_w, btn_h)
         self._last_button_rects[pid] = rects
         return rects
 
@@ -210,19 +211,35 @@ class MonopolyGame:
             gap = 20
             yes_x = panel_rect.centerx - btn_w - gap / 2
             no_x = panel_rect.centerx + gap / 2
-            btn_y = panel_rect.centery + 10
+            btn_y = panel_rect.centery + 20 if angle == 0 else panel_rect.centery - 20 - btn_h
             return {
                 "yes": pygame.Rect(yes_x, btn_y, btn_w, btn_h),
                 "no": pygame.Rect(no_x, btn_y, btn_w, btn_h)
             }
 
+    def _advance_turn(self):
+        if self.players_selected:
+            try:
+                idx_in = self.players_selected.index(self.current)
+                self.current = self.players_selected[(idx_in + 1) % len(self.players_selected)]
+            except ValueError:
+                self.current = self.players_selected[0] if self.players_selected else 0
+        self.turn_phase = "AWAITING_ROLL"
+        self.dice_state = {"rolling": False, "d1": 0, "d2": 0}
+
     def update(self, fingertip_meta: List[Dict]):
         now = time.time()
 
+        # --- Automatic Turn Actions ---
+        if self.turn_phase == "AWAITING_ROLL" and not self.dice_state.get("rolling"):
+            dur = random.uniform(1.5, 2.5)
+            self.dice_state.update({"rolling": True, "start": now, "end": now + dur, "pid": self.current})
+            self.turn_phase = "POST_ROLL"
+
+        # --- Handle User Input ---
         if self.buy_prompt:
             pid = self.buy_prompt.get("pid")
             prop_idx = self.buy_prompt.get("prop_idx")
-            
             action = None
             for meta in fingertip_meta:
                 pos, hand = meta.get("pos"), meta.get("hand")
@@ -230,34 +247,23 @@ class MonopolyGame:
                 for key_name, r in self.buy_prompt["buttons"].items():
                     hkey = f"buy:{pid}:{key_name}:{hand}"
                     if r.collidepoint(pos):
-                        if hkey not in self.buy_prompt_hover:
-                            self.buy_prompt_hover[hkey] = now
-                            self.buy_prompt_hover_pos[hkey] = pos
-                        else:
-                            self.buy_prompt_hover_pos[hkey] = pos
-                            if (now - self.buy_prompt_hover[hkey]) >= HOVER_TIME_THRESHOLD:
-                                action = key_name
+                        if hkey not in self.buy_prompt_hover: self.buy_prompt_hover[hkey] = now
+                        self.buy_prompt_hover_pos[hkey] = pos
+                        if (now - self.buy_prompt_hover[hkey]) >= HOVER_TIME_THRESHOLD: action = key_name
                     else:
-                        if hkey in self.buy_prompt_hover:
-                            self.buy_prompt_hover.pop(hkey, None)
-                            self.buy_prompt_hover_pos.pop(hkey, None)
+                        self.buy_prompt_hover.pop(hkey, None); self.buy_prompt_hover_pos.pop(hkey, None)
             
-            if action == "yes":
-                player = self.players[pid]
-                prop = self.properties[prop_idx]
-                price = prop.get("price", 0)
-                if player.money >= price:
-                    player.money -= price
-                    player.properties.append(prop_idx)
-                    self.owners[prop_idx] = pid
-                self.buy_prompt = {}
-                self.buy_prompt_hover.clear()
-                self.buy_prompt_hover_pos.clear()
-                return
-            elif action == "no":
-                self.buy_prompt = {}
-                self.buy_prompt_hover.clear()
-                self.buy_prompt_hover_pos.clear()
+            if action:
+                if action == "yes":
+                    player = self.players[pid]
+                    prop = self.properties[prop_idx]
+                    price = prop.get("price", 0)
+                    if player.money >= price:
+                        player.money -= price
+                        player.properties.append(prop_idx)
+                        self.owners[prop_idx] = pid
+                self.buy_prompt = {}; self.buy_prompt_hover.clear(); self.buy_prompt_hover_pos.clear()
+                self.turn_phase = "TURN_OVER"
                 return
 
         self.selection_ui.update_with_fingertips(fingertip_meta)
@@ -281,7 +287,11 @@ class MonopolyGame:
                 continue
 
             rects = self._player_button_rects(pid)
-            allowed = {"props", "mortgage"} if pid != self.current else {"roll", "props", "mortgage"}
+            is_current_player = pid == self.current
+            allowed = {"props", "mortgage"}
+            if is_current_player and self.turn_phase == "TURN_OVER":
+                allowed.add("end_turn")
+
             for meta in fingertip_meta:
                 pos, hand = meta.get("pos"), meta.get("hand")
                 if not pos: continue
@@ -292,25 +302,18 @@ class MonopolyGame:
                         continue
                     hkey = f"{pid}:{key_name}:{hand}"
                     if r.collidepoint(pos):
-                        if hkey not in self.button_hover:
-                            self.button_hover[hkey] = now
-                            self.button_hover_pos[hkey] = pos
-                        else:
-                            self.button_hover_pos[hkey] = pos
-                            if (now - self.button_hover[hkey]) >= HOVER_TIME_THRESHOLD:
-                                if key_name == "roll" and pid == self.current and not self.dice_state["rolling"]:
-                                    dur = random.uniform(1.5, 2.5)
-                                    self.dice_state.update({"rolling": True, "start": now, "end": now + dur, "pid": pid})
-                                elif key_name == "mortgage": self.properties_open[pid] = True
-                                elif key_name == "props": self.properties_open[pid] = True
-                                for k in list(self.button_hover.keys()):
-                                    if k.startswith(f"{pid}:"): self.button_hover.pop(k, None); self.button_hover_pos.pop(k, None)
-                                if hkey in self.button_hover: self.button_hover.pop(hkey, None)
-                                if hkey in self.button_hover_pos: self.button_hover_pos.pop(hkey, None)
+                        if hkey not in self.button_hover: self.button_hover[hkey] = now
+                        self.button_hover_pos[hkey] = pos
+                        if (now - self.button_hover[hkey]) >= HOVER_TIME_THRESHOLD:
+                            if key_name == "end_turn": self._advance_turn()
+                            elif key_name in ["props", "mortgage"]: self.properties_open[pid] = True
+                            for k in list(self.button_hover.keys()):
+                                if k.startswith(f"{pid}:"): self.button_hover.pop(k, None); self.button_hover_pos.pop(k, None)
                     else:
                         if hkey in self.button_hover: self.button_hover.pop(hkey, None)
                         if hkey in self.button_hover_pos: self.button_hover_pos.pop(hkey, None)
 
+        # --- Update Game State from Timed Events ---
         if self.dice_state.get("rolling") and now >= self.dice_state["end"]:
             d1, d2 = random.randint(1, 6), random.randint(1, 6)
             self.dice_state.update({"d1": d1, "d2": d2, "rolling": False})
@@ -324,11 +327,6 @@ class MonopolyGame:
                 spec = self.properties[target]
                 p._open_after_move = spec.get("price") and self.owners[target] is None
                 self.last_roll = (d1, d2)
-                if self.players_selected:
-                    try:
-                        idx_in = self.players_selected.index(pid)
-                        self.current = self.players_selected[(idx_in + 1) % len(self.players_selected)]
-                    except ValueError: pass
 
         for p in self.players:
             if p.move_path and now - p.move_start >= p.move_per_space * len(p.move_path):
@@ -338,13 +336,14 @@ class MonopolyGame:
                     p._open_after_move = False
                     prop_idx = p.pos
                     spec = self.properties[prop_idx]
-                    can_afford = p.money >= spec.get("price", 9999)
-                    
+                    self.turn_phase = "AWAITING_BUY_DECISION"
                     self.buy_prompt = {
                         "pid": p.idx, "prop_idx": prop_idx,
                         "buttons": self._get_buy_prompt_button_rects(p.idx),
-                        "can_afford": can_afford
+                        "can_afford": p.money >= spec.get("price", 9999)
                     }
+                else:
+                    self.turn_phase = "TURN_OVER"
 
     def _draw_rotated_text(self, text, font, color, center, angle):
         text_surf = font.render(text, True, color)
@@ -363,35 +362,34 @@ class MonopolyGame:
         font = pygame.font.SysFont(None, font_size)
         prop_font = pygame.font.SysFont(None, max(12, int(font_size * 0.9)))
 
-        if is_vertical:
-            title_y = panel_rect.top + 30
-            money_y = title_y + 30
-            list_start_x = panel_rect.left + 20
-            list_start_y = money_y + 30
-            row_h = max(20, int(panel_rect.width * 0.25))
-        else: # Horizontal
-            title_y = panel_rect.top + 20 if angle == 0 else panel_rect.bottom - 20
-            money_y = title_y + 30 if angle == 0 else title_y - 30
-            list_start_x = panel_rect.left + 20
-            list_start_y = money_y + 40 if angle == 0 else money_y - 40 - (5 * 20)
-            row_h = max(20, int(panel_rect.height * 0.18))
+        # Position calculations based on orientation
+        if angle == 0: # Bottom
+            title_y, money_y = panel_rect.top + 20, panel_rect.top + 50
+            list_start_x, list_start_y = panel_rect.left + 20, money_y + 30
+            row_h, y_dir = max(20, int(panel_rect.height * 0.18)), 1
+        elif angle == 180: # Top
+            title_y, money_y = panel_rect.bottom - 20, panel_rect.bottom - 50
+            list_start_x, list_start_y = panel_rect.left + 20, money_y - 30
+            row_h, y_dir = max(20, int(panel_rect.height * 0.18)), -1
+        else: # Left/Right
+            title_y, money_y = panel_rect.top + 40, panel_rect.top + 70
+            list_start_x, list_start_y = panel_rect.left + 20, money_y + 40
+            row_h, y_dir = max(20, int(panel_rect.width * 0.25)), 1
 
         self._draw_rotated_text(f"Player {pid + 1}", font, (255, 255, 255), (panel_rect.centerx, title_y), angle)
         self._draw_rotated_text(f"Money: ${self.players[pid].money}", font, (255, 255, 255), (panel_rect.centerx, money_y), angle)
         
-        y = list_start_y
+        y = list_start_y if y_dir == 1 else list_start_y - row_h
         for prop_idx in self.players[pid].properties[:5]:
-            if prop_idx < len(self.properties):
-                p = self.properties[prop_idx]
-                color = p.get("color") or ((150,150,150) if "Railroad" in p["name"] else (200,200,200))
-                name = p.get("name", "")
-                
-                color_rect_pos = (list_start_x, y)
-                text_pos = (list_start_x + 30, y + 7)
-                
-                pygame.draw.rect(self.screen, color, pygame.Rect(color_rect_pos[0], color_rect_pos[1], 20, 14))
-                self._draw_rotated_text(name, prop_font, (255, 255, 255), text_pos, angle)
-                y += row_h
+            p = self.properties[prop_idx]
+            color = p.get("color") or ((150,150,150) if "Railroad" in p["name"] else (200,200,200))
+            
+            color_rect = pygame.Rect(list_start_x, y, 20, 14)
+            text_pos = (list_start_x + 30, y + 7)
+            
+            pygame.draw.rect(self.screen, color, color_rect)
+            self._draw_rotated_text(p.get("name", ""), prop_font, (255, 255, 255), text_pos, angle)
+            y += row_h * y_dir
         
         now = time.time()
         for k, start in list(self.popup_hover.items()):
@@ -414,18 +412,18 @@ class MonopolyGame:
         
         prop = self.properties[self.buy_prompt["prop_idx"]]
         angle = self._get_panel_orientation(pid)
-        is_vertical = angle in (90, 270)
         
         title_font = pygame.font.SysFont(None, 36)
         price_font = pygame.font.SysFont(None, 30)
         btn_font = pygame.font.SysFont(None, 28)
         
-        if is_vertical:
-            title_y = panel_rect.top + 50
-            price_y = title_y + 40
-        else: # Horizontal
-            title_y = panel_rect.top + 40
-            price_y = title_y + 40
+        # Position title and price based on orientation
+        if angle == 0: # Bottom
+            title_y, price_y = panel_rect.top + 40, panel_rect.top + 80
+        elif angle == 180: # Top
+            title_y, price_y = panel_rect.bottom - 40, panel_rect.bottom - 80
+        else: # Vertical
+            title_y, price_y = panel_rect.top + 60, panel_rect.top + 100
 
         self._draw_rotated_text(f"Buy {prop['name']}?", title_font, (255, 255, 255), (panel_rect.centerx, title_y), angle)
         self._draw_rotated_text(f"Price: ${prop['price']}", price_font, (200, 200, 200), (panel_rect.centerx, price_y), angle)
@@ -576,12 +574,12 @@ class MonopolyGame:
                 
             rects = self._player_button_rects(pid)
             for key_name, brect in rects.items():
-                is_roll = key_name == "roll"
-                enabled = pid == self.current if is_roll else True
+                is_end_turn = key_name == "end_turn"
+                enabled = (pid == self.current and self.turn_phase == "TURN_OVER") if is_end_turn else True
                 color = tuple(min(255, int(c * 0.7 + 220 * 0.3)) for c in base_col) if enabled else (80,80,80)
                 pygame.draw.rect(self.screen, color, brect, border_radius=8)
                 pygame.draw.rect(self.screen, (60, 60, 60), brect, width=1, border_radius=8)
-                label_text = key_name.capitalize()
+                label_text = "End Turn" if is_end_turn else key_name.capitalize()
                 self._draw_rotated_text(label_text, font, (0,0,0), brect.center, self._get_panel_orientation(pid))
 
         now = time.time()
