@@ -1,7 +1,8 @@
 import time
 import math
+import random
 import pygame
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 from ui_elements import PlayerSelectionUI
 
 # full property list for 40 spaces (name + display color for properties; None for non-property)
@@ -66,6 +67,10 @@ class MonopolyGame:
             (255,77,77),(77,255,77),(77,77,255),(255,200,77),
             (200,77,255),(77,255,200),(255,120,120),(180,180,80)
         ])]
+        # replace with more vibrant palette (keep in sync with ui_elements if desired)
+        vibrant = [(220,40,40),(40,220,40),(40,70,220),(255,200,60),(200,40,200),(40,220,200),(255,120,60),(140,40,220)]
+        for i,p in enumerate(self.players):
+            p.color = vibrant[i]
         self.current = 0
         self.properties = PROPERTY_SPACES.copy()
         self.board_spaces = 40
@@ -78,6 +83,14 @@ class MonopolyGame:
 
         # players actually playing (set by launcher when starting the game)
         self.players_selected: List[int] = []
+        # property ownership: None==bank, otherwise player idx
+        self.owners: List[Optional[int]] = [None] * self.board_spaces
+        # dice rolling state
+        self.dice_state: Dict = {"rolling": False, "start": 0.0, "end": 0.0, "d1": 0, "d2": 0, "pid": None}
+        # hover timers for per-player buttons (keyed by "pid:button:hand")
+        self.button_hover: Dict[str, float] = {}
+        # cached last computed button rects (computed in helper)
+        self._last_button_rects: Dict[int, Dict[str, pygame.Rect]] = {}
 
     def _compute_board_rect(self) -> pygame.Rect:
         """Return a centered board rect that avoids covering edge player slots."""
@@ -138,7 +151,7 @@ class MonopolyGame:
         inner = board_rect.inflate(-10, -10)
         pygame.draw.rect(self.screen, (24,24,24), inner, border_radius=6)
 
-        # draw 10 spaces per side
+        # draw 10 spaces per side (full 40-space board)
         side_count = 10
         font_small = pygame.font.SysFont(None, 14)
         for idx in range(40):
@@ -240,32 +253,105 @@ class MonopolyGame:
             iy = int(inner.top + (p + 0.5) * space_h)
             return ix, iy
 
-    def update(self, fingertip_meta: List[Dict]):
-        # update selection UI hover toggles (still keep selection visible)
-        self.selection_ui.update_with_fingertips(fingertip_meta)
-        # update hover popup logic for property overlays (closable by hover)
-        now = time.time()
-        for meta in fingertip_meta:
-            px,py = meta["pos"]
-            hand = meta["hand"]
-            for pid in range(8):
-                if not self.properties_open[pid]:
-                    continue
-                ow, oh = 360, 280
-                ow_rect = pygame.Rect(self.screen.get_width()//2 - ow//2, self.screen.get_height()//2 - oh//2, ow, oh)
-                if ow_rect.collidepoint((px,py)):
-                    key = (pid, hand)
-                    if key not in self.popup_hover:
-                        self.popup_hover[key] = now
-                    elif now - self.popup_hover[key] >= 1.0:
-                        self.properties_open[pid] = False
-                        self.popup_hover = {k:v for k,v in self.popup_hover.items() if k[0]!=pid}
-                else:
-                    for k in list(self.popup_hover.keys()):
-                        if k == (pid, hand):
-                            self.popup_hover.pop(k, None)
+    def _player_button_rects(self, pid: int) -> Dict[str, pygame.Rect]:
+        """Return precomputed rects for Roll/Props/Buy buttons for a given player slot."""
+        rect = self.selection_ui.slot_rect(pid)
+        pos = self.selection_ui.positions[pid]
+        gap = 8
+        xpad = 6
+        ypad = 6
+        rects = {}
+        if pos[1] == 0 or pos[1] == self.screen.get_height():
+            total_w = rect.width - xpad*2
+            btn_w = max(60, (total_w - gap*2)//3)
+            btn_h = max(32, rect.height - ypad*2)
+            start_x = rect.left + xpad + (total_w - (btn_w*3 + gap*2))//2
+            y = rect.top + ypad
+            for i, key in enumerate(["roll", "props", "buy"]):
+                bx = start_x + i*(btn_w + gap)
+                rects[key] = pygame.Rect(bx, y, btn_w, btn_h)
+        else:
+            btn_w = max(60, rect.width - 12)
+            total_btn_h = rect.height - (gap*4)
+            btn_h = max(28, total_btn_h // 3)
+            x = rect.left + 6
+            y = rect.top + gap
+            rects["roll"] = pygame.Rect(x, y, btn_w, btn_h)
+            rects["props"] = pygame.Rect(x, y + btn_h + gap, btn_w, btn_h)
+            rects["buy"] = pygame.Rect(x, y + 2*(btn_h + gap), btn_w, btn_h)
+        # cache for update/draw consistency
+        self._last_button_rects[pid] = rects
+        return rects
 
-        # animate tokens toward targets if any
+    def update(self, fingertip_meta: List[Dict]):
+        # update selection hover toggles (keep selection visible in game)
+        self.selection_ui.update_with_fingertips(fingertip_meta)
+        now = time.time()
+        # update hover timers for buttons (only consider playing players)
+        for pid in list(self.players_selected):
+            rects = self._player_button_rects(pid)
+            for meta in fingertip_meta:
+                pos = meta.get("pos")
+                hand = meta.get("hand")
+                if not pos:
+                    continue
+                # roll button hover handling (only allow current player to roll)
+                for key_name, r in rects.items():
+                    if r.collidepoint(pos):
+                        hkey = f"{pid}:{key_name}:{hand}"
+                        if hkey not in self.button_hover:
+                            self.button_hover[hkey] = now
+                        else:
+                            if (now - self.button_hover[hkey]) >= 1.0:
+                                # trigger action
+                                if key_name == "roll" and pid == self.current and not self.dice_state["rolling"]:
+                                    # start dice animation for 2-4s
+                                    dur = random.uniform(2.0, 4.0)
+                                    self.dice_state.update({"rolling": True, "start": now, "end": now + dur, "d1": 0, "d2": 0, "pid": pid})
+                                elif key_name == "buy":
+                                    # open property overlay for current player if on a property
+                                    if pid == self.current:
+                                        self.properties_open[pid] = True
+                                elif key_name == "props":
+                                    if pid == self.current:
+                                        self.properties_open[pid] = True
+                    else:
+                        # clear any hover for that hand/key if moved away
+                        hkey = f"{pid}:{key_name}:{hand}"
+                        if hkey in self.button_hover:
+                            self.button_hover.pop(hkey, None)
+
+        # handle dice finish
+        if self.dice_state.get("rolling"):
+            if now >= self.dice_state["end"]:
+                # finalize dice
+                d1 = random.randint(1,6)
+                d2 = random.randint(1,6)
+                self.dice_state.update({"d1": d1, "d2": d2, "rolling": False})
+                pid = self.dice_state["pid"]
+                if pid is not None:
+                    steps = d1 + d2
+                    target = (self.players[pid].pos + steps) % self.board_spaces
+                    self.players[pid].token_anim_target = target
+                    self.players[pid].token_anim_progress = 0.0
+                    self.last_roll = (d1, d2)
+                    # if landed on an ownable property and unowned -> open buy overlay
+                    if 0 <= target < len(self.properties):
+                        spec = self.properties[target]
+                        if spec.get("color") is not None and self.owners[target] is None:
+                            # open property buy overlay for current
+                            self.properties_open[pid] = True
+                    # advance current to next selected player after move (simple turn rotate)
+                    # find next index in self.players_selected
+                    if self.players_selected:
+                        try:
+                            idx_in_list = self.players_selected.index(pid)
+                            next_idx = (idx_in_list + 1) % len(self.players_selected)
+                            self.current = self.players_selected[next_idx]
+                        except ValueError:
+                            pass
+
+        # animate tokens as before
         for p in self.players:
             if p.token_anim_target is not None:
                 p.token_anim_progress += 0.06
@@ -290,91 +376,75 @@ class MonopolyGame:
             pygame.draw.circle(self.screen, p.color, (x, y), 12)
 
     def draw_player_boards_and_buttons(self):
-        # draw per-player large control buttons inside their slot rect from selection_ui
+        # draw only players that are actually playing to keep board clean
         font = pygame.font.SysFont(None, 20)
-        for pid in range(8):
+        for pid in list(self.players_selected):
             rect = self.selection_ui.slot_rect(pid)
             pos = self.selection_ui.positions[pid]
-            # highlight only if player is selected/playing
-            is_selected = (self.players_selected and pid in self.players_selected) or (not self.players_selected and self.selection_ui.selected[pid])
-            tint = tuple(min(255, c + 40) for c in self.players[pid].color)
-            if is_selected:
-                pygame.draw.rect(self.screen, tint, rect.inflate(8,8), border_radius=8)
+            # tinted bg using player color slightly washed for UI elements
+            base_col = self.players[pid].color
+            washed = tuple(min(255, int(c * 0.75 + 180 * 0.25)) for c in base_col)
+            pygame.draw.rect(self.screen, washed, rect.inflate(8,8), border_radius=8)
 
-            # draw border for current player
+            # current player highlight
             if pid == self.current:
-                pygame.draw.rect(self.screen, (255, 215, 0), rect.inflate(6,6), width=4, border_radius=8)
+                pygame.draw.rect(self.screen, (255,215,0), rect.inflate(6,6), width=4, border_radius=8)
                 lbl = font.render("CURRENT", True, (0,0,0))
                 self.screen.blit(lbl, (rect.centerx - lbl.get_width()//2, rect.top + 6))
 
-            # decide layout: top/bottom -> horizontal buttons; left/right -> vertical (unchanged)
-            xpad = 6
-            ypad = 6
-            gap = 8
-            if pos[1] == 0 or pos[1] == self.screen.get_height():
-                # horizontal layout: three buttons across
-                total_w = rect.width - xpad*2
-                btn_w = max(60, (total_w - gap*2)//3)
-                btn_h = max(32, rect.height - ypad*2)
-                start_x = rect.left + xpad + (total_w - (btn_w*3 + gap*2))//2
-                y = rect.top + ypad
-                labels = ["Roll", "Properties", "Buy / Mortg."]
-                angles = {0:180, self.screen.get_height():0}
-                # angle for text inside button
-                angle_text = 180 if pos[1] == 0 else 0
-                for i, lbl_text in enumerate(labels):
-                    bx = start_x + i*(btn_w + gap)
-                    brect = pygame.Rect(bx, y, btn_w, btn_h)
-                    col = (120,200,120) if pid == self.current and i==0 else (200,200,200) if i==1 else (200,180,140)
-                    pygame.draw.rect(self.screen, col, brect, border_radius=8)
-                    pygame.draw.rect(self.screen, (80,80,80), brect, width=1, border_radius=8)
-                    # rotated label facing player
-                    # render text, rotate if needed
-                    txtsurf = font.render(lbl_text, True, (0,0,0))
-                    if angle_text != 0:
-                        txtsurf = pygame.transform.rotate(txtsurf, angle_text)
-                    self.screen.blit(txtsurf, txtsurf.get_rect(center=brect.center))
-            else:
-                # vertical layout (existing)
-                btn_w = max(60, rect.width - 12)
-                total_btn_h = rect.height - (gap*4)
-                btn_h = max(28, total_btn_h // 3)
-                x = rect.left + 6
-                y = rect.top + gap
-
-                # Roll/End
-                roll_rect = pygame.Rect(x, y, btn_w, btn_h)
-                roll_col = (120,200,120) if pid == self.current else (120,120,120)
-                pygame.draw.rect(self.screen, roll_col, roll_rect, border_radius=8)
-                pygame.draw.rect(self.screen, (220,220,220), roll_rect, width=1, border_radius=8)
-                rtxt = font.render("Roll / End", True, (0,0,0))
+            # compute button rects (ensures update/draw use same layout)
+            rects = self._player_button_rects(pid)
+            # draw buttons using player-washed color
+            for key_name, brect in rects.items():
+                if key_name == "roll":
+                    col = tuple(min(255, int(c*0.7 + 220*0.3)) for c in base_col) if pid == self.current else tuple(min(255, int(c*0.6 + 200*0.4)) for c in base_col)
+                elif key_name == "props":
+                    col = tuple(min(255, int(c*0.8 + 200*0.2)) for c in base_col)
+                else:
+                    col = tuple(min(255, int(c*0.85 + 190*0.15)) for c in base_col)
+                pygame.draw.rect(self.screen, col, brect, border_radius=8)
+                pygame.draw.rect(self.screen, (60,60,60), brect, width=1, border_radius=8)
+                # label orientation
+                label_text = "Roll" if key_name == "roll" else ("Properties" if key_name == "props" else "Buy / Mortg.")
+                txtsurf = font.render(label_text, True, (0,0,0))
                 # rotate text to face player
-                angle = 0
-                if pos[0] == 0:
-                    angle = 270
-                elif pos[0] == self.screen.get_width():
-                    angle = 90
-                if angle != 0:
-                    rtxt = pygame.transform.rotate(rtxt, angle)
-                self.screen.blit(rtxt, rtxt.get_rect(center=roll_rect.center))
+                angle_text = 0
+                if pos[1] == 0:
+                    angle_text = 180
+                elif pos[1] == self.screen.get_height():
+                    angle_text = 0
+                elif pos[0] == 0:
+                    angle_text = 270
+                else:
+                    angle_text = 90
+                if angle_text != 0:
+                    txtsurf = pygame.transform.rotate(txtsurf, angle_text)
+                self.screen.blit(txtsurf, txtsurf.get_rect(center=brect.center))
 
-                # Props
-                y += btn_h + gap
-                prop_rect = pygame.Rect(x, y, btn_w, btn_h)
-                pygame.draw.rect(self.screen, (200,200,200), prop_rect, border_radius=8)
-                prt = font.render("Properties", True, (0,0,0))
-                if angle != 0:
-                    prt = pygame.transform.rotate(prt, angle)
-                self.screen.blit(prt, prt.get_rect(center=prop_rect.center))
-
-                # Buy/Mortgage
-                y += btn_h + gap
-                buy_rect = pygame.Rect(x, y, btn_w, btn_h)
-                pygame.draw.rect(self.screen, (200,180,140), buy_rect, border_radius=8)
-                brt = font.render("Buy / Mortg.", True, (0,0,0))
-                if angle != 0:
-                    brt = pygame.transform.rotate(brt, angle)
-                self.screen.blit(brt, brt.get_rect(center=buy_rect.center))
+        # if dice rolling show animated dice near center
+        if self.dice_state.get("rolling"):
+            cx, cy = self.screen.get_width()//2, self.screen.get_height()//2
+            t = time.time()
+            # draw two dice with rapidly changing faces
+            for i in range(2):
+                face = random.randint(1,6)
+                dx = (i*48) - 24
+                dr = pygame.Rect(cx + dx - 22, cy - 22, 44, 44)
+                pygame.draw.rect(self.screen, (255,255,255), dr, border_radius=6)
+                ftxt = font.render(str(face), True, (0,0,0))
+                self.screen.blit(ftxt, ftxt.get_rect(center=dr.center))
+        elif self.dice_state.get("d1", 0) and self.dice_state.get("d2", 0):
+            # show last roll result briefly
+            cx, cy = self.screen.get_width()//2, self.screen.get_height()//2
+            d1 = self.dice_state.get("d1", 0)
+            d2 = self.dice_state.get("d2", 0)
+            for i, val in enumerate([d1, d2]):
+                dx = (i*48) - 24
+                dr = pygame.Rect(cx + dx - 22, cy - 22, 44, 44)
+                pygame.draw.rect(self.screen, (255,255,255), dr, border_radius=6)
+                ftxt = font.render(str(val), True, (0,0,0))
+                self.screen.blit(ftxt, ftxt.get_rect(center=dr.center))
+        # end draw_player_boards_and_buttons
 
     def draw_properties_overlay(self, pid:int):
         # draw centered properties panel for pid

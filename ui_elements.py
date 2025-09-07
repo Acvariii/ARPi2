@@ -4,16 +4,16 @@ from typing import List, Tuple, Dict
 
 HOVER_TIME_THRESHOLD = 0.9
 
-# Define 8 distinct player colors (RGB) used by PlayerSelectionUI
+# Define 8 more vibrant player colors (RGB) used by PlayerSelectionUI
 PLAYER_COLORS = [
-    (200,  30,  30),
-    (30, 200,  30),
-    (30,  30, 200),
-    (200, 200,  30),
-    (200,  30, 200),
-    (30, 200, 200),
-    (150, 100,  50),
-    (100,  30, 150),
+    (220,  40,  40),   # vivid red
+    (40, 220,  40),    # vivid green
+    (40,  70, 220),    # vivid blue
+    (255, 200,  60),   # warm yellow
+    (200,  40, 200),   # magenta
+    (40, 220, 200),    # teal
+    (255, 120,  60),   # orange
+    (140,  40, 220),   # purple
 ]
 
 
@@ -189,32 +189,39 @@ class PlayerSelectionUI:
         return out
 
     def draw_slots(self):
+        # full table background; caller can choose to draw individual slots instead
         w, h = self.screen.get_size()
         inner = pygame.Rect(int(w*0.02), int(h*0.02), int(w*0.96), int(h*0.96))
         pygame.draw.rect(self.screen, (32, 96, 36), inner, border_radius=12)
+        # draw all slots by delegating to draw_slot (keeps single-slot draw available)
+        for idx in range(len(self.positions)):
+            self.draw_slot(idx)
+
+    def draw_slot(self, idx: int, force_selected: bool = None):
+        """Draw a single player slot. If force_selected is provided it overrides self.selected[idx]."""
+        w, h = self.screen.get_size()
         font = pygame.font.SysFont(None, 28)
-        colors = PLAYER_COLORS
-        for idx, pos in enumerate(self.positions):
-            rect = self.slot_rect(idx)
-            sel = self.selected[idx]
-            color = colors[idx]
-            if sel:
-                pygame.draw.rect(self.screen, color, rect.inflate(6, 6), border_radius=10)
-                pygame.draw.rect(self.screen, color, rect, border_radius=8)
-            else:
-                bg = tuple(max(12, c//5) for c in color)
-                pygame.draw.rect(self.screen, bg, rect, border_radius=8)
-                pygame.draw.rect(self.screen, (18,18,18), rect, width=2, border_radius=8)
-            label = font.render(f"P{idx+1}", True, (255,255,255))
-            # rotate label for orientation
-            x,y = pos
-            angle = 0
-            if y == 0: angle = 180
-            elif y == h: angle = 0
-            elif x == 0: angle = 270
-            else: angle = 90
-            lbl = pygame.transform.rotate(label, angle)
-            self.screen.blit(lbl, lbl.get_rect(center=rect.center))
+        pos = self.positions[idx]
+        rect = self.slot_rect(idx)
+        sel = self.selected[idx] if force_selected is None else force_selected
+        color = PLAYER_COLORS[idx]
+        if sel:
+            pygame.draw.rect(self.screen, color, rect.inflate(6, 6), border_radius=10)
+            pygame.draw.rect(self.screen, color, rect, border_radius=8)
+        else:
+            bg = tuple(max(12, c//5) for c in color)
+            pygame.draw.rect(self.screen, bg, rect, border_radius=8)
+            pygame.draw.rect(self.screen, (18,18,18), rect, width=2, border_radius=8)
+        label = font.render(f"P{idx+1}", True, (255,255,255))
+        # rotate label for orientation
+        x,y = pos
+        angle = 0
+        if y == 0: angle = 180
+        elif y == h: angle = 0
+        elif x == 0: angle = 270
+        else: angle = 90
+        lbl = pygame.transform.rotate(label, angle)
+        self.screen.blit(lbl, lbl.get_rect(center=rect.center))
 
     def closest_player_color(self, point: Tuple[int, int]):
         """
