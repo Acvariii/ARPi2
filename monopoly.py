@@ -388,29 +388,65 @@ class MonopolyGame:
             if idx == 0:
                 name = "Go"
             angle = 0 if gy == 9 else (90 if gx == 0 else (180 if gy == 0 else 270))
-            surfaces = self._fit_text_to_rect(name, rr, min_font=8, max_font=22, color=(0,0,0), pad=6)
-            for surf, pos in surfaces:
-                # For left/right, rotate each line and adjust position to stack vertically
-                if angle in (90, 270):
-                    surf = pygame.transform.rotate(surf, angle)
-                    surf_rect = surf.get_rect()
-                    # Stack vertically, centered horizontally
-                    if angle == 90:
-                        # Right edge: stack from top to bottom
-                        surf_rect.midleft = (rr.left + rr.width // 2, pos[1])
+            # Get wrapped lines and font
+            font_name = pygame.font.get_default_font()
+            min_font, max_font = 8, 22
+            pad_text = 6
+            width, height = rr.width - pad_text*2, rr.height - pad_text*2
+            for font_size in range(max_font, min_font-1, -1):
+                font = pygame.freetype.SysFont(font_name, font_size)
+                words = name.split()
+                lines = []
+                current = ""
+                for word in words:
+                    test = current + (" " if current else "") + word
+                    rect_test = font.get_rect(test)
+                    if rect_test.width > width and current:
+                        lines.append(current)
+                        current = word
                     else:
-                        # Left edge: stack from bottom to top
-                        surf_rect.midright = (rr.right - rr.width // 2, pos[1])
-                    self.screen.blit(surf, surf_rect.topleft)
-                else:
-                    # Top/bottom: normal stacking
+                        current = test
+                if current:
+                    lines.append(current)
+                total_height = sum(font.get_rect(line).height for line in lines)
+                if total_height <= height and all(font.get_rect(line).width <= width for line in lines):
+                    break
+            # Now render each line and stack them properly
+            if angle in (90, 270):
+                # Vertical stacking
+                line_surfs = []
+                line_heights = []
+                for line in lines:
+                    surf, _ = font.render(line, (0,0,0))
+                    surf = pygame.transform.rotate(surf, angle)
+                    line_surfs.append(surf)
+                    line_heights.append(surf.get_height())
+                total_h = sum(line_heights)
+                y0 = rr.top + pad_text + (height - total_h)//2
+                for surf, lh in zip(line_surfs, line_heights):
+                    surf_rect = surf.get_rect(centerx=rr.centerx)
+                    surf_rect.top = y0
+                    self.screen.blit(surf, surf_rect)
+                    y0 += lh
+            else:
+                # Horizontal stacking
+                line_surfs = []
+                line_heights = []
+                for line in lines:
+                    surf, _ = font.render(line, (0,0,0))
                     if angle != 0:
                         surf = pygame.transform.rotate(surf, angle)
                         if angle == 180:
                             surf = pygame.transform.flip(surf, True, True)
-                        elif angle == 270:
-                            surf = pygame.transform.flip(surf, True, False)
-                    self.screen.blit(surf, pos)
+                    line_surfs.append(surf)
+                    line_heights.append(surf.get_height())
+                total_h = sum(line_heights)
+                y0 = rr.top + pad_text + (height - total_h)//2
+                for surf, lh in zip(line_surfs, line_heights):
+                    surf_rect = surf.get_rect(centerx=rr.centerx)
+                    surf_rect.top = y0
+                    self.screen.blit(surf, surf_rect)
+                    y0 += lh
 
     def draw_tokens(self):
         static_by_space: Dict[int, List[Player]] = {}
