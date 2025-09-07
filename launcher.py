@@ -72,7 +72,7 @@ class PlayerSelection:
 def run_pygame():
     pygame.init()
     pygame.mouse.set_visible(False)
-    screen = pygame.display.set_mode(WINDOW_SIZE)
+    screen = pygame.display.set_mode((1920, 1080), pygame.FULLSCREEN | pygame.NOFRAME)
     clock = pygame.time.Clock()
     font = pygame.font.SysFont(None, max(32, int(WINDOW_SIZE[1]*0.05)))
 
@@ -155,10 +155,11 @@ def run_pygame():
             screen.blit(label_small, (start_btn.rect.centerx - label_small.get_width()//2, start_btn.rect.bottom + 8))
             if start_btn.clicked and selected_count >= 2:
                 print("Starting Monopoly with players:", selected_count)
+                selected_indices = [i for i, s in enumerate(selection.selected) if s]
                 current_game = MonopolyGame(screen, lambda w, h: fingertip_meta)
-                current_game.selection_ui.selected = list(selection.selected)
-                current_game.players_selected = [i for i, s in enumerate(selection.selected) if s]
-                current_game.current = current_game.players_selected[0] if current_game.players_selected else 0
+                current_game.selection_ui.selected = [s for s in selection.selected]
+                current_game.players_selected = selected_indices
+                current_game.current = selected_indices[0] if selected_indices else 0
                 state = "monopoly_playing"
                 start_btn.reset()
             label_min_players = pygame.font.SysFont(None, 28).render("Minimum 2 players to start", True, WHITE)
