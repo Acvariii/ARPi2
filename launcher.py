@@ -5,9 +5,9 @@ import threading
 import time
 import pygame
 import websockets
-from ui_components import HoverButton, draw_cursor  # use shared UI components
-from monopoly import MonopolyGame                   # import the game
-from ui_elements import PlayerSelectionUI           # use the same selection UI everywhere
+from ui_components import HoverButton, draw_cursor, draw_circular_progress
+from monopoly import MonopolyGame
+from ui_elements import PlayerSelectionUI
 
 # CONFIG
 SERVER_WS = "ws://192.168.1.79:8765"
@@ -118,41 +118,65 @@ def run_pygame():
 
         screen.fill(DARK_BG)
 
+        # --- Game Selection Screen ---
         if state == "menu":
             panel = pygame.Rect(80, 60, WINDOW_SIZE[0] - 160, WINDOW_SIZE[1] - 120)
             pygame.draw.rect(screen, PANEL, panel, border_radius=14)
             title = pygame.font.SysFont(None, 64).render("Game Launcher", True, WHITE)
             screen.blit(title, (panel.centerx - title.get_width() // 2, panel.top + 24))
 
+            # Draw buttons and track hover progress
             for btn in buttons:
                 btn.draw(screen, fingertip_points)
+                # Draw circular progress for any hovered button
+                for p in fingertip_points:
+                    if btn.rect.collidepoint(p):
+                        key = f"{p[0]}_{p[1]}"
+                        start = btn.hover_start.get(key)
+                        if start:
+                            elapsed = time.time() - start
+                            progress = min(1.0, max(0.0, elapsed / HOVER_TIME_THRESHOLD))
+                            off_x, off_y = 28, -28
+                            draw_circular_progress(screen, (p[0]+off_x, p[1]+off_y), 20, progress, ACCENT, thickness=6)
                 if btn.clicked:
                     selected_game = btn.text
                     state = "player_select"
                     btn.reset()
 
+        # --- Player Selection Screen ---
         elif state == "player_select":
             # update and draw selection UI
             selection.update_with_fingertips(fingertip_meta)
             selection.draw()
 
-            # draw hover progress indicators near fingertips
+            # Draw hover progress for player slots
             for h in selection.get_hover_progress():
                 px, py = h["pos"]
                 progress = h["progress"]
                 off_x, off_y = 28, -28
-                arc_rect = pygame.Rect(px + off_x - 20, py + off_y - 20, 40, 40)
-                start_ang = -math.pi / 2
-                end_ang = start_ang + progress * 2 * math.pi
-                pygame.draw.circle(screen, (60, 60, 60), arc_rect.center, 20)
-                pygame.draw.arc(screen, ACCENT, arc_rect, start_ang, end_ang, 6)
+                draw_circular_progress(screen, (px+off_x, py+off_y), 20, progress, ACCENT, thickness=6)
 
-            # center Start button; only enabled if >= 2 players selected
+            # Start button logic
             start_btn = HoverButton(pygame.Rect(WINDOW_SIZE[0]//2-140, WINDOW_SIZE[1]//2-45, 280, 90), "Start", font)
             start_btn.draw(screen, fingertip_points, enabled=sum(selection.selected) >= 2)
+            # Draw circular progress for start button
+            for p in fingertip_points:
+                if start_btn.rect.collidepoint(p):
+                    key = f"{p[0]}_{p[1]}"
+                    start = start_btn.hover_start.get(key)
+                    if start:
+                        elapsed = time.time() - start
+                        progress = min(1.0, max(0.0, elapsed / HOVER_TIME_THRESHOLD))
+                        off_x, off_y = 28, -28
+                        draw_circular_progress(screen, (p[0]+off_x, p[1]+off_y), 20, progress, ACCENT, thickness=6)
+
             selected_count = sum(selection.selected)
             label_small = pygame.font.SysFont(None, 26).render(f"{selected_count} players selected", True, WHITE)
             screen.blit(label_small, (start_btn.rect.centerx - label_small.get_width()//2, start_btn.rect.bottom + 8))
+            label_min_players = pygame.font.SysFont(None, 28).render("Minimum 2 players to start", True, WHITE)
+            screen.blit(label_min_players, (start_btn.rect.centerx - label_min_players.get_width()//2, start_btn.rect.top - 30))
+
+            # Only start game if button is clicked and enough players selected
             if start_btn.clicked and selected_count >= 2:
                 print("Starting Monopoly with players:", selected_count)
                 selected_indices = [i for i, s in enumerate(selection.selected) if s]
@@ -162,9 +186,8 @@ def run_pygame():
                 current_game.current = selected_indices[0] if selected_indices else 0
                 state = "monopoly_playing"
                 start_btn.reset()
-            label_min_players = pygame.font.SysFont(None, 28).render("Minimum 2 players to start", True, WHITE)
-            screen.blit(label_min_players, (start_btn.rect.centerx - label_min_players.get_width()//2, start_btn.rect.top - 30))
 
+        # --- Monopoly Game Screen ---
         elif state == "monopoly_playing":
             if current_game is not None:
                 current_game.update(fingertip_meta)
@@ -175,7 +198,7 @@ def run_pygame():
                 txt = font.render("Monopoly (initializing...)", True, WHITE)
                 screen.blit(txt, txt.get_rect(center=(WINDOW_SIZE[0] // 2, WINDOW_SIZE[1] // 2)))
 
-        # render fingertips last with color by nearest player slot
+        # Draw cursors for each hand
         for meta in fingertip_meta:
             px, py = meta["pos"]
             col = selection.closest_player_color((px, py))
