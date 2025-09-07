@@ -13,14 +13,15 @@ if __name__ == "__main__":
         from pi_client import start_pi_client
         start_pi_client()
     elif mode == "launcher":
-        from launcher import run_launcher
-        run_launcher()
+        # call the restored monolithic launcher entrypoint
+        from game_launcher import run_pygame
+        run_pygame()
     elif mode == "both":
         from pi_client import start_pi_client
-        from launcher import run_launcher
+        from game_launcher import run_pygame
         t = threading.Thread(target=start_pi_client, daemon=True)
         t.start()
         time.sleep(0.3)
-        run_launcher()
+        run_pygame()
     else:
         usage()
