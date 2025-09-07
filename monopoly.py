@@ -190,6 +190,32 @@ class MonopolyGame:
         if x == w: return 90
         return 0
 
+    def _get_buy_prompt_button_rects(self, pid: int) -> Dict[str, pygame.Rect]:
+        panel_rect = self.selection_ui.slot_rect(pid)
+        angle = self._get_panel_orientation(pid)
+        is_vertical = angle in (90, 270)
+        
+        if is_vertical:
+            btn_w, btn_h = panel_rect.width - 60, 60
+            gap = 20
+            btn_x = panel_rect.centerx - btn_w / 2
+            yes_y = panel_rect.centery - btn_h - gap / 2
+            no_y = panel_rect.centery + gap / 2
+            return {
+                "yes": pygame.Rect(btn_x, yes_y, btn_w, btn_h),
+                "no": pygame.Rect(btn_x, no_y, btn_w, btn_h)
+            }
+        else: # Horizontal
+            btn_w, btn_h = 120, 50
+            gap = 20
+            yes_x = panel_rect.centerx - btn_w - gap / 2
+            no_x = panel_rect.centerx + gap / 2
+            btn_y = panel_rect.centery + 10
+            return {
+                "yes": pygame.Rect(yes_x, btn_y, btn_w, btn_h),
+                "no": pygame.Rect(no_x, btn_y, btn_w, btn_h)
+            }
+
     def update(self, fingertip_meta: List[Dict]):
         now = time.time()
 
@@ -313,20 +339,10 @@ class MonopolyGame:
                     prop_idx = p.pos
                     spec = self.properties[prop_idx]
                     can_afford = p.money >= spec.get("price", 9999)
-                    panel_rect = self.selection_ui.slot_rect(p.idx)
-                    
-                    btn_w, btn_h = 100, 40
-                    gap = 20
-                    yes_x = panel_rect.centerx - btn_w - gap // 2
-                    no_x = panel_rect.centerx + gap // 2
-                    btn_y = panel_rect.centery + 20
                     
                     self.buy_prompt = {
                         "pid": p.idx, "prop_idx": prop_idx,
-                        "buttons": {
-                            "yes": pygame.Rect(yes_x, btn_y, btn_w, btn_h),
-                            "no": pygame.Rect(no_x, btn_y, btn_w, btn_h)
-                        },
+                        "buttons": self._get_buy_prompt_button_rects(p.idx),
                         "can_afford": can_afford
                     }
 
@@ -343,28 +359,36 @@ class MonopolyGame:
         angle = self._get_panel_orientation(pid)
         is_vertical = angle in (90, 270)
         
-        font_size = max(12, int(panel_rect.height * 0.12 if is_vertical else panel_rect.height * 0.18))
+        font_size = max(12, int(panel_rect.height * 0.10 if is_vertical else panel_rect.height * 0.15))
         font = pygame.font.SysFont(None, font_size)
-        
-        x0, y0 = inner.left + 12, inner.top + 10
-        
-        self._draw_rotated_text(f"Player {pid + 1}", font, (255, 255, 255), (panel_rect.centerx, y0 + font.get_height() / 2), angle)
-        self._draw_rotated_text(f"Money: ${self.players[pid].money}", font, (255, 255, 255), (panel_rect.centerx, y0 + 24 + font.get_height() / 2), angle)
-        
-        y = y0 + 52
-        row_h = max(20, int(panel_rect.height * 0.15))
         prop_font = pygame.font.SysFont(None, max(12, int(font_size * 0.9)))
 
+        if is_vertical:
+            title_y = panel_rect.top + 30
+            money_y = title_y + 30
+            list_start_x = panel_rect.left + 20
+            list_start_y = money_y + 30
+            row_h = max(20, int(panel_rect.width * 0.25))
+        else: # Horizontal
+            title_y = panel_rect.top + 20 if angle == 0 else panel_rect.bottom - 20
+            money_y = title_y + 30 if angle == 0 else title_y - 30
+            list_start_x = panel_rect.left + 20
+            list_start_y = money_y + 40 if angle == 0 else money_y - 40 - (5 * 20)
+            row_h = max(20, int(panel_rect.height * 0.18))
+
+        self._draw_rotated_text(f"Player {pid + 1}", font, (255, 255, 255), (panel_rect.centerx, title_y), angle)
+        self._draw_rotated_text(f"Money: ${self.players[pid].money}", font, (255, 255, 255), (panel_rect.centerx, money_y), angle)
+        
+        y = list_start_y
         for prop_idx in self.players[pid].properties[:5]:
             if prop_idx < len(self.properties):
                 p = self.properties[prop_idx]
                 color = p.get("color") or ((150,150,150) if "Railroad" in p["name"] else (200,200,200))
                 name = p.get("name", "")
                 
-                color_rect_pos = (x0, y)
-                text_pos = (x0 + 26, y - 2 + row_h / 2)
+                color_rect_pos = (list_start_x, y)
+                text_pos = (list_start_x + 30, y + 7)
                 
-                # This part is not rotated to keep the color swatch aligned with the panel edge
                 pygame.draw.rect(self.screen, color, pygame.Rect(color_rect_pos[0], color_rect_pos[1], 20, 14))
                 self._draw_rotated_text(name, prop_font, (255, 255, 255), text_pos, angle)
                 y += row_h
@@ -390,13 +414,21 @@ class MonopolyGame:
         
         prop = self.properties[self.buy_prompt["prop_idx"]]
         angle = self._get_panel_orientation(pid)
+        is_vertical = angle in (90, 270)
         
         title_font = pygame.font.SysFont(None, 36)
         price_font = pygame.font.SysFont(None, 30)
         btn_font = pygame.font.SysFont(None, 28)
         
-        self._draw_rotated_text(f"Buy {prop['name']}?", title_font, (255, 255, 255), (panel_rect.centerx, panel_rect.top + 40), angle)
-        self._draw_rotated_text(f"Price: ${prop['price']}", price_font, (200, 200, 200), (panel_rect.centerx, panel_rect.top + 80), angle)
+        if is_vertical:
+            title_y = panel_rect.top + 50
+            price_y = title_y + 40
+        else: # Horizontal
+            title_y = panel_rect.top + 40
+            price_y = title_y + 40
+
+        self._draw_rotated_text(f"Buy {prop['name']}?", title_font, (255, 255, 255), (panel_rect.centerx, title_y), angle)
+        self._draw_rotated_text(f"Price: ${prop['price']}", price_font, (200, 200, 200), (panel_rect.centerx, price_y), angle)
 
         can_afford = self.buy_prompt["can_afford"]
         for name, rect in self.buy_prompt["buttons"].items():
