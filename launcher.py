@@ -5,6 +5,7 @@ import threading
 import time
 import pygame
 import websockets
+from monopoly import MonopolyGame
 
 # CONFIG
 SERVER_WS = "ws://192.168.1.79:8765"
@@ -349,8 +350,34 @@ def run_pygame():
             label_small = pygame.font.SysFont(None, 26).render(f"{selected_count} players selected", True, WHITE)
             screen.blit(label_small, (start_btn.rect.centerx - label_small.get_width()//2, start_btn.rect.bottom + 8))
             if start_btn.clicked and selected_count >= selection.min_players:
+                # Start Monopoly: create game, copy selection UI state, and transition
                 print("Starting Monopoly with players:", selected_count)
+                monopoly = MonopolyGame(screen, lambda w,h: fingertip_meta)
+                # copy selected slots into the game's selection UI so the board shows the same players
+                monopoly.selection_ui.selected = list(selection.selected)
+                # record which player indices are active for the game
+                monopoly.players_selected = [i for i, s in enumerate(selection.selected) if s]
+                monopoly.started = True
+                # switch to playing state and keep reference to the game instance
+                state = "monopoly_playing"
+                current_game = monopoly
                 start_btn.reset()
+            # label showing min players
+            label_min_players = pygame.font.SysFont(None, 28).render(f"Minimum {selection.min_players} players to start", True, WHITE)
+            screen.blit(label_min_players, (start_btn.rect.centerx - label_min_players.get_width()//2, start_btn.rect.top - 30))
+
+        elif state == "monopoly_playing":
+            # Running game: update & draw game logic; selection UI remains for reference (no selection updates)
+            # use the instantiated game created on Start
+            if 'current_game' in locals() and current_game is not None:
+                current_game.update(fingertip_meta)
+                current_game.draw()
+            else:
+                # fallback: draw placeholder
+                panel = pygame.Rect(80, 60, WINDOW_SIZE[0] - 160, WINDOW_SIZE[1] - 120)
+                pygame.draw.rect(screen, PANEL, panel, border_radius=14)
+                txt = font.render("Monopoly (initializing...)", True, WHITE)
+                screen.blit(txt, txt.get_rect(center=(WINDOW_SIZE[0] // 2, WINDOW_SIZE[1] // 2)))
 
         else:
             panel = pygame.Rect(80, 60, WINDOW_SIZE[0] - 160, WINDOW_SIZE[1] - 120)
