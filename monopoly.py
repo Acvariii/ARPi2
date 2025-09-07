@@ -106,34 +106,46 @@ class MonopolyGame:
 
     def _grid_cell(self) -> float:
         board = self._compute_board_rect()
-        return board.width / 10.0
+        return board.width / 11.0
 
     def _index_to_grid(self, idx: int) -> Tuple[int, int]:
-        if idx == 0:
-            return 9, 9
-        if 1 <= idx <= 9:
-            return 9 - idx, 9
-        if idx == 10:
-            return 0, 9
-        if 11 <= idx <= 19:
-            return 0, 9 - (idx - 10)
-        if idx == 20:
-            return 0, 0
-        if 21 <= idx <= 29:
+        if 0 <= idx <= 10:
+            return 10 - idx, 10
+        if 11 <= idx <= 20:
+            return 0, 10 - (idx - 10)
+        if 21 <= idx <= 30:
             return idx - 20, 0
-        if idx == 30:
-            return 9, 0
         if 31 <= idx <= 39:
-            return 9, idx - 30
+            return 10, idx - 30
         return 0, 0
 
     def _space_rect_for(self, idx: int) -> pygame.Rect:
         board = self._compute_board_rect()
         cell = self._grid_cell()
         gx, gy = self._index_to_grid(idx)
+        is_corner = (gx in (0, 10) and gy in (0, 10))
+        is_horizontal = (gy == 0 or gy == 10) and not is_corner
+        
+        width = cell * 2 if is_corner else (cell if is_horizontal else cell * 2)
+        height = cell * 2 if is_corner else (cell * 2 if is_horizontal else cell)
+        
+        if is_corner:
+            width, height = cell, cell
+        elif is_horizontal:
+            width, height = cell, cell * 1.6
+        else: # vertical
+            width, height = cell * 1.6, cell
+
         left = board.left + gx * cell
         top = board.top + gy * cell
-        return pygame.Rect(int(round(left)), int(round(top)), int(math.ceil(cell)), int(math.ceil(cell)))
+
+        # Adjust for non-square cells
+        if gy == 10 and not is_corner: # bottom row
+            top -= (height - cell)
+        if gx == 0 and not is_corner: # left row
+            left += (cell - width)
+
+        return pygame.Rect(int(round(left)), int(round(top)), int(math.ceil(width)), int(math.ceil(height)))
 
     def _space_coords_for(self, idx: int) -> Tuple[int, int]:
         r = self._space_rect_for(idx)
@@ -280,13 +292,6 @@ class MonopolyGame:
                         self.properties_open[p.idx] = True
                         p._open_after_move = False
 
-    def _draw_rotated_text(self, surf: pygame.Surface, text: str, rect: pygame.Rect, angle: int, font: pygame.font.Font, color=(255, 255, 255)):
-        txt = font.render(text, True, color)
-        if angle != 0:
-            txt = pygame.transform.rotate(txt, angle)
-        trect = txt.get_rect(center=rect.center)
-        surf.blit(txt, trect)
-
     def _draw_properties_popup_in_panel(self, pid: int, panel_rect: pygame.Rect):
         inner = panel_rect.inflate(-8, -8)
         pygame.draw.rect(self.screen, (28, 28, 28), inner, border_radius=8)
@@ -323,40 +328,61 @@ class MonopolyGame:
             except Exception:
                 pass
 
-    @staticmethod
-    def _fit_text_to_rect(text, rect, min_font=8, max_font=22, color=(0,0,0), pad=4):
+    def _draw_text_in_space(self, text: str, rect: pygame.Rect, angle: int):
         font_name = pygame.font.get_default_font()
-        width, height = rect.width - pad*2, rect.height - pad*2
-        for font_size in range(max_font, min_font-1, -1):
+        pad = 4
+        color = (0, 0, 0)
+
+        is_vertical = angle in (90, 270)
+        wrap_width = rect.height if is_vertical else rect.width
+        wrap_height = rect.width if is_vertical else rect.height
+        
+        lines = []
+        best_font = pygame.freetype.SysFont(font_name, 8)
+        for font_size in range(20, 7, -1):
             font = pygame.freetype.SysFont(font_name, font_size)
-            words = text.split()
-            lines = []
-            current = ""
+            
+            current_lines = []
+            words = text.split(' ')
+            current_line = ""
             for word in words:
-                test = current + (" " if current else "") + word
-                rect_test = font.get_rect(test)
-                if rect_test.width > width and current:
-                    lines.append(current)
-                    current = word
+                test_line = current_line + (" " if current_line else "") + word
+                if font.get_rect(test_line).width > wrap_width - pad * 2:
+                    if current_line: current_lines.append(current_line)
+                    current_line = word
                 else:
-                    current = test
-            if current:
-                lines.append(current)
-            total_height = sum(font.get_rect(line).height for line in lines)
-            if total_height <= height and all(font.get_rect(line).width <= width for line in lines):
-                surfaces = []
-                y = rect.top + pad + (height - total_height)//2
-                for line in lines:
-                    surf, _ = font.render(line, color)
-                    surf_rect = surf.get_rect(centerx=rect.centerx)
-                    surf_rect.top = y
-                    surfaces.append((surf, surf_rect.topleft))
-                    y += surf.get_height()
-                return surfaces
-        font = pygame.freetype.SysFont(font_name, min_font)
-        surf, _ = font.render(text, color)
-        surf_rect = surf.get_rect(center=rect.center)
-        return [(surf, surf_rect.topleft)]
+                    current_line = test_line
+            if current_line: current_lines.append(current_line)
+            
+            line_height = font.get_sized_height()
+            total_height = len(current_lines) * line_height
+            
+            if total_height <= wrap_height - pad * 2:
+                lines = current_lines
+                best_font = font
+                break
+        
+        if not lines:
+            lines = text.split(' ')
+
+        line_height = best_font.get_sized_height()
+        text_surf_height = len(lines) * line_height
+        try:
+            text_surf_width = max(best_font.get_rect(line).width for line in lines) if lines else 0
+        except ValueError:
+            text_surf_width = 0
+
+        text_surf = pygame.Surface((text_surf_width, text_surf_height), pygame.SRCALPHA)
+        
+        y = 0
+        for line in lines:
+            line_img, _ = best_font.render(line, color)
+            text_surf.blit(line_img, ((text_surf_width - line_img.get_width()) / 2, y))
+            y += line_height
+
+        rotated_text_surf = pygame.transform.rotate(text_surf, angle)
+        dest_rect = rotated_text_surf.get_rect(center=rect.center)
+        self.screen.blit(rotated_text_surf, dest_rect)
 
     def draw_board(self):
         sw, sh = self.screen.get_size()
@@ -365,88 +391,41 @@ class MonopolyGame:
         pygame.draw.rect(self.screen, (200, 200, 200), board_rect, width=max(2, int(sw * 0.002)), border_radius=8)
         inner = board_rect.inflate(-max(8, int(sw * 0.01)), -max(8, int(sh * 0.01)))
         pygame.draw.rect(self.screen, (24, 24, 24), inner, border_radius=6)
+
         for idx, spec in enumerate(self.properties):
             r = self._space_rect_for(idx)
-            pad = max(2, int(self._grid_cell() * 0.06))
-            rr = r.inflate(-pad, -pad)
-            color_bg = (180, 180, 180) if idx % 2 == 0 else (200, 200, 200)
-            pygame.draw.rect(self.screen, color_bg, rr, border_radius=3)
+            
+            color_bg = (200, 225, 210)
+            pygame.draw.rect(self.screen, color_bg, r, border_radius=3)
+            pygame.draw.rect(self.screen, (0,0,0), r, width=1, border_radius=3)
+
             gcolor = spec.get("color")
             gx, gy = self._index_to_grid(idx)
-            thickness = max(3, int(self._grid_cell() * 0.16))
-            if gcolor:
-                if gy == 9:
-                    bar = pygame.Rect(rr.left + 2, rr.top + 2, rr.width - 4, thickness)
-                elif gx == 0:
-                    bar = pygame.Rect(rr.right - thickness - 2, rr.top + 2, thickness, rr.height - 4)
-                elif gy == 0:
-                    bar = pygame.Rect(rr.left + 2, rr.bottom - thickness - 2, rr.width - 4, thickness)
-                else:
-                    bar = pygame.Rect(rr.left + 2, rr.top + 2, thickness, rr.height - 4)
+            
+            is_corner = (gx in (0, 10) and gy in (0, 10))
+            
+            if gcolor and not is_corner:
+                thickness = max(3, int(self._grid_cell() * 0.25))
+                if gy == 10: # Bottom
+                    bar = pygame.Rect(r.left, r.top, r.width, thickness)
+                elif gx == 0: # Left
+                    bar = pygame.Rect(r.right - thickness, r.top, thickness, r.height)
+                elif gy == 0: # Top
+                    bar = pygame.Rect(r.left, r.bottom - thickness, r.width, thickness)
+                else: # Right
+                    bar = pygame.Rect(r.left, r.top, thickness, r.height)
                 pygame.draw.rect(self.screen, gcolor, bar, border_radius=2)
+
             name = spec.get("name", "")
-            if idx == 0:
-                name = "Go"
-            angle = 0 if gy == 9 else (90 if gx == 0 else (180 if gy == 0 else 270))
-            # Get wrapped lines and font
-            font_name = pygame.font.get_default_font()
-            min_font, max_font = 8, 22
-            pad_text = 6
-            width, height = rr.width - pad_text*2, rr.height - pad_text*2
-            for font_size in range(max_font, min_font-1, -1):
-                font = pygame.freetype.SysFont(font_name, font_size)
-                words = name.split()
-                lines = []
-                current = ""
-                for word in words:
-                    test = current + (" " if current else "") + word
-                    rect_test = font.get_rect(test)
-                    if rect_test.width > width and current:
-                        lines.append(current)
-                        current = word
-                    else:
-                        current = test
-                if current:
-                    lines.append(current)
-                total_height = sum(font.get_rect(line).height for line in lines)
-                if total_height <= height and all(font.get_rect(line).width <= width for line in lines):
-                    break
-            # Now render each line and stack them properly
-            if angle in (90, 270):
-                # Vertical stacking
-                line_surfs = []
-                line_heights = []
-                for line in lines:
-                    surf, _ = font.render(line, (0,0,0))
-                    surf = pygame.transform.rotate(surf, angle)
-                    line_surfs.append(surf)
-                    line_heights.append(surf.get_height())
-                total_h = sum(line_heights)
-                y0 = rr.top + pad_text + (height - total_h)//2
-                for surf, lh in zip(line_surfs, line_heights):
-                    surf_rect = surf.get_rect(centerx=rr.centerx)
-                    surf_rect.top = y0
-                    self.screen.blit(surf, surf_rect)
-                    y0 += lh
-            else:
-                # Horizontal stacking
-                line_surfs = []
-                line_heights = []
-                for line in lines:
-                    surf, _ = font.render(line, (0,0,0))
-                    if angle != 0:
-                        surf = pygame.transform.rotate(surf, angle)
-                        if angle == 180:
-                            surf = pygame.transform.flip(surf, True, True)
-                    line_surfs.append(surf)
-                    line_heights.append(surf.get_height())
-                total_h = sum(line_heights)
-                y0 = rr.top + pad_text + (height - total_h)//2
-                for surf, lh in zip(line_surfs, line_heights):
-                    surf_rect = surf.get_rect(centerx=rr.centerx)
-                    surf_rect.top = y0
-                    self.screen.blit(surf, surf_rect)
-                    y0 += lh
+            
+            if is_corner:
+                angle = 45 if idx in (10, 30) else -45
+            elif gy == 0 or gy == 10: # Horizontal
+                angle = 180 if gy == 0 else 0
+            else: # Vertical
+                angle = 270 if gx == 0 else 90
+
+            self._draw_text_in_space(name, r, angle)
 
     def draw_tokens(self):
         static_by_space: Dict[int, List[Player]] = {}
