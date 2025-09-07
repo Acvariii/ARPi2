@@ -125,12 +125,15 @@ class PlayerSelection:
         return positions
 
     def slot_rect(self, idx):
-        # Top/bottom: wide, short. Sides: narrow, tall.
+        # Top/bottom: wide, short. Sides: FILL remaining vertical space between top and bottom, same dimension family.
         w, h = self.screen.get_size()
+        # top/bottom sizes
         top_slot_w = int(w / 3)      # each top/bottom slot spans 1/3 width
         top_slot_h = int(h * 0.18)   # short height
-        side_slot_w = int(w * 0.14)  # narrower width
-        side_slot_h = int(h / 3)     # taller height
+        # side slots: take remaining vertical space between top and bottom slots
+        vertical_margin = int(h * 0.04)
+        side_slot_h = max(80, h - (2 * top_slot_h) - vertical_margin)  # fill rest
+        side_slot_w = int(w * 0.14)  # keep reasonable width for side players
 
         x, y = self.positions[idx]
         # top row (y==0)
@@ -139,12 +142,12 @@ class PlayerSelection:
         # bottom row (y==h)
         elif y == h:
             rect = pygame.Rect(x - top_slot_w // 2, h - top_slot_h, top_slot_w, top_slot_h)
-        # left side (x==0) - tall vertical rect hugging left edge
+        # left side (x==0) - tall vertical rect hugging left edge, now fills gap
         elif x == 0:
-            rect = pygame.Rect(0, y - side_slot_h // 2, side_slot_w, side_slot_h)
-        # right side (x==w) - tall vertical rect hugging right edge
+            rect = pygame.Rect(0, int(top_slot_h + vertical_margin // 2), side_slot_w, side_slot_h)
+        # right side (x==w) - tall vertical rect hugging right edge, now fills gap
         else:
-            rect = pygame.Rect(w - side_slot_w, y - side_slot_h // 2, side_slot_w, side_slot_h)
+            rect = pygame.Rect(w - side_slot_w, int(top_slot_h + vertical_margin // 2), side_slot_w, side_slot_h)
         return rect
 
     def update_with_fingertips(self, fingertip_meta):
@@ -163,7 +166,6 @@ class PlayerSelection:
                     slot_hits[idx].append((hand, (px, py)))
 
         # update hover timers/positions per (slot,hand)
-        # Remove keys for slots/hands that are no longer hitting
         active_keys = set()
         for idx, hits in slot_hits.items():
             if hits:
@@ -184,11 +186,9 @@ class PlayerSelection:
                                 self.selected[idx] = not self.selected[idx]
                                 self.toggle_cooldown[idx] = now
                                 # clear hover entries for this slot to avoid immediate re-trigger
-                                # remove keys that start with "{idx}:":
                                 self.hover_start = {k: v for k, v in self.hover_start.items() if not k.startswith(f"{idx}:")}
                                 self.hover_pos = {k: v for k, v in self.hover_pos.items() if not k.startswith(f"{idx}:")}
             else:
-                # no hits for this slot: we'll clear any hover keys related to this slot later
                 pass
 
         # Clear hover keys that are no longer active (hand moved away)
@@ -388,6 +388,10 @@ def run_pygame():
         clock.tick(FPS)
 
     pygame.quit()
+
+# expose entry for main.py to import
+def run_launcher():
+    run_pygame()
 
 if __name__ == "__main__":
     run_pygame()

@@ -47,12 +47,17 @@ async def send_frames(ws):
     finally:
         cap.release()
 
-async def main():
-    async with websockets.connect(SERVER_WS, max_size=None) as ws:
+async def run_pi_client(server_ws: str | None = None):
+    """Async entrypoint; main.py can call this."""
+    target = server_ws or SERVER_WS
+    async with websockets.connect(target, max_size=None) as ws:
         # register as camera
         await ws.send("camera")
         # run send and recv concurrently
         await asyncio.gather(send_frames(ws), receiver(ws))
 
+def start_pi_client(server_ws: str | None = None):
+    asyncio.run(run_pi_client(server_ws))
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(run_pi_client())
