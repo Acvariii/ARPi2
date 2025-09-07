@@ -220,8 +220,16 @@ class MonopolyGame:
             else:
                 self._draw_rotated_text(self.screen, name, inner_r, angle, font_small, color=(0,0,0))
 
-        # draw player slots (edge boards) on top of board so they are not obscured
-        self.selection_ui.draw_slots()
+        # draw only the player slots (edge boards) on top of the board so they are not obscured.
+        # Using draw_slot avoids painting the full table background (which used to cover the board).
+        for pid in range(len(self.selection_ui.positions)):
+            # only draw slots for players that are active OR that were explicitly selected in the UI
+            # if no players_selected is set, fall back to the selection UI state (for editor/testing).
+            if self.players_selected:
+                if pid not in self.players_selected:
+                    continue
+            # draw the slot (this uses selection_ui.selected to render 'lit' state)
+            self.selection_ui.draw_slot(pid)
 
     def _space_coords_for(self, pos:int) -> Tuple[int,int]:
         # map 0..39 to points around board rectangle (consistent with draw_board)
@@ -457,21 +465,23 @@ class MonopolyGame:
             end_ang = start_ang + progress * 2 * math.pi
             pygame.draw.arc(self.screen, ACCENT, arc_rect, start_ang, end_ang, 6)
 
-        # if dice rolling show animated dice near center
+        # if dice rolling show animated dice near the board center (so dice appear on the board)
+        board_rect = self._compute_board_rect()
+        cx, cy = board_rect.centerx, board_rect.centery
         if self.dice_state.get("rolling"):
-            cx, cy = self.screen.get_width()//2, self.screen.get_height()//2
             t = time.time()
             # draw two dice with rapidly changing faces
             for i in range(2):
                 face = random.randint(1,6)
                 dx = (i*48) - 24
+                # offset the dice horizontally so they don't overlap and sit above the board center
                 dr = pygame.Rect(cx + dx - 22, cy - 22, 44, 44)
                 pygame.draw.rect(self.screen, (255,255,255), dr, border_radius=6)
                 ftxt = font.render(str(face), True, (0,0,0))
                 self.screen.blit(ftxt, ftxt.get_rect(center=dr.center))
         elif self.dice_state.get("d1", 0) and self.dice_state.get("d2", 0):
             # show last roll result briefly
-            cx, cy = self.screen.get_width()//2, self.screen.get_height()//2
+            cx, cy = board_rect.centerx, board_rect.centery
             d1 = self.dice_state.get("d1", 0)
             d2 = self.dice_state.get("d2", 0)
             for i, val in enumerate([d1, d2]):
