@@ -352,7 +352,7 @@ class MonopolyGame:
                 px, py = hover_pos if hover_pos else inner.center
                 progress = min(1.0, max(0.0, (now - start) / HOVER_TIME_THRESHOLD))
                 center = (px + 24, py - 24)
-                draw_circular_progress(self.screen, center, radius=18, progress=progress, thickness=max(3, int(rect.height * 0.08)))
+                draw_circular_progress(self.screen, center, radius=18, progress=progress, thickness=max(3, int(panel_rect.height * 0.08)))
             except Exception:
                 pass
 
@@ -365,12 +365,43 @@ class MonopolyGame:
         max_w = rect.height - 2 * padding if is_vertical else rect.width - 2 * padding
         max_h = rect.width - 2 * padding if is_vertical else rect.height - 2 * padding
 
-        best_font_size = 8
-        wrapped_lines = []
-        for size in range(20, 7, -1):
-            font = pygame.font.Font(font_name, size)
+        words = text.split(' ')
+        longest_word_len = 0
+        if words:
+            longest_word_len = max(len(word) for word in words)
+
+        # Determine font size based on the longest word
+        if longest_word_len >= 11:
+            font_size = 11
+        elif longest_word_len >= 9:
+            font_size = 13
+        elif longest_word_len >= 7:
+            font_size = 15
+        elif longest_word_len >= 5:
+            font_size = 17
+        else:
+            font_size = 19
+
+        font = pygame.font.Font(font_name, font_size)
+        
+        # Now, wrap text if it still doesn't fit
+        lines = []
+        current_line = ''
+        for word in words:
+            test_line = current_line + ' ' + word if current_line else word
+            if font.size(test_line)[0] <= max_w:
+                current_line = test_line
+            else:
+                if current_line: lines.append(current_line)
+                current_line = word
+        if current_line: lines.append(current_line)
+
+        # If wrapping makes it too tall, reduce font size further
+        while len(lines) * font.get_linesize() > max_h and font_size > 8:
+            font_size -= 1
+            font = pygame.font.Font(font_name, font_size)
+            # Re-wrap with the new font size
             lines = []
-            words = text.split(' ')
             current_line = ''
             for word in words:
                 test_line = current_line + ' ' + word if current_line else word
@@ -380,27 +411,17 @@ class MonopolyGame:
                     if current_line: lines.append(current_line)
                     current_line = word
             if current_line: lines.append(current_line)
-            
-            if len(lines) * font.get_linesize() <= max_h:
-                best_font_size = size
-                wrapped_lines = lines
-                break
-        
-        if not wrapped_lines:
-            wrapped_lines = text.split(' ')
 
-        font = pygame.font.Font(font_name, best_font_size)
-        
         line_height = font.get_linesize()
-        text_block_h = len(wrapped_lines) * line_height
+        text_block_h = len(lines) * line_height
         try:
-            text_block_w = max(font.size(line)[0] for line in wrapped_lines)
+            text_block_w = max(font.size(line)[0] for line in lines)
         except ValueError:
             text_block_w = 0
         
         text_surface = pygame.Surface((text_block_w, text_block_h), pygame.SRCALPHA)
         
-        for i, line in enumerate(wrapped_lines):
+        for i, line in enumerate(lines):
             line_surf = font.render(line, True, color)
             x_pos = (text_block_w - line_surf.get_width()) / 2
             y_pos = i * line_height
