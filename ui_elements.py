@@ -1,10 +1,10 @@
 import time
 import pygame
 from typing import List, Tuple, Dict
+from ui_components import draw_cursor, get_closest_player_color
 
 HOVER_TIME_THRESHOLD = 0.9
 
-# Define 8 more vibrant player colors (RGB) used by PlayerSelectionUI
 PLAYER_COLORS = [
     (220,  40,  40),   # vivid red
     (40, 220,  40),    # vivid green
@@ -246,3 +246,31 @@ class PlayerSelectionUI:
     def selected_count(self) -> int:
         """Return number of currently selected players."""
         return sum(1 for s in self.selected if s)
+
+class PlayerPanel:
+    def __init__(self, idx, rect, color, orientation):
+        self.idx = idx
+        self.rect = rect
+        self.color = color
+        self.orientation = orientation  # 0=normal, 90=right, 180=upside-down, 270=left
+
+def get_player_panels(screen_size):
+    w, h = screen_size
+    panels = []
+    # Top 3
+    for i in range(3):
+        x = int((i + 0.5) * (w / 3))
+        rect = pygame.Rect(x - w//6, 0, w//3, int(h*0.10))
+        panels.append(PlayerPanel(i, rect, PLAYER_COLORS[i], 180))
+    # Bottom 3
+    for i in range(3):
+        x = int((i + 0.5) * (w / 3))
+        rect = pygame.Rect(x - w//6, h-int(h*0.10), w//3, int(h*0.10))
+        panels.append(PlayerPanel(i+3, rect, PLAYER_COLORS[i+3], 0))
+    # Left
+    rect = pygame.Rect(0, int(h*0.10), int(w*0.12), h-int(h*0.20))
+    panels.append(PlayerPanel(6, rect, PLAYER_COLORS[6], 270))
+    # Right
+    rect = pygame.Rect(w-int(w*0.12), int(h*0.10), int(w*0.12), h-int(h*0.20))
+    panels.append(PlayerPanel(7, rect, PLAYER_COLORS[7], 90))
+    return panels
