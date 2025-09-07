@@ -126,15 +126,14 @@ class PlayerSelection:
         return positions
 
     def slot_rect(self, idx):
-        # Top/bottom: wide, short. Sides: FILL remaining vertical space between top and bottom, same dimension family.
+        # Top/bottom: wide, short. Sides: FILL remaining vertical space between top and bottom.
         w, h = self.screen.get_size()
-        # top/bottom sizes
-        top_slot_w = int(w / 3)      # each top/bottom slot spans 1/3 width
-        top_slot_h = int(h * 0.18)   # short height
-        # side slots: take remaining vertical space between top and bottom slots
+        top_slot_w = int(w / 3)
+        # keep top/bottom slot height modest so it won't obscure game board at fullscreen
+        top_slot_h = int(h * 0.10)
         vertical_margin = int(h * 0.04)
-        side_slot_h = max(80, h - (2 * top_slot_h) - vertical_margin)  # fill rest
-        side_slot_w = int(w * 0.14)  # keep reasonable width for side players
+        side_slot_h = max(80, h - (2 * top_slot_h) - vertical_margin)
+        side_slot_w = int(w * 0.12)
 
         x, y = self.positions[idx]
         # top row (y==0)
@@ -225,7 +224,7 @@ class PlayerSelection:
         pygame.draw.rect(self.screen, (32, 96, 36), inner, border_radius=12)
 
         # draw player slots with same dimensions, flush to edges
-        font = pygame.font.SysFont(None, 30)
+        font = pygame.font.SysFont(None, max(16, int(screen.get_height() * 0.03)))
         for idx, pos in enumerate(self.positions):
             rect = self.slot_rect(idx)
             sel = self.selected[idx]

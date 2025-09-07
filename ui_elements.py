@@ -117,11 +117,12 @@ class PlayerSelectionUI:
 
     def slot_rect(self, idx: int) -> pygame.Rect:
         w, h = self.screen.get_size()
+        # reduce top/bottom slot height so slots don't dominate the screen at 1080p
         top_slot_w = int(w / 3)
-        top_slot_h = int(h * 0.18)
+        top_slot_h = int(h * 0.10)
         vertical_margin = int(h * 0.04)
         side_slot_h = max(80, h - (2 * top_slot_h) - vertical_margin)
-        side_slot_w = int(w * 0.14)
+        side_slot_w = int(w * 0.12)
 
         x, y = self.positions[idx]
         if y == 0:
@@ -200,7 +201,8 @@ class PlayerSelectionUI:
     def draw_slot(self, idx: int, force_selected: bool = None):
         """Draw a single player slot. If force_selected is provided it overrides self.selected[idx]."""
         w, h = self.screen.get_size()
-        font = pygame.font.SysFont(None, 28)
+        # font size scales with screen height to remain legible at 720p/1080p
+        font = pygame.font.SysFont(None, max(14, int(h * 0.025)))
         pos = self.positions[idx]
         rect = self.slot_rect(idx)
         sel = self.selected[idx] if force_selected is None else force_selected

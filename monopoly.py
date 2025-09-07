@@ -112,52 +112,63 @@ class MonopolyGame:
         return pygame.Rect(bx, by, size, size)
 
     def _grid_cell(self) -> float:
-        # board is drawn on an 11x11 grid (corners + 9 spaces per side)
+        # board is drawn on a 10x10 grid (corners included => 10 spaces per side)
         board = self._compute_board_rect()
-        return board.width / 11.0
+        return board.width / 10.0
 
     def _index_to_grid(self, idx: int) -> Tuple[int, int]:
-        """Map monopoly index (0..39) to 11x11 grid coords where (0,0) top-left."""
-        # mapping based on standard Monopoly clockwise ordering, starting Go at bottom-right (10,10)
+        """Map monopoly index (0..39) to 10x10 grid coords where (0,0) top-left.
+        Standard Monopoly order (clockwise) with index 0 = Go at bottom-right (9,9)."""
         if idx == 0:
-            return 10, 10
+            return 9, 9
         if 1 <= idx <= 9:
-            # bottom row right->left: 1 maps to (9,10), 9 -> (1,10)
-            return 10 - idx, 10
+            return 9 - idx, 9
         if idx == 10:
-            return 0, 10
+            return 0, 9
         if 11 <= idx <= 19:
-            # left column bottom->top: 11 -> (0,9), 19 -> (0,1)
-            return 0, 10 - (idx - 10)
+            return 0, 9 - (idx - 10)
         if idx == 20:
             return 0, 0
         if 21 <= idx <= 29:
-            # top row left->right: 21 -> (1,0), 29 -> (9,0)
             return idx - 20, 0
         if idx == 30:
-            return 10, 0
+            return 9, 0
         if 31 <= idx <= 39:
-            # right column top->bottom: 31 -> (10,1), 39 -> (10,9)
-            return 10, idx - 30
-        # fallback
+            return 9, idx - 30
         return 0, 0
 
-    def _space_rect_for(self, idx: int) -> pygame.Rect:
+    def _slot_rect_around_board(self, pid: int) -> pygame.Rect:
+        """Compute a player slot rect anchored outside the board so it never overlaps the board."""
+        sw, sh = self.screen.get_size()
         board = self._compute_board_rect()
-        cell = self._grid_cell()
-        gx, gy = self._index_to_grid(idx)
-        x = board.left + int(gx * cell)
-        y = board.top + int(gy * cell)
-        # corner cells are square cell x cell; edges are same sized cells
-        return pygame.Rect(x, y, int(math.ceil(cell)), int(math.ceil(cell)))
-
-    def _space_coords_for(self, pos: int) -> Tuple[int, int]:
-        r = self._space_rect_for(pos)
-        return r.centerx, r.centery
+        cell = int(self._grid_cell())
+        # sizes anchored to board dimensions
+        top_h = max(int(sh * 0.10), cell * 2)
+        slot_w = max(int(board.width * 0.28), int(sw * 0.12))
+        side_w = max(int(sw * 0.12), cell * 2)
+        pos_idx = pid
+        if pos_idx <= 2:
+            x = board.left + int((pos_idx + 0.5) * (board.width / 3) - slot_w / 2)
+            y = max(8, board.top - top_h - 8)
+            return pygame.Rect(int(x), int(y), int(slot_w), int(top_h))
+        if 3 <= pos_idx <= 5:
+            idx = pos_idx - 3
+            x = board.left + int((idx + 0.5) * (board.width / 3) - slot_w / 2)
+            y = min(sh - top_h - 8, board.bottom + 8)
+            return pygame.Rect(int(x), int(y), int(slot_w), int(top_h))
+        if pos_idx == 6:
+            slot_h = max(int(board.height * 0.44), side_w)
+            x = max(8, board.left - side_w - 8)
+            y = board.top + int((board.height - slot_h) / 2)
+            return pygame.Rect(int(x), int(y), int(side_w), int(slot_h))
+        slot_h = max(int(board.height * 0.44), side_w)
+        x = min(sw - side_w - 8, board.right + 8)
+        y = board.top + int((board.height - slot_h) / 2)
+        return pygame.Rect(int(x), int(y), int(side_w), int(slot_h))
 
     # player button rects relative to slot rect; use relative sizes
-    def _player_button_rects(self, pid: int) -> Dict[str, pygame.Rect]:
-        rect = self.selection_ui.slot_rect(pid)
+    def _player_button_rects(self, pid: int, rect_override: Optional[pygame.Rect] = None) -> Dict[str, pygame.Rect]:
+        rect = rect_override if rect_override is not None else self.selection_ui.slot_rect(pid)
         pos = self.selection_ui.positions[pid]
         gap = max(6, int(min(rect.width, rect.height) * 0.06))
         xpad = max(6, int(rect.width * 0.06))
@@ -380,13 +391,14 @@ class MonopolyGame:
             # bar thickness relative
             thickness = max(3, int(self._grid_cell() * 0.16))
             if gcolor:
-                if gy == 10:  # bottom row -> bar near top of cell
+                # bottom row -> gy == 9, top -> gy == 0, left -> gx == 0, right -> gx == 9
+                if gy == 9:  # bottom row -> bar near top of cell
                     bar = pygame.Rect(rr.left + 2, rr.top + 2, rr.width - 4, thickness)
                 elif gx == 0:  # left col -> bar near right of cell
                     bar = pygame.Rect(rr.right - thickness - 2, rr.top + 2, thickness, rr.height - 4)
                 elif gy == 0:  # top row -> bar near bottom of cell
                     bar = pygame.Rect(rr.left + 2, rr.bottom - thickness - 2, rr.width - 4, thickness)
-                else:  # gx == 10 right column -> bar near left of cell
+                else:  # gx == 9 right column -> bar near left of cell
                     bar = pygame.Rect(rr.left + 2, rr.top + 2, thickness, rr.height - 4)
                 pygame.draw.rect(self.screen, gcolor, bar, border_radius=2)
 
@@ -394,13 +406,13 @@ class MonopolyGame:
             name = spec.get("name", "")
             # rotation: bottom row -> 0, left col -> 90, top row -> 180, right col -> 270 (so text faces away from center)
             angle = 0
-            if gy == 10:
+            if gy == 9:
                 angle = 0
             elif gx == 0:
                 angle = 90
             elif gy == 0:
                 angle = 180
-            elif gx == 10:
+            elif gx == 9:
                 angle = 270
             # short label render; wrap if long
             max_chars = max(8, int(rr.width / 8))
@@ -422,15 +434,8 @@ class MonopolyGame:
             else:
                 self._draw_rotated_text(self.screen, name, rr, angle, font_small, color=(0, 0, 0))
 
-        # draw player slots on top (use selection_ui.draw_slot for each active player)
-        for pid in range(len(self.selection_ui.positions)):
-            if self.players_selected:
-                if pid not in self.players_selected:
-                    continue
-            try:
-                self.selection_ui.draw_slot(pid)
-            except Exception:
-                pass
+        # player slots are rendered in draw_player_boards_and_buttons anchored outside the board
+        return
 
     def draw_tokens(self):
         # group static tokens per space then draw moving tokens on top
@@ -485,7 +490,7 @@ class MonopolyGame:
         sw, sh = self.screen.get_size()
         font = pygame.font.SysFont(None, max(12, int(sh * 0.03)))
         for pid in list(self.players_selected):
-            rect = self.selection_ui.slot_rect(pid)
+            rect = self._slot_rect_around_board(pid)
             pos = self.selection_ui.positions[pid]
             base_col = self.players[pid].color
             washed = tuple(min(255, int(c * 0.75 + 180 * 0.25)) for c in base_col)
@@ -506,13 +511,14 @@ class MonopolyGame:
                 pygame.draw.rect(self.screen, (60, 60, 60), brect, width=1, border_radius=8)
                 label_text = "Roll" if key_name == "roll" else ("Properties" if key_name == "props" else "Buy / Mortg.")
                 txtsurf = font.render(label_text, True, (0, 0, 0))
-                # orientation consistent with selection_ui
-                angle_text = 0
-                if pos[1] == 0:
+                # compute orientation based on where slot is anchored relative to board
+                board = self._compute_board_rect()
+                cx, cy = rect.center
+                if cy < board.top:
                     angle_text = 180
-                elif pos[1] == sh:
+                elif cy > board.bottom:
                     angle_text = 0
-                elif pos[0] == 0:
+                elif cx < board.left:
                     angle_text = 270
                 else:
                     angle_text = 90
@@ -617,28 +623,14 @@ class MonopolyGame:
         self.draw_board()
         self.draw_tokens()
         self.draw_player_boards_and_buttons()
-
+ 
         # draw properties overlays above everything else
         for pid in range(len(self.players)):
             if self.properties_open.get(pid):
                 self.draw_properties_overlay(pid)
-
-        # selection-slot hover progress (from selection UI)
-        try:
-            for h in self.selection_ui.get_hover_progress():
-                px, py = h.get("pos", (0, 0))
-                progress = h.get("progress", 0.0)
-                sw, sh = self.screen.get_size()
-                off_x = int(min(48, sw * 0.03))
-                off_y = -int(min(48, sh * 0.03))
-                arc_rect = pygame.Rect(px + off_x - 20, py + off_y - 20, 40, 40)
-                pygame.draw.circle(self.screen, (60, 60, 60), arc_rect.center, 20)
-                start_ang = -math.pi / 2
-                end_ang = start_ang + progress * 2 * math.pi
-                pygame.draw.arc(self.screen, (240, 200, 80), arc_rect, start_ang, end_ang, max(3, int(self._grid_cell() * 0.06)))
-        except Exception:
-            pass
-
+ 
+        # NOTE: selection-slot hover progress is drawn by the launcher selection screen only.
+        # During gameplay we only draw game-level button hover arcs (tracked in self.button_hover).
         # game-level button hover arcs (follow finger)
         now = time.time()
         ACCENT = (240, 200, 80)
