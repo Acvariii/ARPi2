@@ -115,6 +115,10 @@ def run_pygame():
                 fingertip_points.append((sx, sy))
                 fingertip_meta.append({"pos": (sx, sy), "hand": hand_id, "name": name})
 
+        # --- Add mouse as a fingertip for ALL screens ---
+        mouse_pos = pygame.mouse.get_pos()
+        fingertip_meta.append({"pos": mouse_pos, "hand": -1, "name": "mouse"})
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
