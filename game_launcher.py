@@ -102,62 +102,80 @@ class PlayerSelection:
         self.positions = self.calculate_positions(screen.get_size())
         self.min_players = 2
         self.max_players = 8
-        self.hover_start = {}      # key -> start_time (key: "idx:x_y")
+        # hover keyed by (slot_idx, hand_id) so progress follows the same hand as it moves.
+        self.hover_start = {}      # key -> start_time, key format: "{idx}:{hand_id}"
+        self.hover_pos = {}        # key -> last (x,y) of that hand while hovering that slot
         self.toggle_cooldown = {}  # slot_idx -> last_toggle_time
 
     def calculate_positions(self, size):
         # 3 top, 3 bottom, left middle, right middle
         w, h = size
-        margin_x = int(w * 0.01)
-        margin_y = int(h * 0.01)
         positions = []
-        # three across top
+        # top three (x locations)
         for i in range(3):
             x = int((i + 0.5) * (w / 3))
             positions.append((x, 0))
-        # three across bottom
+        # bottom three
         for i in range(3):
             x = int((i + 0.5) * (w / 3))
             positions.append((x, h))
-        # left middle
+        # left middle, right middle
         positions.append((0, int(h / 2)))
-        # right middle
         positions.append((w, int(h / 2)))
         return positions
 
     def slot_rect(self, idx):
-        # All slots have the same dimensions and are flush to the corresponding edge.
+        # Top/bottom: wide, short. Sides: narrow, tall.
         w, h = self.screen.get_size()
-        slot_w = int(w * 0.28)   # same width for all slots
-        slot_h = int(h * 0.22)   # same height for all slots
+        top_slot_w = int(w / 3)      # each top/bottom slot spans 1/3 width
+        top_slot_h = int(h * 0.18)   # short height
+        side_slot_w = int(w * 0.14)  # narrower width
+        side_slot_h = int(h / 3)     # taller height
 
         x, y = self.positions[idx]
         # top row (y==0)
         if y == 0:
-            rect = pygame.Rect(x - slot_w // 2, 0, slot_w, slot_h)
+            rect = pygame.Rect(x - top_slot_w // 2, 0, top_slot_w, top_slot_h)
         # bottom row (y==h)
         elif y == h:
-            rect = pygame.Rect(x - slot_w // 2, h - slot_h, slot_w, slot_h)
-        # left side (x==0)
+            rect = pygame.Rect(x - top_slot_w // 2, h - top_slot_h, top_slot_w, top_slot_h)
+        # left side (x==0) - tall vertical rect hugging left edge
         elif x == 0:
-            rect = pygame.Rect(0, y - slot_h // 2, slot_w, slot_h)
-        # right side (x==w)
+            rect = pygame.Rect(0, y - side_slot_h // 2, side_slot_w, side_slot_h)
+        # right side (x==w) - tall vertical rect hugging right edge
         else:
-            rect = pygame.Rect(w - slot_w, y - slot_h // 2, slot_w, slot_h)
+            rect = pygame.Rect(w - side_slot_w, y - side_slot_h // 2, side_slot_w, side_slot_h)
         return rect
 
-    def update_with_fingertips(self, fingertip_points):
+    def update_with_fingertips(self, fingertip_meta):
+        """fingertip_meta: list of {'pos':(x,y), 'hand':hand_id}
+        Hover keys use (slot_idx, hand_id) so progress follows the same hand.
+        """
         now = time.time()
-        # for each slot, check fingertips inside and update per-(slot,finger) hover timers
-        for idx in range(len(self.positions)):
-            rect = self.slot_rect(idx)
-            inside = [p for p in fingertip_points if rect.collidepoint(p)]
-            if inside:
-                for p in inside:
-                    key = f"{idx}:{p[0]}_{p[1]}"
+        # build mapping from slot_idx -> list of (hand_id, pos)
+        slot_hits = {i: [] for i in range(len(self.positions))}
+        for meta in fingertip_meta:
+            px, py = meta["pos"]
+            hand = meta.get("hand", 0)
+            for idx in range(len(self.positions)):
+                rect = self.slot_rect(idx)
+                if rect.collidepoint((px, py)):
+                    slot_hits[idx].append((hand, (px, py)))
+
+        # update hover timers/positions per (slot,hand)
+        # Remove keys for slots/hands that are no longer hitting
+        active_keys = set()
+        for idx, hits in slot_hits.items():
+            if hits:
+                for hand, pos in hits:
+                    key = f"{idx}:{hand}"
+                    active_keys.add(key)
                     if key not in self.hover_start:
                         self.hover_start[key] = now
+                        self.hover_pos[key] = pos
                     else:
+                        # update last position so the progress indicator follows
+                        self.hover_pos[key] = pos
                         progress = (now - self.hover_start[key]) / HOVER_TIME_THRESHOLD
                         if progress >= 1.0:
                             last = self.toggle_cooldown.get(idx, 0)
@@ -166,23 +184,32 @@ class PlayerSelection:
                                 self.selected[idx] = not self.selected[idx]
                                 self.toggle_cooldown[idx] = now
                                 # clear hover entries for this slot to avoid immediate re-trigger
+                                # remove keys that start with "{idx}:":
                                 self.hover_start = {k: v for k, v in self.hover_start.items() if not k.startswith(f"{idx}:")}
+                                self.hover_pos = {k: v for k, v in self.hover_pos.items() if not k.startswith(f"{idx}:")}
             else:
-                # remove hover entries for this slot
-                self.hover_start = {k: v for k, v in self.hover_start.items() if not k.startswith(f"{idx}:")}
+                # no hits for this slot: we'll clear any hover keys related to this slot later
+                pass
+
+        # Clear hover keys that are no longer active (hand moved away)
+        keys_to_remove = [k for k in self.hover_start.keys() if k not in active_keys]
+        for k in keys_to_remove:
+            self.hover_start.pop(k, None)
+            self.hover_pos.pop(k, None)
 
     def get_hover_progress(self):
+        """Return list of {slot, pos, progress} using hover_pos so indicator follows hand."""
         now = time.time()
         out = []
         for key, start in list(self.hover_start.items()):
             try:
-                idx_str, coord = key.split(":")
+                idx_str, hand_str = key.split(":")
                 idx = int(idx_str)
-                x_str, y_str = coord.split("_")
-                px = int(x_str)
-                py = int(y_str)
+                pos = self.hover_pos.get(key)
+                if not pos:
+                    continue
                 progress = min(1.0, max(0.0, (now - start) / HOVER_TIME_THRESHOLD))
-                out.append({"slot": idx, "pos": (px, py), "progress": progress})
+                out.append({"slot": idx, "pos": pos, "progress": progress})
             except Exception:
                 continue
         return out
@@ -213,17 +240,23 @@ class PlayerSelection:
 
             # label rotated toward player
             label = font.render(f"P{idx+1}", True, WHITE)
-            # rotation: top players upside-down (180), bottom 0, left 90, right 270
-            angle = 0
+
+            # rotation per-slot so text faces the player at that edge
             x, y = pos
+            angle = 0
+            # top players (y==0) should read upside-down for players standing above table
             if y == 0:
                 angle = 180
+            # bottom players (y==h) read normally
             elif y == h:
                 angle = 0
+            # left side (index 6): rotate so it faces left-side player (use 270)
             elif x == 0:
-                angle = 90
-            else:
                 angle = 270
+            # right side (index 7): rotate so it faces right-side player (use 90)
+            else:
+                angle = 90
+
             lbl = pygame.transform.rotate(label, angle)
             lbl_rect = lbl.get_rect(center=rect.center)
             self.screen.blit(lbl, lbl_rect)
@@ -289,10 +322,8 @@ def run_pygame():
         screen.fill(DARK_BG)
 
         if state == "menu":
-            # nice backdrop panel
             panel = pygame.Rect(80, 60, WINDOW_SIZE[0] - 160, WINDOW_SIZE[1] - 120)
             pygame.draw.rect(screen, PANEL, panel, border_radius=14)
-            # headline
             title = pygame.font.SysFont(None, 64).render("Game Launcher", True, WHITE)
             screen.blit(title, (panel.centerx - title.get_width() // 2, panel.top + 24))
 
@@ -306,8 +337,8 @@ def run_pygame():
                 btn_blackjack.reset()
 
         elif state == "monopoly_select":
-            # Update selection logic (hover -> toggle)
-            selection.update_with_fingertips(fingertip_points)
+            # Update selection logic (hover -> toggle), pass fingertip_meta so hover keys track hand IDs
+            selection.update_with_fingertips(fingertip_meta)
             # Draw selection table and slots (fills entire screen)
             selection.draw()
 
@@ -315,7 +346,6 @@ def run_pygame():
             start_btn.draw(screen, fingertip_points)
             # only allow start if >= min players
             selected_count = sum(selection.selected)
-            # small helper label under the button
             label_small = pygame.font.SysFont(None, 26).render(f"{selected_count} players selected", True, WHITE)
             screen.blit(label_small, (start_btn.rect.centerx - label_small.get_width()//2, start_btn.rect.bottom + 8))
             if start_btn.clicked and selected_count >= selection.min_players:
@@ -323,7 +353,6 @@ def run_pygame():
                 start_btn.reset()
 
         else:
-            # placeholder for other game screens
             panel = pygame.Rect(80, 60, WINDOW_SIZE[0] - 160, WINDOW_SIZE[1] - 120)
             pygame.draw.rect(screen, PANEL, panel, border_radius=14)
             txt = font.render("Game screen (not implemented)", True, WHITE)
@@ -335,7 +364,7 @@ def run_pygame():
             px, py = h["pos"]
             progress = h["progress"]
             # position the indicator slightly offset from fingertip to avoid overlap
-            off_x, off_y = 24, -24
+            off_x, off_y = 28, -28
             arc_rect = pygame.Rect(px + off_x - 20, py + off_y - 20, 40, 40)
             start_ang = -math.pi / 2
             end_ang = start_ang + progress * 2 * math.pi
