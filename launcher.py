@@ -181,8 +181,11 @@ def run_pygame():
                 print("Starting Monopoly with players:", selected_count)
                 selected_indices = [i for i, s in enumerate(selection.selected) if s]
                 current_game = MonopolyGame(screen, lambda w, h: fingertip_meta)
-                current_game.selection_ui.selected = [s for s in selection.selected]
+                # Set selected players in both the game and its selection UI
                 current_game.players_selected = selected_indices
+                for i in range(8):
+                    current_game.selection_ui.selected[i] = (i in selected_indices)
+                # Set current to first selected player
                 current_game.current = selected_indices[0] if selected_indices else 0
                 state = "monopoly_playing"
                 start_btn.reset()
