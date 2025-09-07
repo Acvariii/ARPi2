@@ -205,20 +205,33 @@ class MonopolyGame:
     def _get_buy_prompt_button_rects(self, pid: int) -> Dict[str, pygame.Rect]:
         panel_rect = self.selection_ui.slot_rect(pid)
         angle = self._get_panel_orientation(pid)
-        is_vertical = angle in (90, 270)
         
-        grid_dims = (4, 12) if is_vertical else (12, 4)
-        
-        if is_vertical:
+        if angle == 0: # Bottom Player
+            grid_dims = (12, 4)
             return {
-                "yes": self._get_grid_rect(panel_rect, (0.5, 6, 3, 2.5), grid_dims),
-                "no": self._get_grid_rect(panel_rect, (0.5, 9, 3, 2.5), grid_dims)
+                "yes": self._get_grid_rect(panel_rect, (6.5, 1.5, 2.2, 1.5), grid_dims),
+                "no": self._get_grid_rect(panel_rect, (9, 1.5, 2.2, 1.5), grid_dims)
             }
-        else:
+        elif angle == 180: # Top Player
+            grid_dims = (12, 4)
             return {
-                "yes": self._get_grid_rect(panel_rect, (6.5, 1, 4, 1.2), grid_dims),
-                "no": self._get_grid_rect(panel_rect, (6.5, 2.5, 4, 1.2), grid_dims)
+                "yes": self._get_grid_rect(panel_rect, (3.5, 1, 2.2, 1.5), grid_dims),
+                "no": self._get_grid_rect(panel_rect, (1, 1, 2.2, 1.5), grid_dims)
             }
+        elif angle == 270: # Left Player
+            grid_dims = (4, 12)
+            return {
+                "yes": self._get_grid_rect(panel_rect, (0.75, 6, 2.5, 2.5), grid_dims),
+                "no": self._get_grid_rect(panel_rect, (0.75, 9, 2.5, 2.5), grid_dims)
+            }
+        elif angle == 90: # Right Player
+            grid_dims = (4, 12)
+            return {
+                "yes": self._get_grid_rect(panel_rect, (0.75, 3, 2.5, 2.5), grid_dims),
+                "no": self._get_grid_rect(panel_rect, (0.75, 0.5, 2.5, 2.5), grid_dims)
+            }
+        return {}
+
 
     def _advance_turn(self):
         if self.players_selected:
@@ -547,28 +560,26 @@ class MonopolyGame:
         angle = self._get_panel_orientation(pid)
         is_vertical = angle in (90, 270)
 
-        # Use a consistent logical grid
-        logical_grid_dims = (12, 8)
-        def get_logical_rect(grid_pos):
-            rect = panel_rect
-            if is_vertical:
-                rect = pygame.Rect(0, 0, panel_rect.height, panel_rect.width)
-            
-            gx, gy, gw, gh = grid_pos
-            cell_w = rect.width / logical_grid_dims[0]
-            cell_h = rect.height / logical_grid_dims[1]
-            return pygame.Rect(gx * cell_w, gy * cell_h, gw * cell_w, gh * cell_h)
-
+        # Create a surface to draw the un-rotated content onto
         content_w, content_h = (panel_rect.height, panel_rect.width) if is_vertical else (panel_rect.width, panel_rect.height)
         content_surface = pygame.Surface((content_w, content_h), pygame.SRCALPHA)
 
-        # --- Text Area (Left half of logical grid) ---
-        text_area = get_logical_rect((0.5, 1, 5, 6))
-        title_font = pygame.font.SysFont(None, max(16, int(text_area.height * 0.2)))
-        price_font = pygame.font.SysFont(None, max(14, int(text_area.height * 0.15)))
+        # Define layout based on orientation
+        if angle == 0: # Bottom
+            text_area = pygame.Rect(0, 0, content_w / 2, content_h)
+        elif angle == 180: # Top
+            text_area = pygame.Rect(content_w / 2, 0, content_w / 2, content_h)
+        elif angle == 270: # Left
+            text_area = pygame.Rect(0, 0, content_w, content_h / 2)
+        elif angle == 90: # Right
+            text_area = pygame.Rect(0, content_h / 2, content_w, content_h / 2)
+
+        # --- Draw Text ---
+        title_font = pygame.font.SysFont(None, max(16, int(text_area.height * 0.25)))
+        price_font = pygame.font.SysFont(None, max(14, int(text_area.height * 0.2)))
         
-        title_rect = pygame.Rect(text_area.x, text_area.y, text_area.width, text_area.height / 2)
-        price_rect = pygame.Rect(text_area.x, text_area.centery, text_area.width, text_area.height / 2)
+        title_rect = pygame.Rect(text_area.x, text_area.y, text_area.width, text_area.height * 0.6)
+        price_rect = pygame.Rect(text_area.x, text_area.y + text_area.height * 0.6, text_area.width, text_area.height * 0.4)
 
         title_text = f"Buy {prop['name']}?"
         price_text = f"Price: ${prop['price']}"
@@ -578,27 +589,32 @@ class MonopolyGame:
         words = title_text.split(' ')
         current_line = ""
         for word in words:
-            if title_font.size(current_line + " " + word)[0] < text_area.width * 0.95:
-                current_line += " " + word
+            test_line = (current_line + " " + word).strip()
+            if title_font.size(test_line)[0] < text_area.width * 0.9:
+                current_line = test_line
             else:
-                wrapped_lines.append(current_line.strip())
+                wrapped_lines.append(current_line)
                 current_line = word
-        wrapped_lines.append(current_line.strip())
+        wrapped_lines.append(current_line)
         
         line_h = title_font.get_linesize()
+        total_text_h = len(wrapped_lines) * line_h
+        start_y = title_rect.centery - total_text_h / 2
+
         for i, line in enumerate(wrapped_lines):
             line_surf = title_font.render(line, True, (255, 255, 255))
-            line_y = title_rect.centery - (len(wrapped_lines) * line_h / 2) + (i * line_h)
-            content_surface.blit(line_surf, line_surf.get_rect(centerx=title_rect.centerx, y=line_y))
+            content_surface.blit(line_surf, line_surf.get_rect(centerx=title_rect.centerx, y=start_y + i * line_h))
 
         price_surf = price_font.render(price_text, True, (200, 200, 200))
         content_surface.blit(price_surf, price_surf.get_rect(center=price_rect.center))
-
-        # --- Button Area (Right half of logical grid) ---
-        can_afford = self.buy_prompt["can_afford"]
-        btn_font = pygame.font.SysFont(None, max(14, int(content_h * 0.15)))
         
-        # We still need screen-space rects for collision detection
+        # --- Rotate and Blit the text content ---
+        final_text_surface = pygame.transform.rotate(content_surface, angle)
+        self.screen.blit(final_text_surface, final_text_surface.get_rect(center=panel_rect.center))
+
+        # --- Draw Buttons (always in screen space) ---
+        can_afford = self.buy_prompt["can_afford"]
+        btn_font = pygame.font.SysFont(None, max(14, int(panel_rect.height * 0.2)))
         button_rects_screen = self._get_buy_prompt_button_rects(pid)
 
         for name, screen_rect in button_rects_screen.items():
@@ -610,10 +626,6 @@ class MonopolyGame:
             pygame.draw.rect(self.screen, (10,10,10), screen_rect.move(4,6), border_radius=12)
             pygame.draw.rect(self.screen, color, screen_rect, border_radius=12)
             self._draw_rotated_text(name.capitalize(), btn_font, txt_color, screen_rect.center, angle)
-
-        # --- Rotate and Blit the text content ---
-        final_text_surface = pygame.transform.rotate(content_surface, angle)
-        self.screen.blit(final_text_surface, final_text_surface.get_rect(center=panel_rect.center))
 
         now = time.time()
         for key, start_time in list(self.buy_prompt_hover.items()):
