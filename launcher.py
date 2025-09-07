@@ -76,7 +76,6 @@ def run_pygame():
     clock = pygame.time.Clock()
     font = pygame.font.SysFont(None, max(32, int(WINDOW_SIZE[1]*0.05)))
 
-    # selection UI instance (used in both selection and in-game for cursors/progress)
     selection = PlayerSelection(screen)
 
     # Game selection screen
@@ -85,6 +84,10 @@ def run_pygame():
     for i, game in enumerate(games):
         btn_rect = pygame.Rect(WINDOW_SIZE[0]//2 - 150, WINDOW_SIZE[1]//2 - 60 + i*120, 300, 90)
         buttons.append(HoverButton(btn_rect, game, font))
+
+    # Persist the Start button instance across frames
+    start_btn_rect = pygame.Rect(WINDOW_SIZE[0]//2-140, WINDOW_SIZE[1]//2-45, 280, 90)
+    start_btn = HoverButton(start_btn_rect, "Start", font)
 
     state = "menu"
     selected_game = None
@@ -159,8 +162,7 @@ def run_pygame():
                 off_x, off_y = 28, -28
                 draw_circular_progress(screen, (px+off_x, py+off_y), 20, progress, ACCENT, thickness=6)
 
-            # Start button logic
-            start_btn = HoverButton(pygame.Rect(WINDOW_SIZE[0]//2-140, WINDOW_SIZE[1]//2-45, 280, 90), "Start", font)
+            # Use persistent Start button instance
             start_btn.draw(screen, fingertip_meta, enabled=sum(selection.selected) >= 2)
             # Draw circular progress for start button
             for meta in fingertip_meta:
