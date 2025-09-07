@@ -122,30 +122,32 @@ class MonopolyGame:
     def _space_rect_for(self, idx: int) -> pygame.Rect:
         board = self._compute_board_rect()
         cell = self._grid_cell()
+        long_side = cell * 1.6
         gx, gy = self._index_to_grid(idx)
+
         is_corner = (gx in (0, 10) and gy in (0, 10))
-        is_horizontal = (gy == 0 or gy == 10) and not is_corner
-        
-        width = cell * 2 if is_corner else (cell if is_horizontal else cell * 2)
-        height = cell * 2 if is_corner else (cell * 2 if is_horizontal else cell)
-        
+
         if is_corner:
-            width, height = cell, cell
-        elif is_horizontal:
-            width, height = cell, cell * 1.6
-        else: # vertical
-            width, height = cell * 1.6, cell
-
-        left = board.left + gx * cell
-        top = board.top + gy * cell
-
-        # Adjust for non-square cells
-        if gy == 10 and not is_corner: # bottom row
-            top -= (height - cell)
-        if gx == 0 and not is_corner: # left row
-            left += (cell - width)
-
-        return pygame.Rect(int(round(left)), int(round(top)), int(math.ceil(width)), int(math.ceil(height)))
+            left = board.left + gx * cell
+            top = board.top + gy * cell
+            return pygame.Rect(left, top, cell, cell)
+        
+        if gy == 10:  # Bottom row
+            left = board.left + gx * cell
+            top = board.top + 10 * cell
+            return pygame.Rect(left, top, cell, long_side)
+        elif gx == 0:  # Left row
+            left = board.left
+            top = board.top + gy * cell
+            return pygame.Rect(left, top, long_side, cell)
+        elif gy == 0:  # Top row
+            left = board.left + gx * cell
+            top = board.top
+            return pygame.Rect(left, top, cell, long_side)
+        else:  # Right row (gx == 10)
+            left = board.left + 10 * cell
+            top = board.top + gy * cell
+            return pygame.Rect(left, top, long_side, cell)
 
     def _space_coords_for(self, idx: int) -> Tuple[int, int]:
         r = self._space_rect_for(idx)
@@ -203,7 +205,7 @@ class MonopolyGame:
                                         self.popup_hover.pop(k, None)
                     else:
                         if key in self.popup_hover:
-                            self.popup_hover.pop(key, None)
+                            self.popup_hover.pop(k, None)
                 continue
 
             rects = self._player_button_rects(pid)
@@ -334,11 +336,12 @@ class MonopolyGame:
         color = (0, 0, 0)
 
         is_vertical = angle in (90, 270)
-        wrap_width = rect.height if is_vertical else rect.width
-        wrap_height = rect.width if is_vertical else rect.height
+        wrap_width = rect.height - pad * 2 if is_vertical else rect.width - pad * 2
+        wrap_height = rect.width - pad * 2 if is_vertical else rect.height - pad * 2
         
         lines = []
         best_font = pygame.freetype.SysFont(font_name, 8)
+        
         for font_size in range(20, 7, -1):
             font = pygame.freetype.SysFont(font_name, font_size)
             
@@ -347,7 +350,7 @@ class MonopolyGame:
             current_line = ""
             for word in words:
                 test_line = current_line + (" " if current_line else "") + word
-                if font.get_rect(test_line).width > wrap_width - pad * 2:
+                if font.get_rect(test_line).width > wrap_width:
                     if current_line: current_lines.append(current_line)
                     current_line = word
                 else:
@@ -357,13 +360,13 @@ class MonopolyGame:
             line_height = font.get_sized_height()
             total_height = len(current_lines) * line_height
             
-            if total_height <= wrap_height - pad * 2:
+            if total_height <= wrap_height:
                 lines = current_lines
                 best_font = font
                 break
         
         if not lines:
-            lines = text.split(' ')
+            lines = text.split(' ')[:2] # Fallback
 
         line_height = best_font.get_sized_height()
         text_surf_height = len(lines) * line_height
@@ -388,16 +391,16 @@ class MonopolyGame:
         sw, sh = self.screen.get_size()
         pygame.draw.rect(self.screen, (20, 80, 30), pygame.Rect(0, 0, sw, sh))
         board_rect = self._compute_board_rect()
-        pygame.draw.rect(self.screen, (200, 200, 200), board_rect, width=max(2, int(sw * 0.002)), border_radius=8)
-        inner = board_rect.inflate(-max(8, int(sw * 0.01)), -max(8, int(sh * 0.01)))
-        pygame.draw.rect(self.screen, (24, 24, 24), inner, border_radius=6)
+        pygame.draw.rect(self.screen, (200, 225, 210), board_rect)
+        
+        inner_rect = board_rect.inflate(-self._grid_cell()*1.6, -self._grid_cell()*1.6)
+        pygame.draw.rect(self.screen, (24, 24, 24), inner_rect, border_radius=6)
 
         for idx, spec in enumerate(self.properties):
             r = self._space_rect_for(idx)
             
-            color_bg = (200, 225, 210)
-            pygame.draw.rect(self.screen, color_bg, r, border_radius=3)
-            pygame.draw.rect(self.screen, (0,0,0), r, width=1, border_radius=3)
+            pygame.draw.rect(self.screen, (200, 225, 210), r)
+            pygame.draw.rect(self.screen, (0,0,0), r, width=1)
 
             gcolor = spec.get("color")
             gx, gy = self._index_to_grid(idx)
@@ -414,7 +417,7 @@ class MonopolyGame:
                     bar = pygame.Rect(r.left, r.bottom - thickness, r.width, thickness)
                 else: # Right
                     bar = pygame.Rect(r.left, r.top, thickness, r.height)
-                pygame.draw.rect(self.screen, gcolor, bar, border_radius=2)
+                pygame.draw.rect(self.screen, gcolor, bar)
 
             name = spec.get("name", "")
             
