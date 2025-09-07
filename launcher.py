@@ -8,6 +8,7 @@ from monopoly import MonopolyGame
 WINDOW_SIZE = (1280, 720)
 FPS = 60
 MENU_LOCKOUT_SECONDS = 0.6  # ignore menu clicks for this period after startup
+SELECTION_LOCKOUT_SECONDS = 0.35  # brief lockout when entering selection screen
 
 def run_launcher():
     pygame.init()
@@ -21,6 +22,7 @@ def run_launcher():
 
     # ignore menu clicks for a short time on startup to avoid accidental auto-advance
     menu_lockout_until = time.time() + MENU_LOCKOUT_SECONDS
+    selection_lockout_until = 0.0
 
     # UI elements
     center = (WINDOW_SIZE[0]//2, WINDOW_SIZE[1]//2)
@@ -52,13 +54,19 @@ def run_launcher():
             title = pygame.font.SysFont(None, 64).render("Game Launcher", True, (255,255,255))
             screen.blit(title, (panel.centerx - title.get_width()//2, panel.top + 24))
 
+            # draw menu buttons
             btn_monopoly.draw(screen, fingertip_points)
             btn_blackjack.draw(screen, fingertip_points)
             # show slot previews (non-interactive preview)
             selection_ui.draw_slots()
 
             # only accept menu clicks after the initial lockout to avoid auto-advance
-            if time.time() > menu_lockout_until:
+            # while still in the lockout period, clear menu button hover state every frame
+            # so no stale hover timers cause immediate clicks
+            if time.time() <= menu_lockout_until:
+                btn_monopoly.reset()
+                btn_blackjack.reset()
+            else:
                 if btn_monopoly.clicked:
                     # reset hover state for selection screen to avoid immediate toggles
                     selection_ui.hover_start.clear()
@@ -66,19 +74,23 @@ def run_launcher():
                     start_btn.reset()
                     back_btn.reset()
                     btn_monopoly.reset()
+                    # set a short lockout so selection doesn't immediately toggle
+                    selection_lockout_until = time.time() + SELECTION_LOCKOUT_SECONDS
                     state = "monopoly_select"
                 if btn_blackjack.clicked:
                     btn_blackjack.reset()
                     state = "blackjack"
 
         elif state == "monopoly_select":
-            # Player selection screen: update selection via hover, show progress, show Start
-            selection_ui.update_with_fingertips(fingertip_meta)
+            # Player selection screen: briefly ignore selection updates if we just entered
+            if time.time() > selection_lockout_until:
+                selection_ui.update_with_fingertips(fingertip_meta)
+            # always draw slots
             selection_ui.draw_slots()
- 
+
             # draw monopoly preview under selection
             monopoly_game.draw_board()
- 
+
             # Draw and handle Start button
             selected_count = selection_ui.selected_count()
             start_enabled = (selected_count >= selection_ui.min_players)
@@ -87,11 +99,12 @@ def run_launcher():
             if back_btn.clicked:
                 state = "menu"
                 back_btn.reset()
- 
+
             # draw Start (disabled until enough players)
             # draw start after board to ensure visibility; pass enabled flag
+            # draw it last (just before hover indicators) so it's clearly visible
             start_btn.draw(screen, fingertip_points, enabled=start_enabled)
- 
+
             # only allow starting when enough players selected
             hint_font = pygame.font.SysFont(None, 22)
             hint = hint_font.render(f"{selected_count} selected (min {selection_ui.min_players})", True, (200,200,200))
