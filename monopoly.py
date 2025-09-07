@@ -226,12 +226,13 @@ class MonopolyGame:
                         else:
                             if (now - self.popup_hover[key]) >= HOVER_TIME_THRESHOLD:
                                 self.properties_open[pid] = False
-                                for k in list(self.popup_hover.keys()):
-                                    if k.startswith(f"popup:{pid}:"):
-                                        self.popup_hover.pop(k, None)
+                                # Clear all hover keys for this player's popup
+                                for k_to_remove in [k for k in self.popup_hover if k.startswith(f"popup:{pid}:")]:
+                                    self.popup_hover.pop(k_to_remove, None)
                     else:
+                        # If the key for this hand exists, remove it
                         if key in self.popup_hover:
-                            self.popup_hover.pop(k, None)
+                            self.popup_hover.pop(key, None)
                 continue
 
             rects = self._player_button_rects(pid)
