@@ -26,14 +26,31 @@ class HoverButton:
         self.clicked = False
         self.radius = radius
 
-    def draw(self, surf: pygame.Surface, fingertip_points: List[Tuple[int, int]]):
-        mouse_near = any(self.rect.collidepoint(p) for p in fingertip_points)
-        color = (100, 180, 250) if mouse_near else (60, 120, 200)
+    def draw(self, surf: pygame.Surface, fingertip_points: List[Tuple[int, int]], enabled: bool = True):
+        """
+        Draw the button. If enabled is False the button is drawn in a disabled style and
+        hovering will not trigger clicks.
+        """
+        mouse_near = any(self.rect.collidepoint(p) for p in fingertip_points) if enabled else False
+        if not enabled:
+            color = (80, 80, 80)               # disabled background
+            txt_color = (160, 160, 160)        # disabled text
+        else:
+            color = (100, 180, 250) if mouse_near else (60, 120, 200)
+            txt_color = (255, 255, 255)
+
+        # shadow
         shadow_rect = self.rect.move(4, 6)
         pygame.draw.rect(surf, (10, 10, 10), shadow_rect, border_radius=self.radius)
         pygame.draw.rect(surf, color, self.rect, border_radius=self.radius)
-        txt = self.font.render(self.text, True, (255, 255, 255))
+        txt = self.font.render(self.text, True, txt_color)
         surf.blit(txt, txt.get_rect(center=self.rect.center))
+
+        # only update hover timers when enabled
+        if not enabled:
+            # clear any hover timers so no stale keys remain
+            self.hover_start.clear()
+            return
 
         now = time.time()
         for p in fingertip_points:
@@ -62,6 +79,7 @@ class PlayerSelectionUI:
         self.hover_start: Dict[str, float] = {}
         self.hover_pos: Dict[str, Tuple[int, int]] = {}
         self.toggle_cooldown: Dict[int, float] = {}
+        self.min_players = 2  # minimum players required to start
 
     def _calculate_positions(self, size: Tuple[int, int]) -> List[Tuple[int, int]]:
         w, h = size
@@ -195,3 +213,7 @@ class PlayerSelectionUI:
                 min_d = d
                 idx_min = i
         return PLAYER_COLORS[idx_min]
+
+    def selected_count(self) -> int:
+        """Return number of currently selected players."""
+        return sum(1 for s in self.selected if s)

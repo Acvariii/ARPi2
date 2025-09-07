@@ -22,6 +22,9 @@ def run_launcher():
     center = (WINDOW_SIZE[0]//2, WINDOW_SIZE[1]//2)
     btn_monopoly = HoverButton((center[0]-320, center[1]-70, 280, 90), "Monopoly", font)
     btn_blackjack = HoverButton((center[0]+40, center[1]-70, 280, 90), "Blackjack", font)
+    # Start and Back buttons used on player selection screen
+    start_btn = HoverButton((center[0]-140, center[1]-45, 280, 90), "Start", font)
+    back_btn = HoverButton((20, 20, 120, 48), "Back", pygame.font.SysFont(None, 28), radius=10)
 
     state = "menu"
     selection_ui = PlayerSelectionUI(screen)
@@ -47,23 +50,47 @@ def run_launcher():
 
             btn_monopoly.draw(screen, fingertip_points)
             btn_blackjack.draw(screen, fingertip_points)
-            # show slot previews fill screen
+            # show slot previews (non-interactive preview)
             selection_ui.draw_slots()
 
             if btn_monopoly.clicked:
-                state = "monopoly"
+                state = "monopoly_select"
                 btn_monopoly.reset()
             if btn_blackjack.clicked:
                 state = "blackjack"
                 btn_blackjack.reset()
 
-        elif state == "monopoly":
-            # ensure selection UI updates (players selection persists)
+        elif state == "monopoly_select":
+            # Player selection screen: update selection via hover, show progress, show Start
             selection_ui.update_with_fingertips(fingertip_meta)
             selection_ui.draw_slots()
-            # update and draw monopoly board
-            monopoly_game.update(fingertip_meta)
-            monopoly_game.draw()
+
+            # draw monopoly preview under selection
+            monopoly_game.draw_board()
+
+            # Draw and handle Start button
+            selected_count = selection_ui.selected_count()
+            start_enabled = (selected_count >= selection_ui.min_players)
+            # draw Back button
+            back_btn.draw(screen, fingertip_points)
+            if back_btn.clicked:
+                state = "menu"
+                back_btn.reset()
+
+            # draw Start (disabled until enough players)
+            start_btn.draw(screen, fingertip_points, enabled=start_enabled)
+
+            # only allow starting when enough players selected
+            hint_font = pygame.font.SysFont(None, 22)
+            hint = hint_font.render(f"{selected_count} selected (min {selection_ui.min_players})", True, (200,200,200))
+            screen.blit(hint, (start_btn.rect.centerx - hint.get_width()//2, start_btn.rect.bottom + 8))
+            if start_btn.clicked and start_enabled:
+                # assign selection state to the game and transition to playing
+                monopoly_game.selection_ui = selection_ui
+                monopoly_game.players_selected = [i for i, s in enumerate(selection_ui.selected) if s]
+                monopoly_game.started = True
+                state = "monopoly_playing"
+                start_btn.reset()
 
             # hover progress indicators from selection_ui
             hover_list = selection_ui.get_hover_progress()
@@ -76,6 +103,11 @@ def run_launcher():
                 end_ang = start_ang + prog * 2 * 3.1415
                 pygame.draw.circle(screen, (60,60,60), arc_rect.center, 20)
                 pygame.draw.arc(screen, (240,200,80), arc_rect, start_ang, end_ang, 6)
+
+        elif state == "monopoly_playing":
+            # Running game: update & draw game logic; selection UI remains for reference (no selection updates)
+            monopoly_game.update(fingertip_meta)
+            monopoly_game.draw()
 
         else:
             txt = font.render("Other game (not implemented)", True, (255,255,255))
