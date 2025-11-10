@@ -134,7 +134,7 @@ class Player:
     def get_total_houses(self, all_properties: List[Property]) -> int:
         """Count total houses owned."""
         return sum(all_properties[idx].houses for idx in self.properties 
-                if all_properties[idx].houses < 5)
+                   if all_properties[idx].houses < 5)
     
     def get_total_hotels(self, all_properties: List[Property]) -> int:
         """Count total hotels owned."""
@@ -150,7 +150,8 @@ class MonopolyGame:
         self.screen_size = screen.get_size()
         
         # Game state
-        self.properties = [Property(data) for data in BOARD_SPACES]
+        self.properties = [Property(data) if data else Property({"name": "", "type": "none"}) 
+                        for data in BOARD_SPACES]
         self.players = [Player(i, PLAYER_COLORS[i]) for i in range(8)]
         self.active_players: List[int] = []  # Indices of players in game
         self.current_player_idx = 0
@@ -158,7 +159,6 @@ class MonopolyGame:
         # UI
         self.panels = calculate_all_panels(self.screen_size)
         self.buttons: Dict[int, Dict[str, HoverButton]] = {}
-        self._init_buttons()
         
         # Game flow
         self.phase = "roll"  # "roll", "moving", "landed", "buying", "paying_rent"
@@ -175,33 +175,65 @@ class MonopolyGame:
         
         # Board geometry
         self._calculate_board_geometry()
+        
+        # Initialize buttons after geometry is set
+        self._init_buttons()
+    
+    def _calculate_board_geometry(self):
+        """Calculate board layout with proper spacing."""
+        w, h = self.screen_size
+        
+        # Panel sizes
+        horizontal_panel_height = int(h * 0.10)
+        vertical_panel_width = int(w * 0.12)
+        
+        # Board takes remaining space in center
+        available_width = w - (2 * vertical_panel_width)
+        available_height = h - (2 * horizontal_panel_height)
+        
+        # Make board square, using smaller dimension
+        board_size = min(available_width, available_height)
+        
+        # Center the board
+        board_x = vertical_panel_width + (available_width - board_size) // 2
+        board_y = horizontal_panel_height + (available_height - board_size) // 2
+        
+        self.board_rect = pygame.Rect(board_x, board_y, board_size, board_size)
+        self.space_size = board_size // 11  # 11 spaces per side (including corners)
     
     def _init_buttons(self):
-        """Initialize player panel buttons."""
+        """Initialize player panel buttons with proper sizing."""
         for panel in self.panels:
             player_idx = panel.player_idx
+            font_size = 24 if panel.is_vertical() else 28
+            button_font = pygame.font.SysFont(None, font_size)
             
-            # Action button (Roll/End Turn)
-            action_rect = panel.get_grid_rect(0.5, 0.5, 3, 1.5)
+            if panel.is_vertical():
+                # Vertical panels - stack buttons vertically
+                action_rect = panel.get_grid_rect(0.5, 2, 3, 2, 4, 12)
+                props_rect = panel.get_grid_rect(0.5, 5, 3, 2, 4, 12)
+                build_rect = panel.get_grid_rect(0.5, 8, 3, 2, 4, 12)
+            else:
+                # Horizontal panels - arrange buttons horizontally
+                action_rect = panel.get_grid_rect(1, 1, 3, 2, 12, 4)
+                props_rect = panel.get_grid_rect(4.5, 1, 3, 2, 12, 4)
+                build_rect = panel.get_grid_rect(8, 1, 3, 2, 12, 4)
+            
             action_btn = HoverButton(
                 action_rect, "Roll", 
-                pygame.font.SysFont(None, 32),
+                button_font,
                 orientation=panel.orientation
             )
             
-            # Properties button
-            props_rect = panel.get_grid_rect(0.5, 2.5, 3, 1.5)
             props_btn = HoverButton(
                 props_rect, "Props",
-                pygame.font.SysFont(None, 28),
+                button_font,
                 orientation=panel.orientation
             )
             
-            # Build/Sell button
-            build_rect = panel.get_grid_rect(0.5, 4.5, 3, 1.5)
             build_btn = HoverButton(
                 build_rect, "Build",
-                pygame.font.SysFont(None, 28),
+                button_font,
                 orientation=panel.orientation
             )
             
@@ -210,21 +242,6 @@ class MonopolyGame:
                 "props": props_btn,
                 "build": build_btn
             }
-    
-    def _calculate_board_geometry(self):
-        """Calculate board layout."""
-        w, h = self.screen_size
-        
-        # Board is in center, leaving room for player panels
-        margin_x = int(w * 0.15)
-        margin_y = int(h * 0.15)
-        
-        board_size = min(w - 2 * margin_x, h - 2 * margin_y)
-        board_x = (w - board_size) // 2
-        board_y = (h - board_size) // 2
-        
-        self.board_rect = pygame.Rect(board_x, board_y, board_size, board_size)
-        self.space_size = board_size // 11  # 11 spaces per side (including corners)
     
     def start_game(self, player_indices: List[int]):
         """Start game with selected players."""
@@ -299,7 +316,7 @@ class MonopolyGame:
             player.add_money(PASSING_GO_MONEY)
             self.phase = "roll"
             
-        elif space_type == "property" or space_type == "railroad" or space_type == "utility":
+        elif space_type in ("property", "railroad", "utility"):
             if space.owner is None:
                 # Unowned property - offer to buy
                 self.phase = "buying"
@@ -347,14 +364,29 @@ class MonopolyGame:
             "price": price
         }
         
-        # Create Yes/No buttons
-        panel = self.panels[player.idx]
-        yes_rect = panel.get_grid_rect(1, 5, 1.5, 1)
-        no_rect = panel.get_grid_rect(5.5, 5, 1.5, 1)
+        # Create Yes/No buttons centered in board
+        center_x = self.board_rect.centerx
+        center_y = self.board_rect.centery
+        button_width = 120
+        button_height = 50
+        button_spacing = 20
+        
+        yes_rect = pygame.Rect(
+            center_x - button_width - button_spacing // 2,
+            center_y + 40,
+            button_width,
+            button_height
+        )
+        no_rect = pygame.Rect(
+            center_x + button_spacing // 2,
+            center_y + 40,
+            button_width,
+            button_height
+        )
         
         self.popup_buttons = [
-            HoverButton(yes_rect, "Buy", pygame.font.SysFont(None, 28), orientation=panel.orientation),
-            HoverButton(no_rect, "Pass", pygame.font.SysFont(None, 28), orientation=panel.orientation)
+            HoverButton(yes_rect, "Buy", pygame.font.SysFont(None, 32)),
+            HoverButton(no_rect, "Pass", pygame.font.SysFont(None, 32))
         ]
     
     def _buy_property(self, player: Player, position: int):
@@ -485,9 +517,14 @@ class MonopolyGame:
                 current_player.move_path = []
                 self.land_on_space(current_player)
         
-        # Update buttons
-        for player_idx in self.active_players:
+        # Update buttons for ALL players (active and inactive)
+        for player_idx in range(8):
             player = self.players[player_idx]
+            is_active = player_idx in self.active_players
+            
+            if not is_active:
+                continue
+            
             if player.is_bankrupt:
                 continue
             
@@ -595,14 +632,17 @@ class MonopolyGame:
     
     def draw(self):
         """Draw the game."""
+        # Draw background
+        self.screen.fill((32, 96, 36))
+        
+        # Draw ALL player panels (even inactive ones, just dimmed)
+        self._draw_all_panels()
+        
         # Draw board
         self._draw_board()
         
         # Draw player tokens
         self._draw_tokens()
-        
-        # Draw player panels
-        self._draw_panels()
         
         # Draw dice
         if self.dice_rolling or self.dice_values != (0, 0):
@@ -613,35 +653,92 @@ class MonopolyGame:
             self._draw_popup()
         
         # Draw cursors
-        fingertips = self.get_fingertips(*self.screen_size)
-        for meta in fingertips:
-            pos = meta["pos"]
-            # Find closest player color
-            min_dist = float('inf')
-            closest_color = Colors.WHITE
-            for panel in self.panels:
-                center = panel.rect.center
-                dist = math.sqrt((pos[0] - center[0])**2 + (pos[1] - center[1])**2)
-                if dist < min_dist:
-                    min_dist = dist
-                    closest_color = panel.color
+        self._draw_cursors()
+    
+    def _draw_all_panels(self):
+        """Draw all 8 player panels, highlighting active players."""
+        current_player_idx = self.active_players[self.current_player_idx] if self.active_players else -1
+        
+        for idx in range(8):
+            player = self.players[idx]
+            panel = self.panels[idx]
+            is_active = idx in self.active_players
+            is_current = (idx == current_player_idx)
             
-            # Draw cursor
-            pygame.draw.circle(self.screen, Colors.WHITE, pos, 20)
-            pygame.draw.circle(self.screen, closest_color, pos, 14)
-            pygame.draw.circle(self.screen, Colors.BLACK, pos, 4)
+            # Draw panel background (dimmed if not active)
+            if is_active and not player.is_bankrupt:
+                panel.draw_background(self.screen, is_current)
+            else:
+                # Draw dimmed panel for inactive players
+                washed = tuple(min(255, int(c * 0.3 + 60 * 0.7)) for c in panel.color)
+                pygame.draw.rect(self.screen, washed, panel.rect, border_radius=8)
+                pygame.draw.rect(self.screen, (40, 40, 40), panel.rect, width=1, border_radius=8)
+            
+            # Only draw content for active players
+            if is_active and not player.is_bankrupt:
+                # Draw player info (money, properties)
+                if panel.is_vertical():
+                    info_rect = panel.get_grid_rect(0.5, 0.5, 3, 1.5, 4, 12)
+                else:
+                    info_rect = panel.get_grid_rect(0.5, 0.2, 2, 0.8, 12, 4)
+                
+                font_size = 18 if panel.is_vertical() else 20
+                font = pygame.font.SysFont(None, font_size)
+                
+                money_text = f"${player.money}"
+                props_text = f"{len(player.properties)}p"
+                
+                if panel.is_vertical():
+                    RotatedText.draw(self.screen, money_text, font, Colors.BLACK,
+                                (info_rect.centerx, info_rect.centery - 10), panel.orientation)
+                    RotatedText.draw(self.screen, props_text, font, Colors.BLACK,
+                                (info_rect.centerx, info_rect.centery + 10), panel.orientation)
+                else:
+                    combined = f"{money_text} | {props_text}"
+                    RotatedText.draw(self.screen, combined, font, Colors.BLACK,
+                                (info_rect.centerx, info_rect.centery), panel.orientation)
+                
+                # Draw buttons
+                for btn in self.buttons[idx].values():
+                    btn.draw(self.screen)
+                    
+                    # Draw hover progress
+                    for progress_info in btn.get_hover_progress():
+                        center_x = progress_info["rect"].centerx + 20
+                        center_y = progress_info["rect"].top - 20
+                        draw_circular_progress(
+                            self.screen, (center_x, center_y), 16,
+                            progress_info["progress"], Colors.ACCENT, thickness=4
+                        )
+            else:
+                # Draw player number for inactive slots
+                font = pygame.font.SysFont(None, 36)
+                label = f"P{idx + 1}"
+                text_surf = font.render(label, True, (100, 100, 100))
+                if panel.orientation != 0:
+                    text_surf = pygame.transform.rotate(text_surf, panel.orientation)
+                text_rect = text_surf.get_rect(center=panel.rect.center)
+                self.screen.blit(text_surf, text_rect)
     
     def _draw_board(self):
         """Draw the Monopoly board."""
         # Board background
-        pygame.draw.rect(self.screen, (200, 220, 200), self.board_rect)
+        pygame.draw.rect(self.screen, (220, 240, 220), self.board_rect)
+        pygame.draw.rect(self.screen, Colors.BLACK, self.board_rect, 3)
         
-        # Center area
+        # Center area with Monopoly logo
         center_size = self.space_size * 9
         center_x = self.board_rect.x + self.space_size
         center_y = self.board_rect.y + self.space_size
         center_rect = pygame.Rect(center_x, center_y, center_size, center_size)
-        pygame.draw.rect(self.screen, (220, 240, 220), center_rect)
+        pygame.draw.rect(self.screen, (240, 250, 240), center_rect)
+        pygame.draw.rect(self.screen, Colors.BLACK, center_rect, 2)
+        
+        # Draw "MONOPOLY" in center
+        font = pygame.font.SysFont(None, int(center_size * 0.15), bold=True)
+        text = font.render("MONOPOLY", True, (180, 40, 40))
+        text_rect = text.get_rect(center=center_rect.center)
+        self.screen.blit(text, text_rect)
         
         # Draw spaces
         for i in range(40):
@@ -649,57 +746,63 @@ class MonopolyGame:
     
     def _draw_space(self, idx: int):
         """Draw a single board space."""
+        if idx >= len(self.properties):
+            return
+            
         space = self.properties[idx]
+        if space.data.get("type") == "none":
+            return
+            
         x, y = self._get_space_position(idx)
         
         # Determine if corner
         is_corner = idx in (0, 10, 20, 30)
-        size = self.space_size * 1.5 if is_corner else self.space_size
+        size = int(self.space_size * 1.4) if is_corner else self.space_size
         
         rect = pygame.Rect(x - size//2, y - size//2, size, size)
         
         # Draw space background
         space_type = space.data.get("type")
         if space_type in ("property", "railroad", "utility"):
+            # Color strip at top
             color = space.data.get("color", (200, 200, 200))
-            pygame.draw.rect(self.screen, color, rect)
-            pygame.draw.rect(self.screen, Colors.BLACK, rect, 2)
+            strip_height = size // 4
+            strip_rect = pygame.Rect(rect.x, rect.y, rect.width, strip_height)
+            pygame.draw.rect(self.screen, color, strip_rect)
+            
+            # White background
+            main_rect = pygame.Rect(rect.x, rect.y + strip_height, rect.width, rect.height - strip_height)
+            pygame.draw.rect(self.screen, Colors.WHITE, main_rect)
+            pygame.draw.rect(self.screen, Colors.BLACK, rect, 1)
             
             # Draw houses/hotel
-            if space.houses > 0:
-                house_size = size // 6
-                for h in range(min(space.houses, 4)):
-                    house_x = x - size//2 + house_size + h * (house_size + 2)
-                    house_y = y - size//2 + 4
+            if space.houses > 0 and space_type == "property":
+                house_size = max(4, size // 8)
+                num_houses = min(space.houses, 4)
+                for h in range(num_houses):
+                    house_x = rect.x + 2 + h * (house_size + 1)
+                    house_y = rect.y + 2
                     house_rect = pygame.Rect(house_x, house_y, house_size, house_size)
                     house_color = (200, 0, 0) if space.houses == 5 else (0, 150, 0)
                     pygame.draw.rect(self.screen, house_color, house_rect)
         else:
-            pygame.draw.rect(self.screen, (230, 230, 230), rect)
+            # Special spaces
+            bg_color = (240, 240, 230)
+            pygame.draw.rect(self.screen, bg_color, rect)
             pygame.draw.rect(self.screen, Colors.BLACK, rect, 2)
         
-        # Draw space name
+        # Draw space name (smaller font)
         name = space.data.get("name", "")
-        font = pygame.font.SysFont(None, 14)
-        
-        # Word wrap for long names
-        words = name.split()
-        lines = []
-        current_line = ""
-        for word in words:
-            test = f"{current_line} {word}".strip()
-            if font.size(test)[0] < size - 4:
-                current_line = test
-            else:
-                if current_line:
-                    lines.append(current_line)
-                current_line = word
-        if current_line:
-            lines.append(current_line)
-        
-        for i, line in enumerate(lines[:2]):  # Max 2 lines
-            text_surf = font.render(line, True, Colors.BLACK)
-            text_rect = text_surf.get_rect(center=(x, y + (i - 0.5) * 12))
+        if name and not is_corner:
+            font_size = max(8, size // 8)
+            font = pygame.font.SysFont(None, font_size)
+            
+            # Truncate if too long
+            if len(name) > 12:
+                name = name[:10] + ".."
+            
+            text_surf = font.render(name, True, Colors.BLACK)
+            text_rect = text_surf.get_rect(center=(x, y + size // 4))
             self.screen.blit(text_surf, text_rect)
     
     def _draw_tokens(self):
@@ -740,77 +843,37 @@ class MonopolyGame:
                     y -= int(bounce)
                     
                     # Draw moving token
-                    pygame.draw.circle(self.screen, Colors.BLACK, (x+2, y+3), 18)
-                    pygame.draw.circle(self.screen, player.color, (x, y), 15)
+                    pygame.draw.circle(self.screen, Colors.BLACK, (x+2, y+3), 12)
+                    pygame.draw.circle(self.screen, player.color, (x, y), 10)
                     continue
             
             positions.setdefault(player.position, []).append(player)
         
         # Draw stationary tokens
-        token_radius = 12
+        token_radius = 10
         for pos, players in positions.items():
             x, y = self._get_space_position(pos)
             
             if len(players) == 1:
                 player = players[0]
-                pygame.draw.circle(self.screen, Colors.BLACK, (x+2, y+3), token_radius + 2)
+                pygame.draw.circle(self.screen, Colors.BLACK, (x+1, y+2), token_radius + 1)
                 pygame.draw.circle(self.screen, player.color, (x, y), token_radius)
             else:
                 # Multiple tokens - arrange in circle
                 angle_step = 2 * math.pi / len(players)
-                radius = 25
+                radius = 18
                 for i, player in enumerate(players):
                     angle = i * angle_step
                     px = x + int(math.cos(angle) * radius)
                     py = y + int(math.sin(angle) * radius)
-                    pygame.draw.circle(self.screen, Colors.BLACK, (px+2, py+3), token_radius + 2)
+                    pygame.draw.circle(self.screen, Colors.BLACK, (px+1, py+2), token_radius + 1)
                     pygame.draw.circle(self.screen, player.color, (px, py), token_radius)
     
-    def _draw_panels(self):
-        """Draw player panels."""
-        current_player_idx = self.active_players[self.current_player_idx]
-        
-        for idx in self.active_players:
-            player = self.players[idx]
-            if player.is_bankrupt:
-                continue
-            
-            panel = self.panels[idx]
-            is_current = (idx == current_player_idx)
-            
-            # Draw panel background
-            panel.draw_background(self.screen, is_current)
-            
-            # Draw player info (money, properties)
-            info_rect = panel.get_grid_rect(4, 0.5, 7, 2)
-            font = pygame.font.SysFont(None, 24)
-            
-            money_text = f"${player.money}"
-            props_text = f"{len(player.properties)} props"
-            
-            RotatedText.draw(self.screen, money_text, font, Colors.BLACK,
-                        (info_rect.centerx, info_rect.top + 20), panel.orientation)
-            RotatedText.draw(self.screen, props_text, font, Colors.BLACK,
-                        (info_rect.centerx, info_rect.bottom - 20), panel.orientation)
-            
-            # Draw buttons
-            for btn in self.buttons[idx].values():
-                btn.draw(self.screen)
-                
-                # Draw hover progress
-                for progress_info in btn.get_hover_progress():
-                    center_x = progress_info["rect"].centerx + 28
-                    center_y = progress_info["rect"].top - 28
-                    draw_circular_progress(
-                        self.screen, (center_x, center_y), 20,
-                        progress_info["progress"], Colors.ACCENT, thickness=6
-                    )
-    
     def _draw_dice(self):
-        """Draw dice in center of board."""
+        """Draw dice in center of board without background."""
         center_x = self.board_rect.centerx
-        center_y = self.board_rect.centery
-        die_size = 60
+        center_y = self.board_rect.centery + 60  # Below center
+        die_size = 50
         
         if self.dice_rolling:
             # Animated rolling
@@ -828,19 +891,23 @@ class MonopolyGame:
         else:
             # Static dice showing result
             for i, value in enumerate(self.dice_values):
+                if value == 0:
+                    continue
                 x = center_x - die_size - 10 + i * (die_size + 20)
                 die_surf = self._create_die_surface(value, die_size)
                 rect = die_surf.get_rect(center=(x, center_y))
                 self.screen.blit(die_surf, rect)
     
     def _create_die_surface(self, value: int, size: int) -> pygame.Surface:
-        """Create a die face surface."""
-        surf = pygame.Surface((size, size))
-        surf.fill(Colors.WHITE)
-        pygame.draw.rect(surf, Colors.BLACK, surf.get_rect(), 2)
+        """Create a die face surface with transparency."""
+        surf = pygame.Surface((size, size), pygame.SRCALPHA)
+        
+        # White die with rounded corners effect
+        pygame.draw.rect(surf, Colors.WHITE, surf.get_rect(), border_radius=8)
+        pygame.draw.rect(surf, Colors.BLACK, surf.get_rect(), 2, border_radius=8)
         
         # Dot positions for each value
-        dot_radius = size // 12
+        dot_radius = size // 10
         positions = {
             1: [(0.5, 0.5)],
             2: [(0.25, 0.25), (0.75, 0.75)],
@@ -863,45 +930,71 @@ class MonopolyGame:
             self._draw_buy_prompt()
     
     def _draw_buy_prompt(self):
-        """Draw property purchase prompt."""
+        """Draw property purchase prompt in center of board."""
         player = self.popup_data["player"]
         position = self.popup_data["position"]
         price = self.popup_data["price"]
         space = self.properties[position]
         
-        panel = self.panels[player.idx]
-        
-        # Draw semi-transparent overlay
-        overlay_rect = panel.rect.inflate(-20, -20)
+        # Draw semi-transparent overlay over entire board
+        overlay_rect = self.board_rect.inflate(20, 20)
         overlay = pygame.Surface(overlay_rect.size, pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 180))
+        overlay.fill((0, 0, 0, 200))
         self.screen.blit(overlay, overlay_rect)
         
         # Draw property info
-        font_title = pygame.font.SysFont(None, 32)
-        font_info = pygame.font.SysFont(None, 24)
+        font_title = pygame.font.SysFont(None, 40, bold=True)
+        font_info = pygame.font.SysFont(None, 32)
+        
+        center_x = self.board_rect.centerx
+        center_y = self.board_rect.centery - 40
         
         name = space.data.get("name", "")
-        RotatedText.draw(self.screen, name, font_title, Colors.WHITE,
-                        (overlay_rect.centerx, overlay_rect.top + 40), panel.orientation)
+        name_surf = font_title.render(name, True, Colors.WHITE)
+        name_rect = name_surf.get_rect(center=(center_x, center_y - 60))
+        self.screen.blit(name_surf, name_rect)
         
         price_text = f"Price: ${price}"
-        RotatedText.draw(self.screen, price_text, font_info, Colors.WHITE,
-                        (overlay_rect.centerx, overlay_rect.centery), panel.orientation)
+        price_surf = font_info.render(price_text, True, Colors.WHITE)
+        price_rect = price_surf.get_rect(center=(center_x, center_y - 10))
+        self.screen.blit(price_surf, price_rect)
         
-        afford_text = "Can afford" if player.money >= price else "Can't afford!"
+        afford_text = "Can afford" if player.money >= price else "Cannot afford!"
         color = Colors.ACCENT if player.money >= price else (255, 100, 100)
-        RotatedText.draw(self.screen, afford_text, font_info, color,
-                        (overlay_rect.centerx, overlay_rect.centery + 30), panel.orientation)
+        afford_surf = font_info.render(afford_text, True, color)
+        afford_rect = afford_surf.get_rect(center=(center_x, center_y + 20))
+        self.screen.blit(afford_surf, afford_rect)
         
         # Draw buttons
         for btn in self.popup_buttons:
             btn.draw(self.screen)
             
             for progress_info in btn.get_hover_progress():
-                center_x = progress_info["rect"].centerx + 28
-                center_y = progress_info["rect"].top - 28
+                center_x = progress_info["rect"].centerx + 20
+                center_y = progress_info["rect"].top - 20
                 draw_circular_progress(
-                    self.screen, (center_x, center_y), 20,
-                    progress_info["progress"], Colors.ACCENT, thickness=6
+                    self.screen, (center_x, center_y), 18,
+                    progress_info["progress"], Colors.ACCENT, thickness=5
                 )
+    
+    def _draw_cursors(self):
+        """Draw cursors for all fingertips."""
+        fingertips = self.get_fingertips(*self.screen_size)
+        for meta in fingertips:
+            pos = meta["pos"]
+            # Find closest active player color
+            min_dist = float('inf')
+            closest_color = Colors.WHITE
+            
+            for idx in self.active_players:
+                panel = self.panels[idx]
+                center = panel.rect.center
+                dist = math.sqrt((pos[0] - center[0])**2 + (pos[1] - center[1])**2)
+                if dist < min_dist:
+                    min_dist = dist
+                    closest_color = panel.color
+            
+            # Draw cursor
+            pygame.draw.circle(self.screen, Colors.WHITE, pos, 18)
+            pygame.draw.circle(self.screen, closest_color, pos, 12)
+            pygame.draw.circle(self.screen, Colors.BLACK, pos, 4)
