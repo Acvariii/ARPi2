@@ -21,7 +21,7 @@ hands_detector = mp_hands.Hands(
     min_tracking_confidence=0.5,
 )
 
-# connected viewers (receive JSON hand data)
+# connected viewers (receive both frames and JSON hand data)
 VIEWERS: Set[Any] = set()
 
 # camera clients set
@@ -34,7 +34,8 @@ FINGERTIP_INDICES = {
 # Video display instance
 _video_display = None
 
-async def broadcast(data_str: str):
+async def broadcast_json(data_str: str):
+    """Broadcast JSON hand data to all viewers."""
     if not VIEWERS:
         return
 
@@ -55,6 +56,32 @@ async def broadcast(data_str: str):
             VIEWERS.discard(ws)
             continue
         tasks.append(send_safe(ws, data_str))
+
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+async def broadcast_frame(frame_bytes: bytes):
+    """Broadcast raw frame to all viewers."""
+    if not VIEWERS:
+        return
+
+    async def send_safe(ws, data):
+        try:
+            await ws.send(data)
+        except Exception:
+            VIEWERS.discard(ws)
+
+    tasks = []
+    for ws in list(VIEWERS):
+        is_closed = getattr(ws, "closed", None)
+        is_open = getattr(ws, "open", None)
+        if is_closed is True:
+            VIEWERS.discard(ws)
+            continue
+        if is_open is False:
+            VIEWERS.discard(ws)
+            continue
+        tasks.append(send_safe(ws, frame_bytes))
 
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -126,10 +153,14 @@ async def handler(connection):
     try:
         async for message in ws:
             if isinstance(message, (bytes, bytearray)):
+                # Broadcast frame to viewers first (for video display)
+                await broadcast_frame(message)
+                
+                # Then process for hand tracking and broadcast JSON
                 payload = process_frame_jpeg(message)
                 if payload:
                     data_str = json.dumps(payload)
-                    await broadcast(data_str)
+                    await broadcast_json(data_str)
             else:
                 txt = message.strip().lower()
                 if txt == "viewer":
