@@ -9,19 +9,7 @@ from ui_components import HoverButton, draw_cursor, draw_circular_progress
 from ui_elements import PlayerSelectionUI
 from monopoly import MonopolyGame
 from hand_tracking import HandTracker
-
-# CONFIG
-SERVER_WS = "ws://192.168.1.79:8765"
-WINDOW_SIZE = (1920, 1080)
-FPS = 60
-HOVER_TIME_THRESHOLD = 0.9
-
-# Colors
-WHITE = (255, 255, 255)
-DARK_BG = (18, 18, 28)
-PANEL = (24, 24, 34)
-ACCENT = (240, 200, 80)
-
+from config import SERVER_WS, WINDOW_SIZE, FPS, HOVER_TIME_THRESHOLD, Colors
 
 class GameLauncher:
     """Main game launcher application."""
@@ -82,18 +70,28 @@ class GameLauncher:
     def handle_menu_state(self, fingertip_meta: List[Dict]):
         """Handle game menu screen."""
         panel = pygame.Rect(80, 60, WINDOW_SIZE[0] - 160, WINDOW_SIZE[1] - 120)
-        pygame.draw.rect(self.screen, PANEL, panel, border_radius=14)
+        pygame.draw.rect(self.screen, Colors.PANEL, panel, border_radius=14)
         
-        title = pygame.font.SysFont(None, 64).render("Game Launcher", True, WHITE)
+        title = pygame.font.SysFont(None, 64).render("Game Launcher", True, Colors.WHITE)
         self.screen.blit(title, (panel.centerx - title.get_width() // 2, panel.top + 24))
 
         for btn in self.game_buttons:
-            btn.draw(self.screen, fingertip_meta)
-            self._draw_button_progress(btn, fingertip_meta)
-            
-            if btn.clicked:
+            # Update button state
+            if btn.update(fingertip_meta):
                 self.state = "player_select"
                 btn.reset()
+            
+            # Draw button
+            btn.draw(self.screen)
+            
+            # Draw hover progress
+            for progress_info in btn.get_hover_progress():
+                center_x = progress_info["rect"].centerx + 28
+                center_y = progress_info["rect"].top - 28
+                draw_circular_progress(
+                    self.screen, (center_x, center_y), 20,
+                    progress_info["progress"], Colors.ACCENT, thickness=6
+                )
 
     def handle_player_select_state(self, fingertip_meta: List[Dict]):
         """Handle player selection screen."""
@@ -106,17 +104,33 @@ class GameLauncher:
             progress = h["progress"]
             draw_circular_progress(
                 self.screen, (px + 28, py - 28), 20, progress, 
-                ACCENT, thickness=6
+                Colors.ACCENT, thickness=6
             )
 
         # Draw start button
         selected_count = self.selection_ui.selected_count()
-        self.start_button.draw(self.screen, fingertip_meta, enabled=selected_count >= 2)
-        self._draw_button_progress(self.start_button, fingertip_meta)
+        
+        # Update button state
+        if self.start_button.update(fingertip_meta, enabled=selected_count >= 2):
+            if selected_count >= 2:
+                self._start_monopoly()
+                self.start_button.reset()
+        
+        # Draw button
+        self.start_button.draw(self.screen)
+        
+        # Draw hover progress
+        for progress_info in self.start_button.get_hover_progress():
+            center_x = progress_info["rect"].centerx + 28
+            center_y = progress_info["rect"].top - 28
+            draw_circular_progress(
+                self.screen, (center_x, center_y), 20,
+                progress_info["progress"], Colors.ACCENT, thickness=6
+            )
 
         # Draw labels
         label_small = pygame.font.SysFont(None, 26).render(
-            f"{selected_count} players selected", True, WHITE
+            f"{selected_count} players selected", True, Colors.WHITE
         )
         self.screen.blit(
             label_small,
@@ -125,18 +139,13 @@ class GameLauncher:
         )
         
         label_min = pygame.font.SysFont(None, 28).render(
-            "Minimum 2 players to start", True, WHITE
+            "Minimum 2 players to start", True, Colors.WHITE
         )
         self.screen.blit(
             label_min,
             (self.start_button.rect.centerx - label_min.get_width() // 2,
              self.start_button.rect.top - 30)
         )
-
-        # Start game if button clicked
-        if self.start_button.clicked and selected_count >= 2:
-            self._start_monopoly()
-            self.start_button.reset()
 
     def _start_monopoly(self):
         """Initialize and start Monopoly game."""
@@ -145,10 +154,9 @@ class GameLauncher:
             self.screen,
             lambda w, h: self.get_fingertip_meta()
         )
-        self.current_game.players_selected = selected_indices
-        for i in range(8):
-            self.current_game.selection_ui.selected[i] = (i in selected_indices)
-        self.current_game.current = selected_indices[0] if selected_indices else 0
+        
+        # Initialize game with selected players
+        self.current_game.start_game(selected_indices)
         self.state = "monopoly_playing"
 
     def handle_game_state(self, fingertip_meta: List[Dict]):
@@ -159,27 +167,9 @@ class GameLauncher:
         else:
             # Fallback if game not initialized
             panel = pygame.Rect(80, 60, WINDOW_SIZE[0] - 160, WINDOW_SIZE[1] - 120)
-            pygame.draw.rect(self.screen, PANEL, panel, border_radius=14)
-            txt = self.font.render("Game initializing...", True, WHITE)
+            pygame.draw.rect(self.screen, Colors.PANEL, panel, border_radius=14)
+            txt = self.font.render("Game initializing...", True, Colors.WHITE)
             self.screen.blit(txt, txt.get_rect(center=(WINDOW_SIZE[0] // 2, WINDOW_SIZE[1] // 2)))
-
-    def _draw_button_progress(self, button: HoverButton, fingertip_meta: List[Dict]):
-        """Draw circular progress for a button's hover state."""
-        for meta in fingertip_meta:
-            pos = meta.get("pos")
-            hand = meta.get("hand")
-            name = meta.get("name", "")
-            key = f"{hand}:{name}" if hand is not None else f"coord:{pos[0]}_{pos[1]}"
-            
-            if pos and button.rect.collidepoint(pos):
-                start = button.hover_start.get(key)
-                if start:
-                    elapsed = time.time() - start
-                    progress = min(1.0, max(0.0, elapsed / HOVER_TIME_THRESHOLD))
-                    draw_circular_progress(
-                        self.screen, (pos[0] + 28, pos[1] - 28), 20,
-                        progress, ACCENT, thickness=6
-                    )
 
     def draw_cursors(self, fingertip_meta: List[Dict]):
         """Draw cursor for each fingertip."""
@@ -201,7 +191,7 @@ class GameLauncher:
                     if event.key == pygame.K_ESCAPE:
                         running = False
 
-            self.screen.fill(DARK_BG)
+            self.screen.fill(Colors.DARK_BG)
 
             # Handle current state
             if self.state == "menu":
