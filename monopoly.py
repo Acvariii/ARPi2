@@ -201,7 +201,46 @@ class MonopolyGame:
         board_y = horizontal_panel_height + margin + (available_height - board_size) // 2
         
         self.board_rect = pygame.Rect(board_x, board_y, board_size, board_size)
-        self.space_size = board_size // 11  # 11 spaces per side (including corners)
+        
+        # Each side has exactly 11 spaces (including corners)
+        # Calculate positions for a continuous border
+        self.space_positions = self._calculate_space_positions()
+    
+    def _calculate_space_positions(self) -> List[Tuple[int, int, int, int]]:
+        """Calculate exact positions for all 40 spaces around the board perimeter."""
+        positions = []
+        board_x = self.board_rect.x
+        board_y = self.board_rect.y
+        board_size = self.board_rect.width
+        
+        # Each side has 11 spaces total
+        space_size = board_size // 11
+        
+        # Bottom row: spaces 0-10 (GO to Jail corner, right to left)
+        for i in range(11):
+            x = board_x + board_size - (i * space_size) - space_size
+            y = board_y + board_size - space_size
+            positions.append((x, y, space_size, space_size))
+        
+        # Left column: spaces 11-19 (9 spaces between corners, bottom to top)
+        for i in range(1, 10):
+            x = board_x
+            y = board_y + board_size - (i + 1) * space_size
+            positions.append((x, y, space_size, space_size))
+        
+        # Top row: spaces 20-30 (Free Parking to Go To Jail, left to right)
+        for i in range(11):
+            x = board_x + (i * space_size)
+            y = board_y
+            positions.append((x, y, space_size, space_size))
+        
+        # Right column: spaces 31-39 (9 spaces between corners, top to bottom)
+        for i in range(1, 10):
+            x = board_x + board_size - space_size
+            y = board_y + (i * space_size)
+            positions.append((x, y, space_size, space_size))
+        
+        return positions
     
     def _init_buttons(self):
         """Initialize player panel buttons with proper sizing."""
@@ -316,7 +355,7 @@ class MonopolyGame:
         # Handle different space types
         if space_type == "go":
             player.add_money(PASSING_GO_MONEY)
-            self.phase = "roll"
+            self._finish_turn_or_allow_double()
             
         elif space_type in ("property", "railroad", "utility"):
             if space.owner is None:
@@ -328,31 +367,43 @@ class MonopolyGame:
                 self.phase = "paying_rent"
                 self._pay_rent(player, position)
             else:
-                self.phase = "roll"
+                # Own the property
+                self._finish_turn_or_allow_double()
                 
         elif space_type == "go_to_jail":
             self._send_to_jail(player)
-            self.phase = "roll"
             
         elif space_type == "income_tax":
             player.remove_money(INCOME_TAX)
-            self.phase = "roll"
+            self._finish_turn_or_allow_double()
             
         elif space_type == "luxury_tax":
             player.remove_money(LUXURY_TAX)
-            self.phase = "roll"
+            self._finish_turn_or_allow_double()
             
         elif space_type in ("chance", "community_chest"):
             # TODO: Implement card drawing
-            self.phase = "roll"
+            self._finish_turn_or_allow_double()
             
         else:
             # Free parking, jail (just visiting), etc.
-            self.phase = "roll"
+            self._finish_turn_or_allow_double()
         
         # Check if bankrupt
         if player.money < 0:
             self._handle_bankruptcy(player)
+    
+    def _finish_turn_or_allow_double(self):
+        """Either end turn or allow rolling again if doubles."""
+        player = self.get_current_player()
+        if player.consecutive_doubles > 0:
+            # Rolled doubles - can roll again
+            self.phase = "roll"
+            self.can_roll = True
+        else:
+            # No doubles - end turn
+            self.phase = "roll"
+            # Don't set can_roll here - wait for next turn
     
     def _show_buy_prompt(self, player: Player, position: int):
         """Show popup to buy property in player's panel."""
@@ -396,12 +447,8 @@ class MonopolyGame:
         self.active_popup = None
         self.popup_buttons = []
         
-        # If didn't roll doubles, end turn
-        if player.consecutive_doubles == 0:
-            self.advance_turn()
-        else:
-            self.phase = "roll"
-            self.can_roll = True
+        # After buying, check if rolled doubles
+        self._finish_turn_or_allow_double()
     
     def _pay_rent(self, player: Player, position: int):
         """Pay rent to property owner."""
@@ -432,12 +479,8 @@ class MonopolyGame:
             # Can't afford - handle bankruptcy
             self._handle_bankruptcy(player, owed_to=owner)
         
-        # End turn or allow another roll
-        if player.consecutive_doubles == 0:
-            self.advance_turn()
-        else:
-            self.phase = "roll"
-            self.can_roll = True
+        # After paying rent, check if rolled doubles
+        self._finish_turn_or_allow_double()
     
     def _send_to_jail(self, player: Player):
         """Send player to jail."""
@@ -529,12 +572,13 @@ class MonopolyGame:
                 enabled = False
                 
                 if btn_name == "action":
-                    if is_current and self.phase == "roll" and not current_player.is_moving:
+                    if is_current and self.phase == "roll" and not current_player.is_moving and not self.dice_rolling:
                         enabled = True
-                        if current_player.consecutive_doubles > 0:
-                            btn.text = "Roll"
+                        # Update button text based on state
+                        if self.can_roll:
+                            btn.text = "Roll Again" if current_player.consecutive_doubles > 0 else "Roll"
                         else:
-                            btn.text = "Roll" if self.can_roll else "End"
+                            btn.text = "End Turn"
                 
                 elif btn_name == "props":
                     enabled = len(player.properties) > 0
@@ -558,9 +602,11 @@ class MonopolyGame:
         player = self.players[player_idx]
         
         if button_name == "action":
-            if self.phase == "roll" and self.can_roll:
+            if self.phase == "roll" and self.can_roll and not self.dice_rolling:
+                # Roll dice
                 self.roll_dice()
-            elif player.consecutive_doubles == 0:
+            elif self.phase == "roll" and not self.can_roll:
+                # End turn
                 self.advance_turn()
         
         elif button_name == "props":
@@ -580,11 +626,8 @@ class MonopolyGame:
             else:  # Pass
                 self.active_popup = None
                 self.popup_buttons = []
-                if player.consecutive_doubles == 0:
-                    self.advance_turn()
-                else:
-                    self.phase = "roll"
-                    self.can_roll = True
+                # After declining, check if rolled doubles
+                self._finish_turn_or_allow_double()
     
     def _show_properties_popup(self, player: Player):
         """Show player's properties."""
@@ -599,31 +642,12 @@ class MonopolyGame:
         # TODO: Implement building UI
     
     def _get_space_position(self, space_idx: int) -> Tuple[int, int]:
-        """Get screen position for board space."""
-        # Bottom row: 0-10 (right to left)
-        # Left column: 11-19 (bottom to top)
-        # Top row: 20-30 (left to right)
-        # Right column: 31-39 (top to bottom)
+        """Get screen position (center) for board space."""
+        if space_idx >= len(self.space_positions):
+            return (0, 0)
         
-        board_x = self.board_rect.x
-        board_y = self.board_rect.y
-        size = self.board_rect.width
-        space = self.space_size
-        
-        if space_idx <= 10:  # Bottom
-            x = board_x + size - (space_idx * space) - space // 2
-            y = board_y + size - space // 2
-        elif space_idx <= 19:  # Left
-            x = board_x + space // 2
-            y = board_y + size - ((space_idx - 10) * space) - space // 2
-        elif space_idx <= 30:  # Top
-            x = board_x + ((space_idx - 20) * space) + space // 2
-            y = board_y + space // 2
-        else:  # Right
-            x = board_x + size - space // 2
-            y = board_y + ((space_idx - 30) * space) + space // 2
-        
-        return (x, y)
+        x, y, w, h = self.space_positions[space_idx]
+        return (x + w // 2, y + h // 2)
     
     def draw(self):
         """Draw the game."""
@@ -723,9 +747,10 @@ class MonopolyGame:
         pygame.draw.rect(self.screen, Colors.BLACK, self.board_rect, 3)
         
         # Center area with Monopoly logo
-        center_size = self.space_size * 9
-        center_x = self.board_rect.x + self.space_size
-        center_y = self.board_rect.y + self.space_size
+        space_size = self.space_positions[0][2]  # Get size from first space
+        center_size = space_size * 9
+        center_x = self.board_rect.x + space_size
+        center_y = self.board_rect.y + space_size
         center_rect = pygame.Rect(center_x, center_y, center_size, center_size)
         pygame.draw.rect(self.screen, (240, 250, 240), center_rect)
         pygame.draw.rect(self.screen, Colors.BLACK, center_rect, 2)
@@ -742,25 +767,22 @@ class MonopolyGame:
     
     def _draw_space(self, idx: int):
         """Draw a single board space."""
-        if idx >= len(self.properties):
+        if idx >= len(self.properties) or idx >= len(self.space_positions):
             return
             
         space = self.properties[idx]
         if space.data.get("type") == "none":
             return
-            
-        x, y = self._get_space_position(idx)
         
-        # All spaces same size now (no special corner sizing)
-        size = self.space_size
-        rect = pygame.Rect(x - size//2, y - size//2, size, size)
+        x, y, w, h = self.space_positions[idx]
+        rect = pygame.Rect(x, y, w, h)
         
         # Draw space background
         space_type = space.data.get("type")
         if space_type in ("property", "railroad", "utility"):
             # Color strip at top
             color = space.data.get("color", (200, 200, 200))
-            strip_height = size // 4
+            strip_height = h // 4
             strip_rect = pygame.Rect(rect.x, rect.y, rect.width, strip_height)
             pygame.draw.rect(self.screen, color, strip_rect)
             
@@ -771,10 +793,10 @@ class MonopolyGame:
             
             # Draw houses/hotel
             if space.houses > 0 and space_type == "property":
-                house_size = max(5, size // 7)
+                house_size = max(5, w // 7)
                 num_houses = min(space.houses, 4)
-                for h in range(num_houses):
-                    house_x = rect.x + 2 + h * (house_size + 2)
+                for h_idx in range(num_houses):
+                    house_x = rect.x + 2 + h_idx * (house_size + 2)
                     house_y = rect.y + 2
                     house_rect = pygame.Rect(house_x, house_y, house_size, house_size)
                     house_color = (200, 0, 0) if space.houses == 5 else (0, 150, 0)
@@ -789,14 +811,14 @@ class MonopolyGame:
         name = space.data.get("name", "")
         if name:
             # Use larger, more readable font
-            font_size = max(10, size // 6)
+            font_size = max(10, w // 6)
             font = pygame.font.SysFont(None, font_size)
             
             # Word wrap for long names
             words = name.split()
             lines = []
             current_line = ""
-            max_width = size - 6
+            max_width = w - 6
             
             for word in words:
                 test_line = f"{current_line} {word}".strip()
@@ -811,10 +833,12 @@ class MonopolyGame:
             
             # Draw up to 3 lines
             line_height = font.get_linesize()
-            start_y = y - (len(lines[:3]) * line_height) // 2
+            center_x = x + w // 2
+            center_y = y + h // 2
+            start_y = center_y - (len(lines[:3]) * line_height) // 2
             for i, line in enumerate(lines[:3]):
                 text_surf = font.render(line, True, Colors.BLACK)
-                text_rect = text_surf.get_rect(center=(x, start_y + i * line_height))
+                text_rect = text_surf.get_rect(center=(center_x, start_y + i * line_height))
                 self.screen.blit(text_surf, text_rect)
     
     def _draw_tokens(self):
