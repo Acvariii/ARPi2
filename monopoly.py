@@ -8,9 +8,9 @@ from config import PLAYER_COLORS, HOVER_TIME_THRESHOLD, Colors
 from monopoly_data import (
     BOARD_SPACES, PROPERTY_GROUPS, STARTING_MONEY, PASSING_GO_MONEY,
     LUXURY_TAX, INCOME_TAX, JAIL_POSITION, GO_TO_JAIL_POSITION,
-    JAIL_FINE, MAX_JAIL_TURNS, MAX_HOUSES_PER_PROPERTY,
-    COMMUNITY_CHEST_CARDS, CHANCE_CARDS
+    JAIL_FINE, MAX_JAIL_TURNS, MAX_HOUSES_PER_PROPERTY
 )
+from constants import COMMUNITY_CHEST_CARDS, CHANCE_CARDS
 from player_panel import PlayerPanel, calculate_all_panels
 from ui_components import HoverButton, RotatedText, draw_circular_progress
 
@@ -636,22 +636,18 @@ class MonopolyGame:
         if self.dice_rolling:
             elapsed = time.time() - self.dice_roll_start
             if elapsed >= self.dice_roll_duration:
-                # Dice finished rolling
                 self.dice_rolling = False
                 self.dice_values = (random.randint(1, 6), random.randint(1, 6))
                 
-                # Check for doubles
                 is_doubles = self.dice_values[0] == self.dice_values[1]
                 if is_doubles:
                     current_player.consecutive_doubles += 1
                     if current_player.consecutive_doubles >= 3:
-                        # Three doubles - go to jail
                         self._send_to_jail(current_player)
                         return
                 else:
                     current_player.consecutive_doubles = 0
                 
-                # Move player
                 spaces = sum(self.dice_values)
                 self.move_player(current_player, spaces)
         
@@ -661,7 +657,6 @@ class MonopolyGame:
             move_duration = 0.3 * len(current_player.move_path)
             
             if elapsed >= move_duration:
-                # Finished moving
                 current_player.is_moving = False
                 current_player.position = current_player.move_path[-1]
                 current_player.move_path = []
