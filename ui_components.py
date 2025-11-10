@@ -6,19 +6,19 @@ from typing import Tuple, List, Dict, Optional, Callable
 from config import HOVER_TIME_THRESHOLD, Colors
 
 class HoverButton:
-    """Button that activates on sustained hover."""
+    """Button that activates on sustained hover with modern styling."""
     
     def __init__(self, rect: pygame.Rect, text: str, font: pygame.font.Font, 
-                 radius: int = 12, orientation: int = 0):
+                 radius: int = 8, orientation: int = 0):
         self.rect = rect
         self.text = text
         self.font = font
         self.radius = radius
-        self.orientation = orientation  # 0, 90, 180, 270 degrees
+        self.orientation = orientation
         self.hover_start: Dict[str, float] = {}
         self.clicked = False
         self.enabled = True
-        
+    
     def update(self, fingertip_meta: List[Dict], enabled: bool = True) -> bool:
         """Update hover state and return True if clicked."""
         self.enabled = enabled
@@ -55,24 +55,39 @@ class HoverButton:
         return False
     
     def draw(self, surface: pygame.Surface):
-        """Draw the button."""
+        """Draw the button with modern styling."""
         # Determine colors based on state
         if not self.enabled:
-            bg_color = Colors.DISABLED
-            text_color = Colors.DISABLED_TEXT
+            bg_color = (60, 60, 60)
+            text_color = (120, 120, 120)
+            border_color = (40, 40, 40)
         elif self.hover_start:
-            bg_color = (100, 180, 250)
+            bg_color = (80, 160, 240)
             text_color = Colors.WHITE
+            border_color = (100, 180, 255)
         else:
-            bg_color = (60, 120, 200)
-            text_color = Colors.WHITE
+            bg_color = (50, 100, 180)
+            text_color = (220, 220, 220)
+            border_color = (40, 80, 140)
         
-        # Draw shadow
-        shadow_rect = self.rect.move(4, 6)
-        pygame.draw.rect(surface, Colors.SHADOW, shadow_rect, border_radius=self.radius)
+        # Modern drop shadow
+        shadow_rect = self.rect.move(3, 3)
+        shadow_surf = pygame.Surface((shadow_rect.width, shadow_rect.height), pygame.SRCALPHA)
+        pygame.draw.rect(shadow_surf, (0, 0, 0, 60), shadow_surf.get_rect(), border_radius=self.radius)
+        surface.blit(shadow_surf, shadow_rect)
         
-        # Draw button background
+        # Button background with gradient effect
         pygame.draw.rect(surface, bg_color, self.rect, border_radius=self.radius)
+        
+        # Subtle inner highlight
+        if self.enabled:
+            highlight_rect = self.rect.inflate(-4, -4)
+            highlight_rect.height = highlight_rect.height // 3
+            pygame.draw.rect(surface, tuple(min(255, c + 30) for c in bg_color), 
+                        highlight_rect, border_radius=self.radius)
+        
+        # Border
+        pygame.draw.rect(surface, border_color, self.rect, width=2, border_radius=self.radius)
         
         # Draw text (rotated if needed)
         text_surf = self.font.render(self.text, True, text_color)
