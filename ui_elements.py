@@ -1,7 +1,6 @@
 import time
 import pygame
 from typing import List, Tuple, Dict
-from ui_components import draw_cursor, get_closest_player_color
 
 HOVER_TIME_THRESHOLD = 0.9
 
@@ -15,6 +14,13 @@ PLAYER_COLORS = [
     (255, 120,  60),   # orange
     (140,  40, 220),   # purple
 ]
+
+
+def draw_cursor(surface: pygame.Surface, pos: Tuple[int, int], color: Tuple[int, int, int]):
+    """Draw a fingertip cursor."""
+    pygame.draw.circle(surface, (255, 255, 255), pos, 20)
+    pygame.draw.circle(surface, color, pos, 14)
+    pygame.draw.circle(surface, (0, 0, 0), pos, 4)
 
 
 class HoverButton:
@@ -247,12 +253,14 @@ class PlayerSelectionUI:
         """Return number of currently selected players."""
         return sum(1 for s in self.selected if s)
 
+
 class PlayerPanel:
     def __init__(self, idx, rect, color, orientation):
         self.idx = idx
         self.rect = rect
         self.color = color
         self.orientation = orientation  # 0=normal, 90=right, 180=upside-down, 270=left
+
 
 def get_player_panels(screen_size):
     w, h = screen_size
