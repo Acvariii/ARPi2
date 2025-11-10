@@ -24,12 +24,15 @@ hands_detector = mp_hands.Hands(
 # connected viewers (receive JSON hand data)
 VIEWERS: Set[Any] = set()
 
-# optional: camera clients set (not strictly needed)
+# camera clients set
 CAMERAS: Set[Any] = set()
 
 FINGERTIP_INDICES = {
     "index": 8,
 }
+
+# Video display instance
+_video_display = None
 
 async def broadcast(data_str: str):
     if not VIEWERS:
@@ -39,15 +42,12 @@ async def broadcast(data_str: str):
         try:
             await ws.send(data)
         except Exception:
-            # remove viewers that raised (closed/invalid)
             VIEWERS.discard(ws)
 
     tasks = []
     for ws in list(VIEWERS):
-        # prefer not to access attributes that may not exist on all connection types
         is_closed = getattr(ws, "closed", None)
         is_open = getattr(ws, "open", None)
-        # If we can determine it's closed, skip; otherwise try sending (send_safe will drop invalids)
         if is_closed is True:
             VIEWERS.discard(ws)
             continue
@@ -60,14 +60,12 @@ async def broadcast(data_str: str):
         await asyncio.gather(*tasks, return_exceptions=True)
 
 def process_frame_jpeg(jpeg_bytes: bytes, frame_id: int = 0):
-    # Decode JPEG
     arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
         return None
     h, w = img.shape[:2]
 
-    # Pad to square to avoid the NORM_RECT without IMAGE_DIMENSIONS warning.
     pad_size = max(w, h)
     pad_x = (pad_size - w) // 2
     pad_y = (pad_size - h) // 2
@@ -96,9 +94,6 @@ def process_frame_jpeg(jpeg_bytes: bytes, frame_id: int = 0):
             lm = []
             fingertips = {}
             for pt in landmarks.landmark:
-                # pt.x/pt.y are relative to the padded square
-                # convert to pixels in padded space, then to pixels in original image,
-                # then normalize relative to original width/height.
                 px = pt.x * pad_size - pad_x
                 py = pt.y * pad_size - pad_y
                 nx = clamp01(px / w)
@@ -122,22 +117,20 @@ def process_frame_jpeg(jpeg_bytes: bytes, frame_id: int = 0):
     return payload
 
 async def handler(connection):
-    """WebSocket handler compatible with websockets 11+.
-
-    The library now calls handlers with a single connection object.
-    """
     ws = connection
     logger.info("Client connected: %s", getattr(ws, 'remote_address', None))
+    
+    # Auto-start video display when first camera connects
+    global _video_display
+    
     try:
         async for message in ws:
-            # binary frames from camera clients
             if isinstance(message, (bytes, bytearray)):
                 payload = process_frame_jpeg(message)
                 if payload:
                     data_str = json.dumps(payload)
                     await broadcast(data_str)
             else:
-                # text messages - simple protocol:
                 txt = message.strip().lower()
                 if txt == "viewer":
                     VIEWERS.add(ws)
@@ -146,23 +139,41 @@ async def handler(connection):
                 elif txt == "camera":
                     CAMERAS.add(ws)
                     logger.info("Registered camera: %s", ws.remote_address)
+                    
+                    # Start video display when first camera connects
+                    if _video_display is None and len(CAMERAS) == 1:
+                        try:
+                            from video_display import VideoDisplay
+                            _video_display = VideoDisplay()
+                            _video_display.start()
+                            logger.info("Video display started automatically")
+                        except Exception as e:
+                            logger.error(f"Failed to start video display: {e}")
+                    
                     await ws.send(json.dumps({"type": "info", "message": "camera_registered"}))
                 elif txt == "ping":
                     await ws.send("pong")
                 else:
-                    # echo back unknown commands
                     await ws.send(json.dumps({"type": "info", "message": "unknown_command", "command": txt}))
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:
         VIEWERS.discard(ws)
+        was_camera = ws in CAMERAS
         CAMERAS.discard(ws)
+        
+        # Stop video display when last camera disconnects
+        if was_camera and len(CAMERAS) == 0 and _video_display is not None:
+            logger.info("Last camera disconnected, stopping video display")
+            _video_display.stop()
+            _video_display = None
+        
         logger.info("Client disconnected: %s", ws.remote_address)
 
 async def main():
     logger.info("Starting WebSocket server on :8765")
     async with websockets.serve(handler, "192.168.1.79", 8765, max_size=None, max_queue=None):
-        await asyncio.Future()  # run forever
+        await asyncio.Future()
 
 if __name__ == "__main__":
     asyncio.run(main())
