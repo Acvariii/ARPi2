@@ -1715,6 +1715,294 @@ class MonopolyGame:
             HoverButton(close_rect, "✕ Close", font, orientation=panel.orientation)
         ]
     
+    def start_game(self, player_indices: List[int]):
+        """Start game with selected players."""
+        self.active_players = sorted(player_indices)
+        self.current_player_idx = 0
+        
+        # Reset all players
+        for i in self.active_players:
+            self.players[i].money = STARTING_MONEY
+            self.players[i].position = 0
+            self.players[i].properties = []
+            self.players[i].in_jail = False
+            self.players[i].is_bankrupt = False
+            self.players[i].get_out_of_jail_cards = 0
+    
+    def get_current_player(self) -> Player:
+        """Get the current active player."""
+        return self.players[self.active_players[self.current_player_idx]]
+    
+    def advance_turn(self):
+        """Move to next player's turn."""
+        player = self.get_current_player()
+        player.consecutive_doubles = 0
+        
+        # Move to next non-bankrupt player
+        original_idx = self.current_player_idx
+        while True:
+            self.current_player_idx = (self.current_player_idx + 1) % len(self.active_players)
+            next_player = self.get_current_player()
+            
+            if not next_player.is_bankrupt or self.current_player_idx == original_idx:
+                break
+        
+        self.phase = "roll"
+        self.can_roll = True
+        self.dice_values = (0, 0)
+    
+    def roll_dice(self):
+        """Initiate dice roll."""
+        if not self.can_roll or self.dice_rolling:
+            return
+        
+        self.dice_rolling = True
+        self.dice_roll_start = time.time()
+        self.can_roll = False
+    
+    def move_player(self, player: Player, spaces: int):
+        """Move player forward by spaces."""
+        old_pos = player.position
+        player.move_from = old_pos
+        
+        # Create path
+        player.move_path = []
+        for i in range(1, abs(spaces) + 1):
+            if spaces > 0:
+                player.move_path.append((old_pos + i) % 40)
+            else:
+                player.move_path.append((old_pos - i) % 40)
+        
+        player.is_moving = True
+        player.move_start = time.time()
+        self.phase = "moving"
+    
+    def land_on_space(self, player: Player):
+        """Handle landing on a space."""
+        position = player.position
+        space = self.properties[position]
+        space_type = space.data.get("type")
+        
+        # Check if passed GO
+        if player.move_from > player.position and len(player.move_path) > 0:
+            player.add_money(PASSING_GO_MONEY)
+        
+        # Handle different space types
+        if space_type == "go":
+            player.add_money(PASSING_GO_MONEY)
+            self._finish_turn_or_allow_double()
+            
+        elif space_type in ("property", "railroad", "utility"):
+            if space.owner is None:
+                self.phase = "buying"
+                self._show_buy_prompt(player, position)
+            elif space.owner != player.idx:
+                self.phase = "paying_rent"
+                self._pay_rent(player, position)
+            else:
+                self._finish_turn_or_allow_double()
+                
+        elif space_type == "go_to_jail":
+            self._send_to_jail(player)
+            
+        elif space_type == "income_tax":
+            player.remove_money(INCOME_TAX)
+            self._finish_turn_or_allow_double()
+            
+        elif space_type == "luxury_tax":
+            player.remove_money(LUXURY_TAX)
+            self._finish_turn_or_allow_double()
+            
+        elif space_type == "chance":
+            self._draw_card(player, "chance")
+            
+        elif space_type == "community_chest":
+            self._draw_card(player, "community_chest")
+            
+        else:
+            self._finish_turn_or_allow_double()
+        
+        # Check if bankrupt
+        if player.money < 0:
+            self._handle_bankruptcy(player)
+    
+    def _draw_card(self, player: Player, deck_type: str):
+        """Draw a card from deck."""
+        if deck_type == "chance":
+            if not self.chance_deck:
+                self.chance_deck = list(CHANCE_CARDS)
+                random.shuffle(self.chance_deck)
+            card = self.chance_deck.pop(0)
+        else:
+            if not self.community_chest_deck:
+                self.community_chest_deck = list(COMMUNITY_CHEST_CARDS)
+                random.shuffle(self.community_chest_deck)
+            card = self.community_chest_deck.pop(0)
+        
+        self.phase = "card"
+        self._show_card_popup(player, card, deck_type)
+    
+    def _execute_card_action(self, player: Player, card: Dict):
+        """Execute the action from a card."""
+        action = card.get("action")
+        if not action:
+            return
+        
+        action_type = action[0]
+        
+        if action_type == "money":
+            amount = action[1]
+            if amount > 0:
+                player.add_money(amount)
+            else:
+                player.remove_money(abs(amount))
+        
+        elif action_type == "jail_free":
+            player.get_out_of_jail_cards += 1
+        
+        elif action_type == "go_to_jail":
+            self._send_to_jail(player)
+            return  # Don't finish turn
+        
+        elif action_type == "advance":
+            target_pos = action[1]
+            collect_go = action[2] if len(action) > 2 else False
+            
+            if collect_go and target_pos < player.position:
+                player.add_money(PASSING_GO_MONEY)
+            
+            player.position = target_pos
+            self.land_on_space(player)
+            return  # Don't finish turn (land_on_space will handle it)
+        
+        elif action_type == "collect_from_each":
+            amount = action[1]
+            for idx in self.active_players:
+                if idx != player.idx and not self.players[idx].is_bankrupt:
+                    if self.players[idx].remove_money(amount):
+                        player.add_money(amount)
+        
+        elif action_type == "pay_each_player":
+            amount = action[1]
+            for idx in self.active_players:
+                if idx != player.idx and not self.players[idx].is_bankrupt:
+                    if player.remove_money(amount):
+                        self.players[idx].add_money(amount)
+        
+        elif action_type == "pay_per_house_hotel":
+            house_cost, hotel_cost = action[1]
+            houses = player.get_total_houses(self.properties)
+            hotels = player.get_total_hotels(self.properties)
+            total = houses * house_cost + hotels * hotel_cost
+            player.remove_money(total)
+        
+        self._finish_turn_or_allow_double()
+    
+    def _finish_turn_or_allow_double(self):
+        """Either end turn or allow rolling again if doubles."""
+        player = self.get_current_player()
+        if player.consecutive_doubles > 0:
+            self.phase = "roll"
+            self.can_roll = True
+        else:
+            self.phase = "roll"
+    
+    def _show_buy_prompt(self, player: Player, position: int):
+        """Show popup to buy property in player's panel."""
+        space = self.properties[position]
+        price = space.data.get("price", 0)
+        
+        self.active_popup = "buy_prompt"
+        self.popup_data = {
+            "player": player,
+            "position": position,
+            "price": price
+        }
+        
+        panel = self.panels[player.idx]
+        
+        # Place buttons consistently to the right from player's perspective
+        if panel.is_vertical():
+            # For vertical panels, buttons go in the bottom right area
+            yes_rect = panel.get_grid_rect(2, 9, 1.8, 1.2, 4, 12)
+            no_rect = panel.get_grid_rect(2, 10.5, 1.8, 1.2, 4, 12)
+        else:
+            # For horizontal panels, buttons go on the right side
+            yes_rect = panel.get_grid_rect(9, 1.5, 2.5, 1, 12, 4)
+            no_rect = panel.get_grid_rect(9, 2.7, 2.5, 1, 12, 4)
+        
+        font = pygame.font.SysFont(None, 26)
+        self.popup_buttons = [
+            HoverButton(yes_rect, "Buy", font, orientation=panel.orientation),
+            HoverButton(no_rect, "Pass", font, orientation=panel.orientation)
+        ]
+    
+    def _show_card_popup(self, player: Player, card: Dict, deck_type: str):
+        """Show card text popup."""
+        self.active_popup = "card"
+        self.popup_data = {
+            "player": player,
+            "card": card,
+            "deck_type": deck_type
+        }
+        
+        panel = self.panels[player.idx]
+        
+        # Consistent button placement
+        if panel.is_vertical():
+            ok_rect = panel.get_grid_rect(1, 10.5, 2, 1.2, 4, 12)
+        else:
+            ok_rect = panel.get_grid_rect(9.5, 2.5, 2, 1, 12, 4)
+        
+        font = pygame.font.SysFont(None, 26)
+        self.popup_buttons = [
+            HoverButton(ok_rect, "OK", font, orientation=panel.orientation)
+        ]
+    
+    def _show_properties_popup(self, player: Player):
+        """Show player's properties popup."""
+        self.active_popup = "properties"
+        self.popup_data = {"player": player}
+        self.property_scroll = 0
+        
+        panel = self.panels[player.idx]
+        
+        # Consistent button placement - all to the right
+        if panel.is_vertical():
+            prev_rect = panel.get_grid_rect(2, 8.5, 1.8, 1, 4, 12)
+            next_rect = panel.get_grid_rect(2, 9.7, 1.8, 1, 4, 12)
+            close_rect = panel.get_grid_rect(2, 10.9, 1.8, 1, 4, 12)
+        else:
+            prev_rect = panel.get_grid_rect(9, 0.5, 2.5, 1, 12, 4)
+            next_rect = panel.get_grid_rect(9, 1.7, 2.5, 1, 12, 4)
+            close_rect = panel.get_grid_rect(9, 2.9, 2.5, 1, 12, 4)
+        
+        font = pygame.font.SysFont(None, 24)
+        self.popup_buttons = [
+            HoverButton(prev_rect, "◀ Prev", font, orientation=panel.orientation),
+            HoverButton(next_rect, "Next ▶", font, orientation=panel.orientation),
+            HoverButton(close_rect, "✕ Close", font, orientation=panel.orientation)
+        ]
+    
+    def _show_build_popup(self, player: Player):
+        """Show building options popup."""
+        self.active_popup = "build"
+        self.popup_data = {"player": player, "selected_group": None}
+        self.property_scroll = 0
+        
+        panel = self.panels[player.idx]
+        
+        # Consistent button placement
+        if panel.is_vertical():
+            close_rect = panel.get_grid_rect(2, 10.9, 1.8, 1, 4, 12)
+        else:
+            close_rect = panel.get_grid_rect(9, 2.9, 2.5, 1, 12, 4)
+        
+        font = pygame.font.SysFont(None, 24)
+        self.popup_buttons = [
+            HoverButton(close_rect, "✕ Close", font, orientation=panel.orientation)
+        ]
+    
     def _buy_property(self, player: Player, position: int):
         """Player buys property."""
         space = self.properties[position]
@@ -2527,3 +2815,53 @@ class MonopolyGame:
                     self.screen, (center_x, center_y), 16,
                     progress_info["progress"], Colors.ACCENT, thickness=4
                 )
+    
+    def _draw_build_popup(self):
+        """Draw building options popup."""
+        player = self.popup_data["player"]
+        panel = self.panels[player.idx]
+        
+        # Modern overlay
+        overlay = pygame.Surface(panel.rect.size, pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 200))
+        self.screen.blit(overlay, panel.rect)
+        
+        # Modern fonts
+        font_title = pygame.font.SysFont("Arial", 24, bold=True)
+        title_text = "Building (Coming Soon)"
+        RotatedText.draw(self.screen, title_text, font_title, Colors.ACCENT,
+                       (panel.rect.centerx, panel.rect.centery), panel.orientation)
+        
+        for btn in self.popup_buttons:
+            btn.draw(self.screen)
+            
+            for progress_info in btn.get_hover_progress():
+                center_x = progress_info["rect"].centerx + 20
+                center_y = progress_info["rect"].top - 20
+                draw_circular_progress(
+                    self.screen, (center_x, center_y), 16,
+                    progress_info["progress"], Colors.ACCENT, thickness=4
+                )
+    
+    def _draw_cursors(self):
+        """Draw cursors for all fingertips."""
+        fingertips = self.get_fingertips(*self.screen_size)
+        for meta in fingertips:
+            pos = meta["pos"]
+            
+            # Find closest player panel to color the cursor
+            min_dist = float('inf')
+            closest_color = Colors.WHITE
+            
+            for idx in self.active_players:
+                panel = self.panels[idx]
+                center = panel.rect.center
+                dist = math.sqrt((pos[0] - center[0])**2 + (pos[1] - center[1])**2)
+                if dist < min_dist:
+                    min_dist = dist
+                    closest_color = panel.color
+            
+            # Draw cursor with player color
+            pygame.draw.circle(self.screen, Colors.WHITE, pos, 18)
+            pygame.draw.circle(self.screen, closest_color, pos, 12)
+            pygame.draw.circle(self.screen, Colors.BLACK, pos, 4)
