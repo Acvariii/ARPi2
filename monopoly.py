@@ -134,7 +134,7 @@ class Player:
     def get_total_houses(self, all_properties: List[Property]) -> int:
         """Count total houses owned."""
         return sum(all_properties[idx].houses for idx in self.properties 
-                   if all_properties[idx].houses < 5)
+                if all_properties[idx].houses < 5)
     
     def get_total_hotels(self, all_properties: List[Property]) -> int:
         """Count total hotels owned."""
@@ -180,23 +180,25 @@ class MonopolyGame:
         self._init_buttons()
     
     def _calculate_board_geometry(self):
-        """Calculate board layout with proper spacing."""
+        """Calculate board layout ensuring it doesn't overlap player panels."""
         w, h = self.screen_size
         
         # Panel sizes
         horizontal_panel_height = int(h * 0.10)
         vertical_panel_width = int(w * 0.12)
         
-        # Board takes remaining space in center
-        available_width = w - (2 * vertical_panel_width)
-        available_height = h - (2 * horizontal_panel_height)
+        # Board must fit within the space between panels
+        # Add some margin for safety
+        margin = 20
+        available_width = w - (2 * vertical_panel_width) - (2 * margin)
+        available_height = h - (2 * horizontal_panel_height) - (2 * margin)
         
         # Make board square, using smaller dimension
         board_size = min(available_width, available_height)
         
-        # Center the board
-        board_x = vertical_panel_width + (available_width - board_size) // 2
-        board_y = horizontal_panel_height + (available_height - board_size) // 2
+        # Center the board in available space
+        board_x = vertical_panel_width + margin + (available_width - board_size) // 2
+        board_y = horizontal_panel_height + margin + (available_height - board_size) // 2
         
         self.board_rect = pygame.Rect(board_x, board_y, board_size, board_size)
         self.space_size = board_size // 11  # 11 spaces per side (including corners)
@@ -205,19 +207,19 @@ class MonopolyGame:
         """Initialize player panel buttons with proper sizing."""
         for panel in self.panels:
             player_idx = panel.player_idx
-            font_size = 24 if panel.is_vertical() else 28
+            font_size = 22 if panel.is_vertical() else 26
             button_font = pygame.font.SysFont(None, font_size)
             
             if panel.is_vertical():
                 # Vertical panels - stack buttons vertically
-                action_rect = panel.get_grid_rect(0.5, 2, 3, 2, 4, 12)
-                props_rect = panel.get_grid_rect(0.5, 5, 3, 2, 4, 12)
-                build_rect = panel.get_grid_rect(0.5, 8, 3, 2, 4, 12)
+                action_rect = panel.get_grid_rect(0.5, 3, 3, 1.8, 4, 12)
+                props_rect = panel.get_grid_rect(0.5, 5.5, 3, 1.8, 4, 12)
+                build_rect = panel.get_grid_rect(0.5, 8, 3, 1.8, 4, 12)
             else:
                 # Horizontal panels - arrange buttons horizontally
-                action_rect = panel.get_grid_rect(1, 1, 3, 2, 12, 4)
-                props_rect = panel.get_grid_rect(4.5, 1, 3, 2, 12, 4)
-                build_rect = panel.get_grid_rect(8, 1, 3, 2, 12, 4)
+                action_rect = panel.get_grid_rect(1, 1.2, 3, 1.6, 12, 4)
+                props_rect = panel.get_grid_rect(4.5, 1.2, 3, 1.6, 12, 4)
+                build_rect = panel.get_grid_rect(8, 1.2, 3, 1.6, 12, 4)
             
             action_btn = HoverButton(
                 action_rect, "Roll", 
@@ -353,7 +355,7 @@ class MonopolyGame:
             self._handle_bankruptcy(player)
     
     def _show_buy_prompt(self, player: Player, position: int):
-        """Show popup to buy property."""
+        """Show popup to buy property in player's panel."""
         space = self.properties[position]
         price = space.data.get("price", 0)
         
@@ -364,29 +366,22 @@ class MonopolyGame:
             "price": price
         }
         
-        # Create Yes/No buttons centered in board
-        center_x = self.board_rect.centerx
-        center_y = self.board_rect.centery
-        button_width = 120
-        button_height = 50
-        button_spacing = 20
+        # Create Yes/No buttons in player's panel
+        panel = self.panels[player.idx]
         
-        yes_rect = pygame.Rect(
-            center_x - button_width - button_spacing // 2,
-            center_y + 40,
-            button_width,
-            button_height
-        )
-        no_rect = pygame.Rect(
-            center_x + button_spacing // 2,
-            center_y + 40,
-            button_width,
-            button_height
-        )
+        if panel.is_vertical():
+            # Vertical layout - buttons stacked
+            yes_rect = panel.get_grid_rect(0.5, 7, 3, 1.5, 4, 12)
+            no_rect = panel.get_grid_rect(0.5, 9, 3, 1.5, 4, 12)
+        else:
+            # Horizontal layout - buttons side by side
+            yes_rect = panel.get_grid_rect(3, 2, 2.5, 1.2, 12, 4)
+            no_rect = panel.get_grid_rect(6.5, 2, 2.5, 1.2, 12, 4)
         
+        font = pygame.font.SysFont(None, 28)
         self.popup_buttons = [
-            HoverButton(yes_rect, "Buy", pygame.font.SysFont(None, 32)),
-            HoverButton(no_rect, "Pass", pygame.font.SysFont(None, 32))
+            HoverButton(yes_rect, "Buy", font, orientation=panel.orientation),
+            HoverButton(no_rect, "Pass", font, orientation=panel.orientation)
         ]
     
     def _buy_property(self, player: Player, position: int):
@@ -635,7 +630,7 @@ class MonopolyGame:
         # Draw background
         self.screen.fill((32, 96, 36))
         
-        # Draw ALL player panels (even inactive ones, just dimmed)
+        # Draw ALL player panels first (so board goes on top)
         self._draw_all_panels()
         
         # Draw board
@@ -648,11 +643,11 @@ class MonopolyGame:
         if self.dice_rolling or self.dice_values != (0, 0):
             self._draw_dice()
         
-        # Draw popups
+        # Draw popups (on top of everything)
         if self.active_popup:
             self._draw_popup()
         
-        # Draw cursors
+        # Draw cursors (always on top)
         self._draw_cursors()
     
     def _draw_all_panels(self):
@@ -678,23 +673,24 @@ class MonopolyGame:
             if is_active and not player.is_bankrupt:
                 # Draw player info (money, properties)
                 if panel.is_vertical():
-                    info_rect = panel.get_grid_rect(0.5, 0.5, 3, 1.5, 4, 12)
-                else:
-                    info_rect = panel.get_grid_rect(0.5, 0.2, 2, 0.8, 12, 4)
-                
-                font_size = 18 if panel.is_vertical() else 20
-                font = pygame.font.SysFont(None, font_size)
-                
-                money_text = f"${player.money}"
-                props_text = f"{len(player.properties)}p"
-                
-                if panel.is_vertical():
+                    info_rect = panel.get_grid_rect(0.5, 0.5, 3, 1.8, 4, 12)
+                    font_size = 16
+                    font = pygame.font.SysFont(None, font_size)
+                    
+                    money_text = f"${player.money}"
+                    props_text = f"{len(player.properties)}p"
+                    
+                    # Stack vertically for vertical panels
                     RotatedText.draw(self.screen, money_text, font, Colors.BLACK,
-                                (info_rect.centerx, info_rect.centery - 10), panel.orientation)
+                                (info_rect.centerx, info_rect.centery - 8), panel.orientation)
                     RotatedText.draw(self.screen, props_text, font, Colors.BLACK,
-                                (info_rect.centerx, info_rect.centery + 10), panel.orientation)
+                                (info_rect.centerx, info_rect.centery + 8), panel.orientation)
                 else:
-                    combined = f"{money_text} | {props_text}"
+                    info_rect = panel.get_grid_rect(0.3, 0.2, 2.5, 0.8, 12, 4)
+                    font_size = 18
+                    font = pygame.font.SysFont(None, font_size)
+                    
+                    combined = f"${player.money} | {len(player.properties)}p"
                     RotatedText.draw(self.screen, combined, font, Colors.BLACK,
                                 (info_rect.centerx, info_rect.centery), panel.orientation)
                 
@@ -735,7 +731,7 @@ class MonopolyGame:
         pygame.draw.rect(self.screen, Colors.BLACK, center_rect, 2)
         
         # Draw "MONOPOLY" in center
-        font = pygame.font.SysFont(None, int(center_size * 0.15), bold=True)
+        font = pygame.font.SysFont(None, int(center_size * 0.12), bold=True)
         text = font.render("MONOPOLY", True, (180, 40, 40))
         text_rect = text.get_rect(center=center_rect.center)
         self.screen.blit(text, text_rect)
@@ -755,10 +751,8 @@ class MonopolyGame:
             
         x, y = self._get_space_position(idx)
         
-        # Determine if corner
-        is_corner = idx in (0, 10, 20, 30)
-        size = int(self.space_size * 1.4) if is_corner else self.space_size
-        
+        # All spaces same size now (no special corner sizing)
+        size = self.space_size
         rect = pygame.Rect(x - size//2, y - size//2, size, size)
         
         # Draw space background
@@ -773,14 +767,14 @@ class MonopolyGame:
             # White background
             main_rect = pygame.Rect(rect.x, rect.y + strip_height, rect.width, rect.height - strip_height)
             pygame.draw.rect(self.screen, Colors.WHITE, main_rect)
-            pygame.draw.rect(self.screen, Colors.BLACK, rect, 1)
+            pygame.draw.rect(self.screen, Colors.BLACK, rect, 2)
             
             # Draw houses/hotel
             if space.houses > 0 and space_type == "property":
-                house_size = max(4, size // 8)
+                house_size = max(5, size // 7)
                 num_houses = min(space.houses, 4)
                 for h in range(num_houses):
-                    house_x = rect.x + 2 + h * (house_size + 1)
+                    house_x = rect.x + 2 + h * (house_size + 2)
                     house_y = rect.y + 2
                     house_rect = pygame.Rect(house_x, house_y, house_size, house_size)
                     house_color = (200, 0, 0) if space.houses == 5 else (0, 150, 0)
@@ -791,19 +785,37 @@ class MonopolyGame:
             pygame.draw.rect(self.screen, bg_color, rect)
             pygame.draw.rect(self.screen, Colors.BLACK, rect, 2)
         
-        # Draw space name (smaller font)
+        # Draw space name with better font sizing
         name = space.data.get("name", "")
-        if name and not is_corner:
-            font_size = max(8, size // 8)
+        if name:
+            # Use larger, more readable font
+            font_size = max(10, size // 6)
             font = pygame.font.SysFont(None, font_size)
             
-            # Truncate if too long
-            if len(name) > 12:
-                name = name[:10] + ".."
+            # Word wrap for long names
+            words = name.split()
+            lines = []
+            current_line = ""
+            max_width = size - 6
             
-            text_surf = font.render(name, True, Colors.BLACK)
-            text_rect = text_surf.get_rect(center=(x, y + size // 4))
-            self.screen.blit(text_surf, text_rect)
+            for word in words:
+                test_line = f"{current_line} {word}".strip()
+                if font.size(test_line)[0] <= max_width:
+                    current_line = test_line
+                else:
+                    if current_line:
+                        lines.append(current_line)
+                    current_line = word
+            if current_line:
+                lines.append(current_line)
+            
+            # Draw up to 3 lines
+            line_height = font.get_linesize()
+            start_y = y - (len(lines[:3]) * line_height) // 2
+            for i, line in enumerate(lines[:3]):
+                text_surf = font.render(line, True, Colors.BLACK)
+                text_rect = text_surf.get_rect(center=(x, start_y + i * line_height))
+                self.screen.blit(text_surf, text_rect)
     
     def _draw_tokens(self):
         """Draw player tokens on board."""
@@ -930,40 +942,51 @@ class MonopolyGame:
             self._draw_buy_prompt()
     
     def _draw_buy_prompt(self):
-        """Draw property purchase prompt in center of board."""
+        """Draw property purchase prompt in player's panel."""
         player = self.popup_data["player"]
         position = self.popup_data["position"]
         price = self.popup_data["price"]
         space = self.properties[position]
         
-        # Draw semi-transparent overlay over entire board
-        overlay_rect = self.board_rect.inflate(20, 20)
-        overlay = pygame.Surface(overlay_rect.size, pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 200))
-        self.screen.blit(overlay, overlay_rect)
+        panel = self.panels[player.idx]
+        
+        # Draw semi-transparent overlay over player's panel
+        overlay = pygame.Surface(panel.rect.size, pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 220))
+        self.screen.blit(overlay, panel.rect)
         
         # Draw property info
-        font_title = pygame.font.SysFont(None, 40, bold=True)
-        font_info = pygame.font.SysFont(None, 32)
-        
-        center_x = self.board_rect.centerx
-        center_y = self.board_rect.centery - 40
+        font_title = pygame.font.SysFont(None, 28, bold=True)
+        font_info = pygame.font.SysFont(None, 22)
         
         name = space.data.get("name", "")
-        name_surf = font_title.render(name, True, Colors.WHITE)
-        name_rect = name_surf.get_rect(center=(center_x, center_y - 60))
-        self.screen.blit(name_surf, name_rect)
+        price_text = f"${price}"
         
-        price_text = f"Price: ${price}"
-        price_surf = font_info.render(price_text, True, Colors.WHITE)
-        price_rect = price_surf.get_rect(center=(center_x, center_y - 10))
-        self.screen.blit(price_surf, price_rect)
-        
-        afford_text = "Can afford" if player.money >= price else "Cannot afford!"
-        color = Colors.ACCENT if player.money >= price else (255, 100, 100)
-        afford_surf = font_info.render(afford_text, True, color)
-        afford_rect = afford_surf.get_rect(center=(center_x, center_y + 20))
-        self.screen.blit(afford_surf, afford_rect)
+        if panel.is_vertical():
+            # Vertical layout
+            info_rect = panel.get_grid_rect(0.5, 1, 3, 5, 4, 12)
+            
+            RotatedText.draw(self.screen, name, font_title, Colors.WHITE,
+                        (info_rect.centerx, info_rect.top + 30), panel.orientation, max_width=info_rect.width)
+            RotatedText.draw(self.screen, price_text, font_info, Colors.ACCENT,
+                        (info_rect.centerx, info_rect.centery), panel.orientation)
+            
+            afford_text = "Affordable" if player.money >= price else "Too expensive!"
+            color = Colors.ACCENT if player.money >= price else (255, 100, 100)
+            RotatedText.draw(self.screen, afford_text, font_info, color,
+                        (info_rect.centerx, info_rect.bottom - 30), panel.orientation)
+        else:
+            # Horizontal layout
+            info_rect = panel.get_grid_rect(0.5, 0, 11, 1, 12, 4)
+            
+            # Draw name and price side by side
+            name_x = info_rect.left + info_rect.width * 0.25
+            price_x = info_rect.left + info_rect.width * 0.75
+            
+            RotatedText.draw(self.screen, name, font_title, Colors.WHITE,
+                           (name_x, info_rect.centery), panel.orientation, max_width=info_rect.width // 2)
+            RotatedText.draw(self.screen, price_text, font_info, Colors.ACCENT,
+                        (price_x, info_rect.centery), panel.orientation)
         
         # Draw buttons
         for btn in self.popup_buttons:
