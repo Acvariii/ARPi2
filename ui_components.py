@@ -252,19 +252,18 @@ class RotatedText:
                    line_spacing: int = 8,
                    padding: int = 8,
                    wrap: bool = False):
-        """
-        Render multiple lines (optionally wrapped) inside rect, rotate once.
-        lines: list of (text, font, color)
-        For wrap=True only the FIRST tuple's font/color are used; text is wrapped.
-        """
         if not lines:
             return
 
-        # Determine base drawing surface BEFORE rotation
         if orientation in (90, 270):
             base_w, base_h = rect.height, rect.width
         else:
             base_w, base_h = rect.width, rect.height
+
+        base_w = max(4, int(base_w))
+        base_h = max(4, int(base_h))
+        if base_w <= 4 or base_h <= 4:
+            return
 
         block_surf = pygame.Surface((base_w, base_h), pygame.SRCALPHA)
 
@@ -284,31 +283,38 @@ class RotatedText:
             return out
 
         rendered: List[pygame.Surface] = []
+        max_w_px = max(10, base_w - 2 * padding)
 
         if wrap and lines:
             txt, fnt, col = lines[0]
-            max_w = base_w - 2 * padding
-            for seg in wrap_text(txt, fnt, max_w):
+            for seg in wrap_text(txt, fnt, max_w_px):
                 rendered.append(fnt.render(seg, True, col))
         else:
             for txt, fnt, col in lines:
-                # Truncate if too wide
-                max_w = base_w - 2 * padding
-                if fnt.size(txt)[0] > max_w:
-                    t = txt
-                    while t and fnt.size(t + "...")[0] > max_w:
+                t = txt
+                if fnt.size(t)[0] > max_w_px:
+                    # prefer wrapping for long words instead of hard ellipsis
+                    parts = wrap_text(t, fnt, max_w_px)
+                    if len(parts) > 1:
+                        for p in parts:
+                            rendered.append(fnt.render(p, True, col))
+                        continue
+                    # fallback to ellipsis for a very long single word
+                    while t and fnt.size(t + "...")[0] > max_w_px:
                         t = t[:-1]
                     if t:
-                        txt = t + "..."
-                rendered.append(fnt.render(txt, True, col))
+                        t = t + "..."
 
+                rendered.append(fnt.render(t, True, col))
+
+        line_spacing = max(2, int(line_spacing))
         total_h = sum(s.get_height() for s in rendered) + line_spacing * (len(rendered) - 1)
-        y = (base_h - total_h) // 2
+        y = max(0, (base_h - total_h) // 2)
         for surf_line in rendered:
-            block_surf.blit(surf_line, ( (base_w - surf_line.get_width()) // 2, y ))
+            x = max(0, (base_w - surf_line.get_width()) // 2)
+            block_surf.blit(surf_line, (x, y))
             y += surf_line.get_height() + line_spacing
 
-        # Rotate final block once
         if orientation == 90:
             block_surf = pygame.transform.rotate(block_surf, -90)
         elif orientation == 180:
