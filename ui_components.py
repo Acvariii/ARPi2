@@ -128,17 +128,20 @@ class RotatedText:
         """Draw text rotated by angle (in degrees) around center point."""
         # Truncate text if needed
         if max_width:
-            original_width = font.size(text)[0]
-            if original_width > max_width:
-                short_text = text
-                while font.size(short_text + "...")[0] > max_width and len(short_text) > 0:
-                    short_text = short_text[:-1]
-                text = short_text + "..."
+            while text and font.size(text)[0] > max_width:
+                text = text[:-4] + "..."
+                if len(text) <= 3:
+                    break
         
-        # Render and rotate
+        # Render text first
         text_surf = font.render(text, True, color)
+        
+        # Rotate if needed
         if angle != 0:
+            # Rotate the surface
             text_surf = pygame.transform.rotate(text_surf, angle)
+        
+        # Center the rotated text at the given point
         text_rect = text_surf.get_rect(center=center)
         surface.blit(text_surf, text_rect)
     
@@ -151,10 +154,16 @@ class RotatedText:
         lines = []
         current_line = ""
         
+        # Determine max width based on rotation
+        if angle in (90, 270):
+            max_width = rect.height - 20
+        else:
+            max_width = rect.width - 20
+        
         # Word wrap
         for word in words:
             test_line = f"{current_line} {word}".strip()
-            if font.size(test_line)[0] <= rect.width:
+            if font.size(test_line)[0] <= max_width:
                 current_line = test_line
             else:
                 if current_line:
@@ -164,26 +173,18 @@ class RotatedText:
             lines.append(current_line)
         
         # Calculate total height
-        line_height = font.get_linesize()
+        line_height = font.get_linesize() + 2
         total_height = len(lines) * line_height
         
-        # Draw lines
+        # Draw lines centered in rect
         start_y = rect.centery - total_height // 2
+        
         for i, line in enumerate(lines):
-            line_surf = font.render(line, True, color)
-            if angle != 0:
-                line_surf = pygame.transform.rotate(line_surf, angle)
-            
             y_pos = start_y + i * line_height
             
-            if align == "center":
-                x_pos = rect.centerx - line_surf.get_width() // 2
-            elif align == "left":
-                x_pos = rect.left
-            else:  # right
-                x_pos = rect.right - line_surf.get_width()
-            
-            surface.blit(line_surf, (x_pos, y_pos))
+            # For rotated text, use the draw method which handles rotation properly
+            RotatedText.draw(surface, line, font, color, 
+                           (rect.centerx, y_pos), angle)
 
 
 def draw_cursor(surface: pygame.Surface, pos: Tuple[int, int], color: Tuple[int, int, int]):

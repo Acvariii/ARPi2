@@ -2251,23 +2251,27 @@ class MonopolyGame:
             
             if is_active and not player.is_bankrupt:
                 if panel.is_vertical():
-                    info_rect = panel.get_grid_rect(0.5, 0.5, 3, 1.8, 4, 12)
-                    font = pygame.font.SysFont(None, 16)
+                    # Vertical panels - stack info vertically with more space
+                    info_rect = panel.get_grid_rect(0.5, 0.5, 3, 2.5, 4, 12)
+                    font = pygame.font.SysFont("Arial", 18, bold=True)
                     
                     money_text = f"${player.money}"
                     props_text = f"{len(player.properties)}p"
                     
+                    # Draw money at top of info area
                     RotatedText.draw(self.screen, money_text, font, Colors.BLACK,
-                                (info_rect.centerx, info_rect.centery - 8), panel.orientation)
+                                   (info_rect.centerx, info_rect.top + 20), panel.orientation)
+                    # Draw properties below with more spacing
                     RotatedText.draw(self.screen, props_text, font, Colors.BLACK,
-                                (info_rect.centerx, info_rect.centery + 8), panel.orientation)
+                                   (info_rect.centerx, info_rect.top + 45), panel.orientation)
                 else:
+                    # Horizontal panels - single line
                     info_rect = panel.get_grid_rect(0.3, 0.2, 2.5, 0.8, 12, 4)
-                    font = pygame.font.SysFont(None, 18)
+                    font = pygame.font.SysFont("Arial", 18, bold=True)
                     
                     combined = f"${player.money} | {len(player.properties)}p"
                     RotatedText.draw(self.screen, combined, font, Colors.BLACK,
-                                (info_rect.centerx, info_rect.centery), panel.orientation)
+                                   (info_rect.centerx, info_rect.centery), panel.orientation)
                 
                 for btn in self.buttons[idx].values():
                     btn.draw(self.screen)
@@ -2282,7 +2286,7 @@ class MonopolyGame:
                         )
             else:
                 # Draw player number for inactive slots
-                font = pygame.font.SysFont(None, 36)
+                font = pygame.font.SysFont("Arial", 36, bold=True)
                 label = f"P{idx + 1}"
                 text_surf = font.render(label, True, (100, 100, 100))
                 if panel.orientation != 0:
