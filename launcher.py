@@ -5,8 +5,7 @@ import threading
 import time
 import pygame
 from typing import List, Dict
-from ui_components import HoverButton, draw_cursor, draw_circular_progress
-from ui_elements import PlayerSelectionUI
+from ui_components import HoverButton, draw_cursor, draw_circular_progress, PlayerSelectionUI
 from monopoly import MonopolyGame
 from hand_tracking import HandTracker
 from config import SERVER_WS, WINDOW_SIZE, FPS, HOVER_TIME_THRESHOLD, Colors

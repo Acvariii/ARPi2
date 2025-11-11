@@ -253,3 +253,108 @@ def draw_cursor(surface: pygame.Surface, pos: Tuple[int, int],
     pygame.draw.circle(surface, Colors.WHITE, pos, 18)
     pygame.draw.circle(surface, color, pos, 12)
     pygame.draw.circle(surface, Colors.BLACK, pos, 4)
+
+
+class PlayerSelectionUI:
+    """UI for selecting players before game starts."""
+    
+    def __init__(self, screen: pygame.Surface):
+        self.screen = screen
+        self.screen_w, self.screen_h = screen.get_size()
+        self.selected = [False] * 8
+        self.hover_start: Dict[int, float] = {}
+        
+        # Calculate slot positions (8 slots in a circle)
+        center_x = self.screen_w // 2
+        center_y = self.screen_h // 2
+        radius = min(self.screen_w, self.screen_h) // 3
+        
+        self.slot_positions = []
+        for i in range(8):
+            angle = (i * 45 - 90) * (3.14159 / 180)  # Start from top
+            x = center_x + int(radius * math.cos(angle))
+            y = center_y + int(radius * math.sin(angle))
+            self.slot_positions.append((x, y))
+    
+    def update_with_fingertips(self, fingertip_meta: List[Dict]):
+        """Update selection state based on fingertip positions."""
+        now = time.time()
+        active_slots = set()
+        
+        for meta in fingertip_meta:
+            pos = meta["pos"]
+            
+            # Check which slot is being hovered
+            for i, (sx, sy) in enumerate(self.slot_positions):
+                dist = math.sqrt((pos[0] - sx)**2 + (pos[1] - sy)**2)
+                if dist < 60:  # Hover radius
+                    active_slots.add(i)
+                    
+                    if i not in self.hover_start:
+                        self.hover_start[i] = now
+                    elif (now - self.hover_start[i]) >= HOVER_TIME_THRESHOLD:
+                        # Toggle selection
+                        self.selected[i] = not self.selected[i]
+                        self.hover_start.pop(i)
+                    break
+        
+        # Remove hover for slots no longer being touched
+        for slot in list(self.hover_start.keys()):
+            if slot not in active_slots:
+                self.hover_start.pop(slot)
+    
+    def draw_slots(self):
+        """Draw all player selection slots."""
+        from config import PLAYER_COLORS
+        
+        for i, (x, y) in enumerate(self.slot_positions):
+            color = PLAYER_COLORS[i]
+            
+            # Draw slot circle
+            if self.selected[i]:
+                # Selected - filled circle with border
+                pygame.draw.circle(self.screen, color, (x, y), 55)
+                pygame.draw.circle(self.screen, Colors.WHITE, (x, y), 55, 5)
+            else:
+                # Not selected - outline only
+                pygame.draw.circle(self.screen, (80, 80, 80), (x, y), 55, 3)
+            
+            # Draw player number
+            font = pygame.font.SysFont(None, 36, bold=True)
+            text_color = Colors.WHITE if self.selected[i] else (150, 150, 150)
+            text = font.render(f"P{i+1}", True, text_color)
+            text_rect = text.get_rect(center=(x, y))
+            self.screen.blit(text, text_rect)
+    
+    def get_hover_progress(self) -> List[Dict]:
+        """Get hover progress for all slots being hovered."""
+        now = time.time()
+        result = []
+        for slot, start_time in self.hover_start.items():
+            progress = min(1.0, (now - start_time) / HOVER_TIME_THRESHOLD)
+            x, y = self.slot_positions[slot]
+            result.append({
+                "slot": slot,
+                "progress": progress,
+                "pos": (x, y)
+            })
+        return result
+    
+    def selected_count(self) -> int:
+        """Get number of selected players."""
+        return sum(self.selected)
+    
+    def closest_player_color(self, pos: Tuple[int, int]):
+        """Get color of closest player slot."""
+        from config import PLAYER_COLORS
+        
+        min_dist = float('inf')
+        closest_idx = 0
+        
+        for i, (sx, sy) in enumerate(self.slot_positions):
+            dist = math.sqrt((pos[0] - sx)**2 + (pos[1] - sy)**2)
+            if dist < min_dist:
+                min_dist = dist
+                closest_idx = i
+        
+        return PLAYER_COLORS[closest_idx]
