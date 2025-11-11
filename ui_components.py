@@ -1,4 +1,4 @@
-"""UI components with proper rotation support."""
+"""UI components with proper rotation support for all orientations."""
 import time
 import pygame
 import math
@@ -7,7 +7,7 @@ from config import HOVER_TIME_THRESHOLD, Colors
 
 
 class HoverButton:
-    """Button that activates on sustained hover."""
+    """Button that activates on sustained hover with modern styling."""
     
     def __init__(self, rect: pygame.Rect, text: str, font: pygame.font.Font, 
                  radius: int = 8, orientation: int = 0):
@@ -55,7 +55,8 @@ class HoverButton:
         return False
     
     def draw(self, surface: pygame.Surface):
-        """Draw the button."""
+        """Draw the button with modern styling."""
+        # Determine colors
         if not self.enabled:
             bg_color = (60, 60, 60)
             text_color = (120, 120, 120)
@@ -88,19 +89,16 @@ class HoverButton:
         # Border
         pygame.draw.rect(surface, border_color, self.rect, width=2, border_radius=self.radius)
         
-        # Text - render and position based on orientation
+        # Draw text - render normally first
         text_surf = self.font.render(self.text, True, text_color)
         
-        # Apply rotation transformation
+        # Rotate based on orientation
         if self.orientation == 90:
-            # Left side - rotate so text reads from bottom to top
-            text_surf = pygame.transform.rotate(text_surf, 90)
+            text_surf = pygame.transform.rotate(text_surf, -90)  # Clockwise
         elif self.orientation == 180:
-            # Top - upside down
             text_surf = pygame.transform.rotate(text_surf, 180)
         elif self.orientation == 270:
-            # Right side - rotate so text reads from top to bottom
-            text_surf = pygame.transform.rotate(text_surf, 270)
+            text_surf = pygame.transform.rotate(text_surf, 90)  # Counter-clockwise
         
         text_rect = text_surf.get_rect(center=self.rect.center)
         surface.blit(text_surf, text_rect)
@@ -125,7 +123,7 @@ class HoverButton:
 
 
 class RotatedText:
-    """Helper for drawing text with proper rotation."""
+    """Helper for drawing text with proper rotation for each player orientation."""
     
     @staticmethod
     def draw(surface: pygame.Surface, text: str, font: pygame.font.Font, 
@@ -140,7 +138,7 @@ class RotatedText:
             font: Font to use
             color: Text color
             pos: (x, y) center position
-            orientation: 0=normal, 90=left side, 180=upside down, 270=right side
+            orientation: 0=bottom, 90=left, 180=top, 270=right
             max_width: Maximum width before truncating
         """
         # Truncate if needed
@@ -151,19 +149,24 @@ class RotatedText:
                 if len(display_text) <= 3:
                     break
         
-        # Render text normally
+        # Render text normally first
         text_surf = font.render(display_text, True, color)
         
-        # Apply orientation rotation
+        # Apply rotation based on orientation
+        # orientation 0 = bottom panels (no rotation)
+        # orientation 90 = left panel (rotate so text reads vertically from their view)
+        # orientation 180 = top panels (upside down)
+        # orientation 270 = right panel (rotate so text reads vertically from their view)
+        
         if orientation == 90:
-            # Left side: rotate 90 degrees counter-clockwise
-            text_surf = pygame.transform.rotate(text_surf, 90)
+            # Left side: rotate -90 degrees (clockwise) so it reads bottom-to-top from left
+            text_surf = pygame.transform.rotate(text_surf, -90)
         elif orientation == 180:
             # Top: rotate 180 degrees
             text_surf = pygame.transform.rotate(text_surf, 180)
         elif orientation == 270:
-            # Right side: rotate 90 degrees clockwise (270 ccw)
-            text_surf = pygame.transform.rotate(text_surf, 270)
+            # Right side: rotate 90 degrees (counter-clockwise) so it reads top-to-bottom from right
+            text_surf = pygame.transform.rotate(text_surf, 90)
         
         # Center at position
         text_rect = text_surf.get_rect(center=pos)
@@ -184,9 +187,8 @@ class RotatedText:
             rect: Rectangle to draw within
             orientation: 0, 90, 180, or 270
         """
-        # Determine wrap width based on orientation
+        # For vertical orientations, we need to wrap based on height dimension
         if orientation in (90, 270):
-            # For vertical orientations, we wrap based on the "height" dimension
             wrap_width = rect.height - 40
         else:
             wrap_width = rect.width - 40
@@ -207,11 +209,11 @@ class RotatedText:
         if current_line:
             lines.append(current_line)
         
-        # Calculate positioning
-        line_height = font.get_linesize() + 4
+        # Calculate line spacing
+        line_height = font.get_linesize() + 6
         total_height = len(lines) * line_height
         
-        # Draw each line centered
+        # Draw each line
         start_y = rect.centery - total_height // 2
         for i, line in enumerate(lines):
             y_pos = start_y + i * line_height
@@ -225,8 +227,6 @@ def draw_circular_progress(surface: pygame.Surface, center: Tuple[int, int],
     """Draw a circular progress indicator."""
     if progress <= 0:
         return
-    
-    rect = pygame.Rect(center[0] - radius, center[1] - radius, radius * 2, radius * 2)
     
     # Background circle
     pygame.draw.circle(surface, (40, 40, 40), center, radius, thickness)
