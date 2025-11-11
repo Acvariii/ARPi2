@@ -312,32 +312,31 @@ class MonopolyGame:
             self.phase = "roll"
     
     def _popup_button_row(self, panel, count: int) -> List[pygame.Rect]:
-        """
-        Return a list of rects (world coords) for a horizontal button row
-        visually at the bottom of the panel (player-local), consistent
-        across orientations.
-        """
-        margin = 8
-        row_h_frac = 0.16 if panel.is_vertical() else 0.35
-        # Base area in panel local coordinates (unrotated perspective)
-        if panel.is_vertical():
-            # Use panel.rect directly; treat width/height as displayed
-            w = panel.rect.width - 2 * margin
-            h = int((panel.rect.height * row_h_frac))
-            y = panel.rect.bottom - h - margin
-            x = panel.rect.x + margin
-        else:
-            w = panel.rect.width - 2 * margin
-            h = int((panel.rect.height * 0.55))
-            y = panel.rect.bottom - h - margin
-            x = panel.rect.x + margin
+        BUTTON_ROW_FRAC_VERTICAL = 0.22
+        BUTTON_ROW_FRAC_HORIZONTAL = 0.38
+        MIN_W, MIN_H = 72, 44
+        GAP = 8
+        MARGIN = 8
 
-        gap = 6
-        btn_w = (w - gap * (count - 1)) // count
+        if panel.is_vertical():
+            w = max(16, panel.rect.width - 2 * MARGIN)
+            h = max(MIN_H, int(panel.rect.height * BUTTON_ROW_FRAC_VERTICAL))
+            y = panel.rect.bottom - h - MARGIN
+            x = panel.rect.x + MARGIN
+        else:
+            w = max(16, panel.rect.width - 2 * MARGIN)
+            h = max(MIN_H, int(panel.rect.height * BUTTON_ROW_FRAC_HORIZONTAL))
+            y = panel.rect.bottom - h - MARGIN
+            x = panel.rect.x + MARGIN
+
+        btn_w = max(MIN_W, (w - GAP * (count - 1)) // count)
         btn_h = h
+        total_w = btn_w * count + GAP * (count - 1)
+        start_x = x + max(0, (w - total_w) // 2)
+
         rects = []
         for i in range(count):
-            rects.append(pygame.Rect(x + i * (btn_w + gap), y, btn_w, btn_h))
+            rects.append(pygame.Rect(start_x + i * (btn_w + GAP), y, btn_w, btn_h))
         return rects
 
     # ---- Popup creators updated to use unified layout ----

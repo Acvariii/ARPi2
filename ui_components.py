@@ -265,8 +265,6 @@ class RotatedText:
         if base_w <= 4 or base_h <= 4:
             return
 
-        block_surf = pygame.Surface((base_w, base_h), pygame.SRCALPHA)
-
         def wrap_text(text: str, font: pygame.font.Font, max_w: int) -> List[str]:
             words = text.split()
             out, cur = [], ""
@@ -282,48 +280,59 @@ class RotatedText:
                 out.append(cur)
             return out
 
-        rendered: List[pygame.Surface] = []
         max_w_px = max(10, base_w - 2 * padding)
+        rendered: List[pygame.Surface] = []
 
         if wrap and lines:
             txt, fnt, col = lines[0]
             for seg in wrap_text(txt, fnt, max_w_px):
                 rendered.append(fnt.render(seg, True, col))
+            extra = lines[1:]
+            for txt, fnt, col in extra:
+                parts = wrap_text(txt, fnt, max_w_px)
+                if parts:
+                    for p in parts:
+                        rendered.append(fnt.render(p, True, col))
+                else:
+                    rendered.append(fnt.render(txt, True, col))
         else:
             for txt, fnt, col in lines:
-                t = txt
-                if fnt.size(t)[0] > max_w_px:
-                    # prefer wrapping for long words instead of hard ellipsis
-                    parts = wrap_text(t, fnt, max_w_px)
-                    if len(parts) > 1:
-                        for p in parts:
-                            rendered.append(fnt.render(p, True, col))
-                        continue
-                    # fallback to ellipsis for a very long single word
-                    while t and fnt.size(t + "...")[0] > max_w_px:
-                        t = t[:-1]
-                    if t:
-                        t = t + "..."
-
-                rendered.append(fnt.render(t, True, col))
+                parts = wrap_text(txt, fnt, max_w_px)
+                if parts and (len(parts) > 1 or fnt.size(txt)[0] > max_w_px):
+                    for p in parts:
+                        rendered.append(fnt.render(p, True, col))
+                else:
+                    rendered.append(fnt.render(txt, True, col))
 
         line_spacing = max(2, int(line_spacing))
         total_h = sum(s.get_height() for s in rendered) + line_spacing * (len(rendered) - 1)
-        y = max(0, (base_h - total_h) // 2)
-        for surf_line in rendered:
-            x = max(0, (base_w - surf_line.get_width()) // 2)
-            block_surf.blit(surf_line, (x, y))
-            y += surf_line.get_height() + line_spacing
+
+        base_surf = pygame.Surface((base_w, base_h), pygame.SRCALPHA)
+        if total_h <= base_h - 2 * padding:
+            y = max(padding, (base_h - total_h) // 2)
+            for surf_line in rendered:
+                x = max(padding, (base_w - surf_line.get_width()) // 2)
+                base_surf.blit(surf_line, (x, y))
+                y += surf_line.get_height() + line_spacing
+        else:
+            temp_h = max(8, total_h + 2 * padding)
+            temp_surf = pygame.Surface((base_w, temp_h), pygame.SRCALPHA)
+            y = padding
+            for surf_line in rendered:
+                x = max(padding, (base_w - surf_line.get_width()) // 2)
+                temp_surf.blit(surf_line, (x, y))
+                y += surf_line.get_height() + line_spacing
+            base_surf = pygame.transform.smoothscale(temp_surf, (base_w, base_h))
 
         if orientation == 90:
-            block_surf = pygame.transform.rotate(block_surf, -90)
+            base_surf = pygame.transform.rotate(base_surf, -90)
         elif orientation == 180:
-            block_surf = pygame.transform.rotate(block_surf, 180)
+            base_surf = pygame.transform.rotate(base_surf, 180)
         elif orientation == 270:
-            block_surf = pygame.transform.rotate(block_surf, 90)
+            base_surf = pygame.transform.rotate(base_surf, 90)
 
-        block_rect = block_surf.get_rect(center=rect.center)
-        surface.blit(block_surf, block_rect)
+        block_rect = base_surf.get_rect(center=rect.center)
+        surface.blit(base_surf, block_rect)
 
 
 def draw_circular_progress(surface: pygame.Surface, center: Tuple[int, int], 
