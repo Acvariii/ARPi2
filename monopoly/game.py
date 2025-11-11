@@ -127,233 +127,88 @@ class MonopolyGame:
         return positions
     
     def _init_buttons(self):
-        """Initialize player panel buttons."""
-        font = pygame.font.SysFont(None, 24)
-        
+        font = pygame.font.SysFont(None, 26)
         for idx in range(8):
             panel = self.panels[idx]
-            
             if panel.is_vertical():
-                action_rect = panel.get_grid_rect(0.2, 8.5, 3.6, 1.2, 4, 12)
-                props_rect = panel.get_grid_rect(0.2, 9.8, 1.7, 1, 4, 12)
-                build_rect = panel.get_grid_rect(2.1, 9.8, 1.7, 1, 4, 12)
+                margin = 6
+                gap = 6
+                row_h = int(panel.rect.width * 0.26)
+                y = panel.rect.y + int(panel.rect.height * 0.70)
+                x = panel.rect.x + margin
+                avail_w = panel.rect.width - 2 * margin
+                btn_w = (avail_w - 2 * gap) // 3
+                btn_h = row_h
+                r_roll = pygame.Rect(x, y, btn_w, btn_h)
+                r_props = pygame.Rect(x + (btn_w + gap), y, btn_w, btn_h)
+                r_build = pygame.Rect(x + 2 * (btn_w + gap), y, btn_w, btn_h)
             else:
-                action_rect = panel.get_grid_rect(0.3, 2, 2.5, 1.5, 12, 4)
-                props_rect = panel.get_grid_rect(3, 2, 2, 1.5, 12, 4)
-                build_rect = panel.get_grid_rect(5.2, 2, 2, 1.5, 12, 4)
-            
+                margin = 10
+                gap = 12
+                row_h = int(panel.rect.height * 0.55)
+                y = panel.rect.y + panel.rect.height - row_h - margin
+                x = panel.rect.x + margin
+                avail_w = panel.rect.width - 2 * margin
+                btn_w = (avail_w - 2 * gap) // 3
+                btn_h = row_h
+                r_roll = pygame.Rect(x, y, btn_w, btn_h)
+                r_props = pygame.Rect(x + (btn_w + gap), y, btn_w, btn_h)
+                r_build = pygame.Rect(x + 2 * (btn_w + gap), y, btn_w, btn_h)
             self.buttons[idx] = {
-                "action": HoverButton(action_rect, "Roll", font, orientation=panel.orientation),
-                "props": HoverButton(props_rect, "Props", font, orientation=panel.orientation),
-                "build": HoverButton(build_rect, "Build", font, orientation=panel.orientation)
+                "action": HoverButton(r_roll, "Roll", font, orientation=panel.orientation),
+                "props": HoverButton(r_props, "Props", font, orientation=panel.orientation),
+                "build": HoverButton(r_build, "Build", font, orientation=panel.orientation)
             }
-    
-    def start_game(self, player_indices: List[int]):
-        """Start game with selected players."""
-        self.active_players = sorted(player_indices)
-        self.current_player_idx = 0
-        
-        for i in self.active_players:
-            self.players[i].money = STARTING_MONEY
-            self.players[i].position = 0
-            self.players[i].properties = []
-            self.players[i].in_jail = False
-            self.players[i].is_bankrupt = False
-            self.players[i].get_out_of_jail_cards = 0
-    
-    def get_current_player(self) -> Player:
-        """Get the current active player."""
-        return self.players[self.active_players[self.current_player_idx]]
-    
-    def advance_turn(self):
-        """Move to next player's turn."""
-        player = self.get_current_player()
-        player.consecutive_doubles = 0
-        
-        original_idx = self.current_player_idx
-        while True:
-            self.current_player_idx = (self.current_player_idx + 1) % len(self.active_players)
-            next_player = self.get_current_player()
-            
-            if not next_player.is_bankrupt or self.current_player_idx == original_idx:
-                break
-        
-        self.phase = "roll"
-        self.can_roll = True
-        self.dice_values = (0, 0)
-    
-    def roll_dice(self):
-        """Initiate dice roll."""
-        if not self.can_roll or self.dice_rolling:
-            return
-        
-        self.dice_rolling = True
-        self.dice_roll_start = time.time()
-        self.can_roll = False
-    
-    def move_player(self, player: Player, spaces: int):
-        """Move player forward by spaces."""
-        GameLogic.move_player(player, spaces)
-        self.phase = "moving"
-    
-    def land_on_space(self, player: Player):
-        """Handle landing on a space."""
-        position = player.position
-        space = self.properties[position]
-        space_type = space.data.get("type")
-        
-        if GameLogic.check_passed_go(player):
-            player.add_money(PASSING_GO_MONEY)
-        
-        if space_type == "go":
-            player.add_money(PASSING_GO_MONEY)
-            self._finish_turn_or_allow_double()
-        
-        elif space_type in ("property", "railroad", "utility"):
-            if space.owner is None:
-                self.phase = "buying"
-                self._show_buy_prompt(player, position)
-            elif space.owner != player.idx:
-                self.phase = "paying_rent"
-                self._pay_rent(player, position)
-            else:
-                self._finish_turn_or_allow_double()
-        
-        elif space_type == "go_to_jail":
-            GameLogic.send_to_jail(player)
-            self._finish_turn_or_allow_double()
-        
-        elif space_type == "income_tax":
-            player.remove_money(INCOME_TAX)
-            self._finish_turn_or_allow_double()
-        
-        elif space_type == "luxury_tax":
-            player.remove_money(LUXURY_TAX)
-            self._finish_turn_or_allow_double()
-        
-        elif space_type == "chance":
-            self._draw_card(player, "chance")
-        
-        elif space_type == "community_chest":
-            self._draw_card(player, "community_chest")
-        
-        else:
-            self._finish_turn_or_allow_double()
-        
-        if player.money < 0:
-            self._handle_bankruptcy(player)
-    
-    def _draw_card(self, player: Player, deck_type: str):
-        """Draw a card from deck."""
-        card = GameLogic.draw_card(deck_type, self.chance_deck, self.community_chest_deck)
-        self._show_card_popup(player, card, deck_type)
-    
-    def _execute_card_action(self, player: Player, card: Dict):
-        """Execute card action."""
-        action = card.get("action")
-        if not action:
-            return
-        
-        action_type = action[0]
-        
-        if action_type == "money":
-            amount = action[1]
-            if amount > 0:
-                player.add_money(amount)
-            else:
-                player.remove_money(abs(amount))
-        
-        elif action_type == "jail_free":
-            player.get_out_of_jail_cards += 1
-        
-        elif action_type == "go_to_jail":
-            GameLogic.send_to_jail(player)
-            return
-        
-        elif action_type == "advance":
-            target_pos = action[1]
-            collect_go = action[2] if len(action) > 2 else False
-            
-            if collect_go and target_pos < player.position:
-                player.add_money(PASSING_GO_MONEY)
-            
-            player.position = target_pos
-            self.land_on_space(player)
-            return
-        
-        elif action_type == "collect_from_each":
-            amount = action[1]
-            for idx in self.active_players:
-                if idx != player.idx and not self.players[idx].is_bankrupt:
-                    if self.players[idx].remove_money(amount):
-                        player.add_money(amount)
-        
-        elif action_type == "pay_each_player":
-            amount = action[1]
-            for idx in self.active_players:
-                if idx != player.idx and not self.players[idx].is_bankrupt:
-                    if player.remove_money(amount):
-                        self.players[idx].add_money(amount)
-        
-        elif action_type == "pay_per_house_hotel":
-            house_cost, hotel_cost = action[1]
-            houses = player.get_total_houses(self.properties)
-            hotels = player.get_total_hotels(self.properties)
-            total_cost = houses * house_cost + hotels * hotel_cost
-            player.remove_money(total_cost)
-    
-    def _finish_turn_or_allow_double(self):
-        """Handle doubles or end turn."""
-        player = self.get_current_player()
-        if player.consecutive_doubles > 0:
-            self.phase = "roll"
-            self.can_roll = True
-        else:
-            self.phase = "roll"
-    
-    def _popup_button_row(self, panel, count: int) -> List[pygame.Rect]:
-        BUTTON_ROW_FRAC_VERTICAL = 0.22
-        BUTTON_ROW_FRAC_HORIZONTAL = 0.38
-        MIN_W, MIN_H = 72, 44
-        GAP = 8
-        MARGIN = 8
 
-        if panel.is_vertical():
-            w = max(16, panel.rect.width - 2 * MARGIN)
-            h = max(MIN_H, int(panel.rect.height * BUTTON_ROW_FRAC_VERTICAL))
-            y = panel.rect.bottom - h - MARGIN
-            x = panel.rect.x + MARGIN
-        else:
-            w = max(16, panel.rect.width - 2 * MARGIN)
-            h = max(MIN_H, int(panel.rect.height * BUTTON_ROW_FRAC_HORIZONTAL))
-            y = panel.rect.bottom - h - MARGIN
-            x = panel.rect.x + MARGIN
-
-        btn_w = max(MIN_W, (w - GAP * (count - 1)) // count)
-        btn_h = h
-        total_w = btn_w * count + GAP * (count - 1)
-        start_x = x + max(0, (w - total_w) // 2)
-
-        rects = []
-        for i in range(count):
-            rects.append(pygame.Rect(start_x + i * (btn_w + GAP), y, btn_w, btn_h))
+    def _popup_button_column(self, panel, count: int, small: bool = False) -> list:
+        col_ratio = 0.32
+        margin = 6
+        gap = 8
+        if panel.orientation == 0:  # bottom
+            col_w = int(panel.rect.width * col_ratio)
+            col_h = panel.rect.height - 2 * margin
+            x = panel.rect.x + margin
+            y = panel.rect.y + margin
+            btn_h = (col_h - (count - 1) * gap) // count
+            btn_w = col_w - 2 * margin
+            rects = [pygame.Rect(x + margin, y + i * (btn_h + gap), btn_w, btn_h) for i in range(count)]
+        elif panel.orientation == 180:  # top (flipped)
+            col_w = int(panel.rect.width * col_ratio)
+            col_h = panel.rect.height - 2 * margin
+            x = panel.rect.right - col_w - margin
+            y = panel.rect.y + margin
+            btn_h = (col_h - (count - 1) * gap) // count
+            btn_w = col_w - 2 * margin
+            rects = [pygame.Rect(x + margin, y + i * (btn_h + gap), btn_w, btn_h) for i in range(count)]
+        elif panel.orientation == 90:  # left (rotated)
+            col_h = int(panel.rect.height * col_ratio)
+            col_w = panel.rect.width - 2 * margin
+            y = panel.rect.bottom - col_h - margin
+            x = panel.rect.x + margin
+            btn_w = (col_w - (count - 1) * gap) // count
+            btn_h = col_h - 2 * margin
+            rects = [pygame.Rect(x + i * (btn_w + gap), y + margin, btn_w, btn_h) for i in range(count)]
+        else:  # 270 right
+            col_h = int(panel.rect.height * col_ratio)
+            col_w = panel.rect.width - 2 * margin
+            y = panel.rect.y + margin
+            x = panel.rect.x + margin
+            btn_w = (col_w - (count - 1) * gap) // count
+            btn_h = col_h - 2 * margin
+            rects = [pygame.Rect(x + i * (btn_w + gap), y + margin, btn_w, btn_h) for i in range(count)]
+        if small:
+            for r in rects:
+                r.height = int(r.height * 0.55)
         return rects
-
-    # ---- Popup creators updated to use unified layout ----
 
     def _show_buy_prompt(self, player: Player, position: int):
         space = self.properties[position]
         price = space.data.get("price", 0)
         self.active_popup = "buy_prompt"
-        self.popup_data = {
-            "player": player,
-            "position": position,
-            "price": price,
-            "space": space
-        }
+        self.popup_data = {"player": player, "position": position, "price": price, "space": space}
         panel = self.panels[player.idx]
-        font = pygame.font.SysFont(None, 26)
-        rects = self._popup_button_row(panel, 2)
+        font = pygame.font.SysFont(None, 24)
+        rects = self._popup_button_column(panel, 2)
         self.popup_buttons = [
             HoverButton(rects[0], "Buy", font, orientation=panel.orientation),
             HoverButton(rects[1], "Pass", font, orientation=panel.orientation)
@@ -361,14 +216,10 @@ class MonopolyGame:
 
     def _show_card_popup(self, player: Player, card: Dict, deck_type: str):
         self.active_popup = "card"
-        self.popup_data = {
-            "player": player,
-            "card": card,
-            "deck_type": deck_type
-        }
+        self.popup_data = {"player": player, "card": card, "deck_type": deck_type}
         panel = self.panels[player.idx]
-        font = pygame.font.SysFont(None, 26)
-        rects = self._popup_button_row(panel, 1)
+        font = pygame.font.SysFont(None, 22)
+        rects = self._popup_button_column(panel, 1, small=True)
         self.popup_buttons = [
             HoverButton(rects[0], "OK", font, orientation=panel.orientation)
         ]
@@ -379,7 +230,7 @@ class MonopolyGame:
         self.property_scroll = 0
         panel = self.panels[player.idx]
         font = pygame.font.SysFont(None, 22)
-        rects = self._popup_button_row(panel, 3)
+        rects = self._popup_button_column(panel, 3, small=True)
         self.popup_buttons = [
             HoverButton(rects[0], "◀", font, orientation=panel.orientation),
             HoverButton(rects[1], "▶", font, orientation=panel.orientation),
@@ -390,8 +241,8 @@ class MonopolyGame:
         self.active_popup = "build"
         self.popup_data = {"player": player}
         panel = self.panels[player.idx]
-        font = pygame.font.SysFont(None, 24)
-        rects = self._popup_button_row(panel, 1)
+        font = pygame.font.SysFont(None, 22)
+        rects = self._popup_button_column(panel, 1, small=True)
         self.popup_buttons = [
             HoverButton(rects[0], "✕ Close", font, orientation=panel.orientation)
         ]
