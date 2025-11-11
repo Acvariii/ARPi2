@@ -600,3 +600,94 @@ class MonopolyGame:
 
     def get_current_player(self) -> "Player":
         return self.players[self.active_players[self.current_player_idx]]
+    
+    def roll_dice(self):
+        """Start a dice roll animation, then move the current player in update()."""
+        if not self.can_roll or self.dice_rolling:
+            return
+        self.dice_rolling = True
+        self.dice_roll_start = time.time()
+        self.can_roll = False
+
+    def move_player(self, player: "Player", spaces: int):
+        """Animate player movement using GameLogic and set phase."""
+        GameLogic.move_player(player, spaces)
+        self.phase = "moving"
+
+    def land_on_space(self, player: "Player"):
+        """Resolve effects after movement ends."""
+        from monopoly_data import PASSING_GO_MONEY
+        from constants import COMMUNITY_CHEST_CARDS, CHANCE_CARDS  # just to ensure deps
+
+        if GameLogic.check_passed_go(player):
+            player.add_money(PASSING_GO_MONEY)
+
+        position = player.position
+        space = self.properties[position]
+        space_type = space.data.get("type")
+
+        if space_type == "go":
+            player.add_money(PASSING_GO_MONEY)
+            self._finish_turn_or_allow_double()
+
+        elif space_type in ("property", "railroad", "utility"):
+            if space.owner is None:
+                self.phase = "buying"
+                self._show_buy_prompt(player, position)
+            elif space.owner != player.idx:
+                self.phase = "paying_rent"
+                self._pay_rent(player, position)
+            else:
+                self._finish_turn_or_allow_double()
+
+        elif space_type == "go_to_jail":
+            self._send_to_jail(player)
+
+        elif space_type == "chance":
+            self._show_card_popup(player, GameLogic.draw_card("chance", self.chance_deck, self.community_chest_deck), "chance")
+
+        elif space_type == "community_chest":
+            self._show_card_popup(player, GameLogic.draw_card("community_chest", self.chance_deck, self.community_chest_deck), "community_chest")
+
+        elif space_type == "income_tax":
+            player.remove_money(INCOME_TAX)
+            self._finish_turn_or_allow_double()
+
+        elif space_type == "luxury_tax":
+            player.remove_money(LUXURY_TAX)
+            self._finish_turn_or_allow_double()
+
+        else:
+            self._finish_turn_or_allow_double()
+
+        if player.money < 0:
+            self._handle_bankruptcy(player)
+
+    def _finish_turn_or_allow_double(self):
+        """If doubles were rolled, allow another roll; otherwise advance turn."""
+        current = self.get_current_player()
+        if current.consecutive_doubles > 0:
+            self.phase = "roll"
+            self.can_roll = True
+        else:
+            self.advance_turn()
+
+    def advance_turn(self):
+        """Advance to next non-bankrupt active player."""
+        if not self.active_players:
+            return
+
+        player = self.get_current_player()
+        player.consecutive_doubles = 0
+
+        original_idx = self.current_player_idx
+        while True:
+            self.current_player_idx = (self.current_player_idx + 1) % len(self.active_players)
+            next_player = self.get_current_player()
+            if not next_player.is_bankrupt or self.current_player_idx == original_idx:
+                break
+
+        self.phase = "roll"
+        self.can_roll = True
+        self.dice_values = (0, 0)
+        self.dice_rolling = False
