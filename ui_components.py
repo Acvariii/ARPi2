@@ -89,16 +89,12 @@ class HoverButton:
         # Border
         pygame.draw.rect(surface, border_color, self.rect, width=2, border_radius=self.radius)
         
-        # Draw text with correct rotation
+        # Draw text with rotation
         text_surf = self.font.render(self.text, True, text_color)
         
-        # Apply same rotation fix as RotatedText
-        if self.orientation == 90:
-            text_surf = pygame.transform.rotate(text_surf, -90)
-        elif self.orientation == 270:
-            text_surf = pygame.transform.rotate(text_surf, 90)
-        elif self.orientation == 180:
-            text_surf = pygame.transform.rotate(text_surf, 180)
+        # Simply rotate by orientation angle
+        if self.orientation != 0:
+            text_surf = pygame.transform.rotate(text_surf, self.orientation)
         
         text_rect = text_surf.get_rect(center=self.rect.center)
         surface.blit(text_surf, text_rect)
@@ -143,18 +139,9 @@ class RotatedText:
         # Render text horizontally first
         text_surf = font.render(text, True, color)
         
-        # Apply rotation - pygame rotates counter-clockwise
-        # We need to negate angles for proper orientation
-        if angle == 90:
-            # Right side: rotate -90 (clockwise) so text reads bottom-to-top
-            text_surf = pygame.transform.rotate(text_surf, -90)
-        elif angle == 270:
-            # Left side: rotate 90 (counter-clockwise) so text reads top-to-bottom  
-            text_surf = pygame.transform.rotate(text_surf, 90)
-        elif angle == 180:
-            # Top: rotate 180
-            text_surf = pygame.transform.rotate(text_surf, 180)
-        # angle == 0 needs no rotation
+        # Simply rotate by the angle (pygame rotates counter-clockwise)
+        if angle != 0:
+            text_surf = pygame.transform.rotate(text_surf, angle)
         
         # Center the rotated text at the given point
         text_rect = text_surf.get_rect(center=center)
@@ -188,10 +175,10 @@ class RotatedText:
             lines.append(current_line)
         
         # Calculate line spacing
-        line_height = font.get_linesize() + 4
+        line_height = font.get_linesize() + 6
         total_height = len(lines) * line_height
         
-        # Draw each line
+        # Draw each line with proper spacing
         start_y = rect.centery - total_height // 2
         for i, line in enumerate(lines):
             y_pos = start_y + i * line_height

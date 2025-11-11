@@ -14,8 +14,8 @@ class PlayerPanel:
         3: ("top", 0, 180),       # Top left - upside down
         4: ("top", 1, 180),       # Top center - upside down
         5: ("top", 2, 180),       # Top right - upside down
-        6: ("left", 0, 270),      # Left - rotated 270° (reads top-to-bottom)
-        7: ("right", 0, 90),      # Right - rotated 90° (reads bottom-to-top)
+        6: ("left", 0, 90),       # Left - rotated 90° (clockwise from their view)
+        7: ("right", 0, 270),     # Right - rotated 270° (counter-clockwise from their view)
     }
     
     def __init__(self, player_idx: int, screen_size: Tuple[int, int]):
