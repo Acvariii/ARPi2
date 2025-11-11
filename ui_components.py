@@ -76,7 +76,7 @@ class HoverButton:
         pygame.draw.rect(shadow_surf, (0, 0, 0, 60), shadow_surf.get_rect(), border_radius=self.radius)
         surface.blit(shadow_surf, shadow_rect)
         
-        # Button background with gradient effect
+        # Button background
         pygame.draw.rect(surface, bg_color, self.rect, border_radius=self.radius)
         
         # Subtle inner highlight
@@ -84,15 +84,22 @@ class HoverButton:
             highlight_rect = self.rect.inflate(-4, -4)
             highlight_rect.height = highlight_rect.height // 3
             pygame.draw.rect(surface, tuple(min(255, c + 30) for c in bg_color), 
-                        highlight_rect, border_radius=self.radius)
+                           highlight_rect, border_radius=self.radius)
         
         # Border
         pygame.draw.rect(surface, border_color, self.rect, width=2, border_radius=self.radius)
         
-        # Draw text (rotated if needed)
+        # Draw text with correct rotation
         text_surf = self.font.render(self.text, True, text_color)
-        if self.orientation != 0:
-            text_surf = pygame.transform.rotate(text_surf, self.orientation)
+        
+        # Apply same rotation fix as RotatedText
+        if self.orientation == 90:
+            text_surf = pygame.transform.rotate(text_surf, -90)
+        elif self.orientation == 270:
+            text_surf = pygame.transform.rotate(text_surf, 90)
+        elif self.orientation == 180:
+            text_surf = pygame.transform.rotate(text_surf, 180)
+        
         text_rect = text_surf.get_rect(center=self.rect.center)
         surface.blit(text_surf, text_rect)
     
@@ -136,15 +143,16 @@ class RotatedText:
         # Render text horizontally first
         text_surf = font.render(text, True, color)
         
-        # For vertical orientations (90, 270), we need special handling
+        # Apply rotation - pygame rotates counter-clockwise
+        # We need to negate angles for proper orientation
         if angle == 90:
-            # Rotate 90 degrees clockwise
+            # Right side: rotate -90 (clockwise) so text reads bottom-to-top
             text_surf = pygame.transform.rotate(text_surf, -90)
         elif angle == 270:
-            # Rotate 90 degrees counter-clockwise
+            # Left side: rotate 90 (counter-clockwise) so text reads top-to-bottom  
             text_surf = pygame.transform.rotate(text_surf, 90)
         elif angle == 180:
-            # Rotate 180 degrees
+            # Top: rotate 180
             text_surf = pygame.transform.rotate(text_surf, 180)
         # angle == 0 needs no rotation
         
@@ -161,8 +169,7 @@ class RotatedText:
         lines = []
         current_line = ""
         
-        # For vertical orientations, we need to use height as max width
-        # since text will be rotated
+        # For vertical orientations, use height as constraint
         if angle in (90, 270):
             max_width = rect.height - 40
         else:
@@ -184,21 +191,12 @@ class RotatedText:
         line_height = font.get_linesize() + 4
         total_height = len(lines) * line_height
         
-        # Calculate starting position based on orientation
-        if angle in (90, 270):
-            # For vertical text, lines stack differently
-            start_y = rect.centery - total_height // 2
-            for i, line in enumerate(lines):
-                y_pos = start_y + i * line_height
-                RotatedText.draw(surface, line, font, color, 
-                               (rect.centerx, y_pos), angle)
-        else:
-            # For horizontal text
-            start_y = rect.centery - total_height // 2
-            for i, line in enumerate(lines):
-                y_pos = start_y + i * line_height
-                RotatedText.draw(surface, line, font, color, 
-                               (rect.centerx, y_pos), angle)
+        # Draw each line
+        start_y = rect.centery - total_height // 2
+        for i, line in enumerate(lines):
+            y_pos = start_y + i * line_height
+            RotatedText.draw(surface, line, font, color, 
+                           (rect.centerx, y_pos), angle)
 
 
 def draw_cursor(surface: pygame.Surface, pos: Tuple[int, int], color: Tuple[int, int, int]):

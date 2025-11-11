@@ -8,14 +8,14 @@ class PlayerPanel:
     
     # Panel positions around the table
     POSITIONS = {
-        0: ("bottom", 0, 0),      # Bottom left
-        1: ("bottom", 1, 0),      # Bottom center
-        2: ("bottom", 2, 0),      # Bottom right
-        3: ("top", 0, 180),       # Top left
-        4: ("top", 1, 180),       # Top center
-        5: ("top", 2, 180),       # Top right
-        6: ("left", 0, 270),      # Left
-        7: ("right", 0, 90),      # Right
+        0: ("bottom", 0, 0),      # Bottom left - normal orientation
+        1: ("bottom", 1, 0),      # Bottom center - normal orientation
+        2: ("bottom", 2, 0),      # Bottom right - normal orientation
+        3: ("top", 0, 180),       # Top left - upside down
+        4: ("top", 1, 180),       # Top center - upside down
+        5: ("top", 2, 180),       # Top right - upside down
+        6: ("left", 0, 270),      # Left - rotated 270° (reads top-to-bottom)
+        7: ("right", 0, 90),      # Right - rotated 90° (reads bottom-to-top)
     }
     
     def __init__(self, player_idx: int, screen_size: Tuple[int, int]):
