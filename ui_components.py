@@ -21,7 +21,6 @@ class HoverButton:
         self.enabled = True
     
     def update(self, fingertip_meta: List[Dict], enabled: bool = True) -> bool:
-        """Update hover state and return True if clicked."""
         self.enabled = enabled
         
         if not enabled:
@@ -55,7 +54,6 @@ class HoverButton:
         return False
     
     def draw(self, surface: pygame.Surface):
-        """Draw the button with modern styling."""
         if not self.enabled:
             bg_color = (60, 60, 60)
             text_color = (120, 120, 120)
@@ -87,17 +85,16 @@ class HoverButton:
         text_surf = self.font.render(self.text, True, text_color)
         
         if self.orientation == 90:
-            text_surf = pygame.transform.rotate(text_surf, 90)
+            text_surf = pygame.transform.rotate(text_surf, -90)
         elif self.orientation == 180:
             text_surf = pygame.transform.rotate(text_surf, 180)
         elif self.orientation == 270:
-            text_surf = pygame.transform.rotate(text_surf, -90)
+            text_surf = pygame.transform.rotate(text_surf, 90)
         
         text_rect = text_surf.get_rect(center=self.rect.center)
         surface.blit(text_surf, text_rect)
     
     def get_hover_progress(self) -> List[Dict]:
-        """Get hover progress for visualization."""
         now = time.time()
         result = []
         for key, start_time in self.hover_start.items():
@@ -110,13 +107,11 @@ class HoverButton:
         return result
     
     def reset(self):
-        """Reset button state."""
         self.clicked = False
         self.hover_start.clear()
 
 
 class RotatedText:
-    """Helper for drawing text with proper rotation for each player orientation."""
     
     @staticmethod
     def draw(surface: pygame.Surface, text: str, font: pygame.font.Font, 
@@ -132,11 +127,11 @@ class RotatedText:
         text_surf = font.render(display_text, True, color)
         
         if orientation == 90:
-            text_surf = pygame.transform.rotate(text_surf, 90)
+            text_surf = pygame.transform.rotate(text_surf, -90)
         elif orientation == 180:
             text_surf = pygame.transform.rotate(text_surf, 180)
         elif orientation == 270:
-            text_surf = pygame.transform.rotate(text_surf, -90)
+            text_surf = pygame.transform.rotate(text_surf, 90)
         
         text_rect = text_surf.get_rect(center=pos)
         surface.blit(text_surf, text_rect)
@@ -145,40 +140,49 @@ class RotatedText:
     def draw_wrapped(surface: pygame.Surface, text: str, font: pygame.font.Font,
                     color: Tuple[int, int, int], rect: pygame.Rect, 
                     orientation: int = 0):
+        
         if orientation in (90, 270):
-            wrap_width = rect.height - 60
+            available_space = rect.height
         else:
-            wrap_width = rect.width - 60
+            available_space = rect.width
+        
+        wrap_width = available_space - 80
         
         words = text.split()
         lines = []
         current_line = ""
         
         for word in words:
-            test_line = f"{current_line} {word}".strip()
-            if font.size(test_line)[0] <= wrap_width:
+            test_line = current_line + (" " if current_line else "") + word
+            text_width = font.size(test_line)[0]
+            
+            if text_width <= wrap_width:
                 current_line = test_line
             else:
                 if current_line:
                     lines.append(current_line)
                 current_line = word
+        
         if current_line:
             lines.append(current_line)
         
-        line_height = font.get_linesize() + 10
-        total_height = len(lines) * line_height
+        line_height = font.get_height()
+        vertical_spacing = max(12, int(line_height * 0.4))
+        total_line_height = line_height + vertical_spacing
         
-        start_y = rect.centery - total_height // 2
+        total_text_height = len(lines) * line_height + (len(lines) - 1) * vertical_spacing
+        
+        start_y = rect.centery - (total_text_height // 2)
+        
         for i, line in enumerate(lines):
-            y_pos = start_y + i * line_height
+            line_y = start_y + (i * total_line_height)
             RotatedText.draw(surface, line, font, color, 
-                           (rect.centerx, y_pos), orientation)
+                           (rect.centerx, line_y), orientation)
 
 
 def draw_circular_progress(surface: pygame.Surface, center: Tuple[int, int], 
                           radius: int, progress: float, color: Tuple[int, int, int],
                           thickness: int = 4):
-    """Draw a circular progress indicator."""
     if progress <= 0:
         return
     
@@ -201,14 +205,12 @@ def draw_circular_progress(surface: pygame.Surface, center: Tuple[int, int],
 
 def draw_cursor(surface: pygame.Surface, pos: Tuple[int, int], 
                color: Tuple[int, int, int] = Colors.WHITE):
-    """Draw a cursor at position."""
     pygame.draw.circle(surface, Colors.WHITE, pos, 18)
     pygame.draw.circle(surface, color, pos, 12)
     pygame.draw.circle(surface, Colors.BLACK, pos, 4)
 
 
 class PlayerSelectionUI:
-    """UI for selecting players before game starts."""
     
     def __init__(self, screen: pygame.Surface):
         self.screen = screen
@@ -235,7 +237,6 @@ class PlayerSelectionUI:
         self.slot_positions.append((self.screen_w - spacing_x // 2, self.screen_h // 2))
     
     def update_with_fingertips(self, fingertip_meta: List[Dict]):
-        """Update selection state based on fingertip positions."""
         now = time.time()
         active_slots = set()
         
@@ -259,7 +260,6 @@ class PlayerSelectionUI:
                 self.hover_start.pop(slot)
     
     def draw_slots(self):
-        """Draw all player selection slots."""
         from config import PLAYER_COLORS
         
         for i, (x, y) in enumerate(self.slot_positions):
@@ -278,7 +278,6 @@ class PlayerSelectionUI:
             self.screen.blit(text, text_rect)
     
     def get_hover_progress(self) -> List[Dict]:
-        """Get hover progress for all slots being hovered."""
         now = time.time()
         result = []
         for slot, start_time in self.hover_start.items():
@@ -292,11 +291,9 @@ class PlayerSelectionUI:
         return result
     
     def selected_count(self) -> int:
-        """Get number of selected players."""
         return sum(self.selected)
     
     def closest_player_color(self, pos: Tuple[int, int]):
-        """Get color of closest player slot."""
         from config import PLAYER_COLORS
         
         min_dist = float('inf')
