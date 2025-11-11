@@ -311,11 +311,40 @@ class MonopolyGame:
         else:
             self.phase = "roll"
     
+    def _popup_button_row(self, panel, count: int) -> List[pygame.Rect]:
+        """
+        Return a list of rects (world coords) for a horizontal button row
+        visually at the bottom of the panel (player-local), consistent
+        across orientations.
+        """
+        margin = 8
+        row_h_frac = 0.16 if panel.is_vertical() else 0.35
+        # Base area in panel local coordinates (unrotated perspective)
+        if panel.is_vertical():
+            # Use panel.rect directly; treat width/height as displayed
+            w = panel.rect.width - 2 * margin
+            h = int((panel.rect.height * row_h_frac))
+            y = panel.rect.bottom - h - margin
+            x = panel.rect.x + margin
+        else:
+            w = panel.rect.width - 2 * margin
+            h = int((panel.rect.height * 0.55))
+            y = panel.rect.bottom - h - margin
+            x = panel.rect.x + margin
+
+        gap = 6
+        btn_w = (w - gap * (count - 1)) // count
+        btn_h = h
+        rects = []
+        for i in range(count):
+            rects.append(pygame.Rect(x + i * (btn_w + gap), y, btn_w, btn_h))
+        return rects
+
+    # ---- Popup creators updated to use unified layout ----
+
     def _show_buy_prompt(self, player: Player, position: int):
-        """Show buy property popup."""
         space = self.properties[position]
         price = space.data.get("price", 0)
-        
         self.active_popup = "buy_prompt"
         self.popup_data = {
             "player": player,
@@ -323,82 +352,49 @@ class MonopolyGame:
             "price": price,
             "space": space
         }
-        
         panel = self.panels[player.idx]
         font = pygame.font.SysFont(None, 26)
-        
-        if panel.is_vertical():
-            yes_rect = panel.get_grid_rect(2, 9, 1.8, 1.2, 4, 12)
-            no_rect = panel.get_grid_rect(2, 10.5, 1.8, 1.2, 4, 12)
-        else:
-            yes_rect = panel.get_grid_rect(9, 1.5, 2.5, 1, 12, 4)
-            no_rect = panel.get_grid_rect(9, 2.7, 2.5, 1, 12, 4)
-        
+        rects = self._popup_button_row(panel, 2)
         self.popup_buttons = [
-            HoverButton(yes_rect, "Buy", font, orientation=panel.orientation),
-            HoverButton(no_rect, "Pass", font, orientation=panel.orientation)
+            HoverButton(rects[0], "Buy", font, orientation=panel.orientation),
+            HoverButton(rects[1], "Pass", font, orientation=panel.orientation)
         ]
-    
+
     def _show_card_popup(self, player: Player, card: Dict, deck_type: str):
-        """Show card popup."""
         self.active_popup = "card"
         self.popup_data = {
             "player": player,
             "card": card,
             "deck_type": deck_type
         }
-        
         panel = self.panels[player.idx]
         font = pygame.font.SysFont(None, 26)
-        
-        if panel.is_vertical():
-            ok_rect = panel.get_grid_rect(1, 10.5, 2, 1.2, 4, 12)
-        else:
-            ok_rect = panel.get_grid_rect(9.5, 2.5, 2, 1, 12, 4)
-        
+        rects = self._popup_button_row(panel, 1)
         self.popup_buttons = [
-            HoverButton(ok_rect, "OK", font, orientation=panel.orientation)
+            HoverButton(rects[0], "OK", font, orientation=panel.orientation)
         ]
-    
+
     def _show_properties_popup(self, player: Player):
-        """Show properties popup."""
         self.active_popup = "properties"
         self.popup_data = {"player": player}
         self.property_scroll = 0
-        
         panel = self.panels[player.idx]
         font = pygame.font.SysFont(None, 22)
-        
-        if panel.is_vertical():
-            prev_rect = panel.get_grid_rect(2, 8.5, 1.8, 1, 4, 12)
-            next_rect = panel.get_grid_rect(2, 9.7, 1.8, 1, 4, 12)
-            close_rect = panel.get_grid_rect(2, 10.9, 1.8, 1, 4, 12)
-        else:
-            prev_rect = panel.get_grid_rect(9, 0.5, 2.5, 1, 12, 4)
-            next_rect = panel.get_grid_rect(9, 1.7, 2.5, 1, 12, 4)
-            close_rect = panel.get_grid_rect(9, 2.9, 2.5, 1, 12, 4)
-        
+        rects = self._popup_button_row(panel, 3)
         self.popup_buttons = [
-            HoverButton(prev_rect, "◀", font, orientation=panel.orientation),
-            HoverButton(next_rect, "▶", font, orientation=panel.orientation),
-            HoverButton(close_rect, "✕", font, orientation=panel.orientation)
+            HoverButton(rects[0], "◀", font, orientation=panel.orientation),
+            HoverButton(rects[1], "▶", font, orientation=panel.orientation),
+            HoverButton(rects[2], "✕", font, orientation=panel.orientation)
         ]
-    
+
     def _show_build_popup(self, player: Player):
-        """Show build popup."""
         self.active_popup = "build"
         self.popup_data = {"player": player}
-        
         panel = self.panels[player.idx]
         font = pygame.font.SysFont(None, 24)
-        
-        if panel.is_vertical():
-            close_rect = panel.get_grid_rect(2, 10.9, 1.8, 1, 4, 12)
-        else:
-            close_rect = panel.get_grid_rect(9, 2.9, 2.5, 1, 12, 4)
-        
+        rects = self._popup_button_row(panel, 1)
         self.popup_buttons = [
-            HoverButton(close_rect, "✕ Close", font, orientation=panel.orientation)
+            HoverButton(rects[0], "✕ Close", font, orientation=panel.orientation)
         ]
     
     def _buy_property(self, player: Player, position: int):
@@ -607,9 +603,7 @@ class MonopolyGame:
     def _draw_all_panels(self):
         """Draw all player panels."""
         from ui_components import RotatedText
-        
         current_player_idx = self.active_players[self.current_player_idx] if self.active_players else -1
-        
         for idx in range(8):
             player = self.players[idx]
             panel = self.panels[idx]
@@ -625,20 +619,24 @@ class MonopolyGame:
             
             if is_active and not player.is_bankrupt:
                 if panel.is_vertical():
+                    info_rect = panel.get_grid_rect(0.2, 0.4, 3.6, 2.2, 4, 12)
                     font = pygame.font.SysFont("Arial", 18, bold=True)
-                    money_text = f"${player.money}"
-                    props_text = f"{len(player.properties)}p"
-                    RotatedText.draw_stacked(self.screen,
-                                             [money_text, props_text],
-                                             font, Colors.BLACK,
-                                             panel.rect, panel.orientation,
-                                             top_offset=50, spacing=18)
+                    RotatedText.draw_block(
+                        self.screen,
+                        [(f"${player.money}", font, Colors.BLACK),
+                         (f"{len(player.properties)}p", font, Colors.BLACK)],
+                        info_rect,
+                        panel.orientation,
+                        line_spacing=14
+                    )
                 else:
                     info_rect = panel.get_grid_rect(0.3, 0.2, 2.5, 0.8, 12, 4)
                     font = pygame.font.SysFont("Arial", 18, bold=True)
-                    combined = f"${player.money} | {len(player.properties)}p"
-                    RotatedText.draw(self.screen, combined, font, Colors.BLACK,
-                                     (info_rect.centerx, info_rect.centery), panel.orientation)
+                    RotatedText.draw(self.screen,
+                                     f"${player.money} | {len(player.properties)}p",
+                                     font, Colors.BLACK,
+                                     (info_rect.centerx, info_rect.centery),
+                                     panel.orientation)
                 
                 for btn in self.buttons[idx].values():
                     btn.draw(self.screen)

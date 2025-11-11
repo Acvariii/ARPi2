@@ -243,6 +243,81 @@ class RotatedText:
             r = surf.get_rect(center=(cx, cy + heights[i] // 2))
             surface.blit(surf, r)
             cy += heights[i] + spacing
+    
+    @staticmethod
+    def draw_block(surface: pygame.Surface,
+                   lines: List[Tuple[str, pygame.font.Font, Tuple[int,int,int]]],
+                   rect: pygame.Rect,
+                   orientation: int,
+                   line_spacing: int = 8,
+                   padding: int = 8,
+                   wrap: bool = False):
+        """
+        Render multiple lines (optionally wrapped) inside rect, rotate once.
+        lines: list of (text, font, color)
+        For wrap=True only the FIRST tuple's font/color are used; text is wrapped.
+        """
+        if not lines:
+            return
+
+        # Determine base drawing surface BEFORE rotation
+        if orientation in (90, 270):
+            base_w, base_h = rect.height, rect.width
+        else:
+            base_w, base_h = rect.width, rect.height
+
+        block_surf = pygame.Surface((base_w, base_h), pygame.SRCALPHA)
+
+        def wrap_text(text: str, font: pygame.font.Font, max_w: int) -> List[str]:
+            words = text.split()
+            out, cur = [], ""
+            for w in words:
+                test = (cur + " " + w).strip()
+                if font.size(test)[0] <= max_w:
+                    cur = test
+                else:
+                    if cur:
+                        out.append(cur)
+                    cur = w
+            if cur:
+                out.append(cur)
+            return out
+
+        rendered: List[pygame.Surface] = []
+
+        if wrap and lines:
+            txt, fnt, col = lines[0]
+            max_w = base_w - 2 * padding
+            for seg in wrap_text(txt, fnt, max_w):
+                rendered.append(fnt.render(seg, True, col))
+        else:
+            for txt, fnt, col in lines:
+                # Truncate if too wide
+                max_w = base_w - 2 * padding
+                if fnt.size(txt)[0] > max_w:
+                    t = txt
+                    while t and fnt.size(t + "...")[0] > max_w:
+                        t = t[:-1]
+                    if t:
+                        txt = t + "..."
+                rendered.append(fnt.render(txt, True, col))
+
+        total_h = sum(s.get_height() for s in rendered) + line_spacing * (len(rendered) - 1)
+        y = (base_h - total_h) // 2
+        for surf_line in rendered:
+            block_surf.blit(surf_line, ( (base_w - surf_line.get_width()) // 2, y ))
+            y += surf_line.get_height() + line_spacing
+
+        # Rotate final block once
+        if orientation == 90:
+            block_surf = pygame.transform.rotate(block_surf, -90)
+        elif orientation == 180:
+            block_surf = pygame.transform.rotate(block_surf, 180)
+        elif orientation == 270:
+            block_surf = pygame.transform.rotate(block_surf, 90)
+
+        block_rect = block_surf.get_rect(center=rect.center)
+        surface.blit(block_surf, block_rect)
 
 
 def draw_circular_progress(surface: pygame.Surface, center: Tuple[int, int], 
