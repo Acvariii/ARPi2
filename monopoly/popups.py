@@ -2,7 +2,7 @@
 import pygame
 from typing import Dict
 from config import Colors
-from ui_components import RotatedText, HoverButton, draw_circular_progress
+from ui_components import RotatedText, draw_circular_progress
 
 
 class PopupDrawer:
@@ -18,50 +18,41 @@ class PopupDrawer:
         price = popup_data["price"]
         space = popup_data["space"]
         
-        # Modern overlay
         overlay = pygame.Surface(panel.rect.size, pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 200))
         self.screen.blit(overlay, panel.rect)
         
-        # Fonts
-        font_title = pygame.font.SysFont("Arial", 24, bold=True)
-        font_info = pygame.font.SysFont("Arial", 18)
-        font_price = pygame.font.SysFont("Arial", 28, bold=True)
+        font_title = pygame.font.SysFont("Arial", 22, bold=True)
+        font_info = pygame.font.SysFont("Arial", 16)
+        font_price = pygame.font.SysFont("Arial", 26, bold=True)
         
         name = space.data.get("name", "")
         price_text = f"${price}"
         
-        # Content area
         if panel.is_vertical():
-            content_rect = panel.get_grid_rect(0.3, 1.5, 1.4, 6, 4, 12)
+            content_rect = panel.get_grid_rect(0.4, 2, 1.2, 5, 4, 12)
         else:
-            content_rect = panel.get_grid_rect(1, 0.5, 7, 2.8, 12, 4)
+            content_rect = panel.get_grid_rect(1.5, 0.8, 6, 2, 12, 4)
         
-        # Color bar
         color = space.data.get("color", (200, 200, 200))
-        bar_height = 6
+        bar_height = 5
         color_bar = pygame.Rect(content_rect.x, content_rect.y, content_rect.width, bar_height)
-        pygame.draw.rect(self.screen, color, color_bar, border_radius=3)
+        pygame.draw.rect(self.screen, color, color_bar, border_radius=2)
         
-        # Content
-        y_offset = bar_height + 20
-        line_spacing = 35
-        
+        y = content_rect.y + bar_height + 25
         RotatedText.draw(self.screen, name, font_title, Colors.WHITE,
-                       (content_rect.centerx, content_rect.y + y_offset), 
-                       panel.orientation, max_width=content_rect.width - 20)
+                       (content_rect.centerx, y), panel.orientation, 
+                       max_width=content_rect.width - 20)
         
-        y_offset += line_spacing + 10
+        y += 45
         RotatedText.draw(self.screen, "Price", font_info, (180, 180, 180),
-                       (content_rect.centerx, content_rect.y + y_offset), panel.orientation)
+                       (content_rect.centerx, y), panel.orientation)
         
-        y_offset += line_spacing
+        y += 35
         RotatedText.draw(self.screen, price_text, font_price, Colors.ACCENT,
-                       (content_rect.centerx, content_rect.y + y_offset), panel.orientation)
+                       (content_rect.centerx, y), panel.orientation)
         
-        y_offset += line_spacing + 15
-        
-        # Affordability
+        y += 50
         if player.money >= price:
             status_text = "✓ Can afford"
             status_color = (100, 220, 100)
@@ -70,14 +61,13 @@ class PopupDrawer:
             status_color = (255, 100, 100)
         
         RotatedText.draw(self.screen, status_text, font_info, status_color,
-                       (content_rect.centerx, content_rect.y + y_offset), panel.orientation)
+                       (content_rect.centerx, y), panel.orientation)
         
-        y_offset += line_spacing
-        balance_text = f"Your balance: ${player.money}"
+        y += 35
+        balance_text = f"Balance: ${player.money}"
         RotatedText.draw(self.screen, balance_text, font_info, (200, 200, 200),
-                       (content_rect.centerx, content_rect.y + y_offset), panel.orientation)
+                       (content_rect.centerx, y), panel.orientation)
         
-        # Draw buttons
         for btn in buttons:
             btn.draw(self.screen)
             for progress_info in btn.get_hover_progress():
@@ -91,42 +81,38 @@ class PopupDrawer:
         card = popup_data["card"]
         deck_type = popup_data["deck_type"]
         
-        # Overlay
         overlay = pygame.Surface(panel.rect.size, pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 200))
         self.screen.blit(overlay, panel.rect)
         
-        # Fonts
-        font_title = pygame.font.SysFont("Arial", 22, bold=True)
-        font_text = pygame.font.SysFont("Arial", 15)
+        font_title = pygame.font.SysFont("Arial", 20, bold=True)
+        font_text = pygame.font.SysFont("Arial", 14)
         
         title = "CHANCE" if deck_type == "chance" else "COMMUNITY CHEST"
         card_text = card.get("text", "")
         title_color = (255, 200, 60) if deck_type == "chance" else (100, 180, 255)
         
-        # Content area
         if panel.is_vertical():
-            content_rect = panel.get_grid_rect(0.3, 1.5, 1.4, 6, 4, 12)
+            content_rect = panel.get_grid_rect(0.4, 2, 1.2, 5, 4, 12)
         else:
-            content_rect = panel.get_grid_rect(1, 0.5, 7, 2.8, 12, 4)
+            content_rect = panel.get_grid_rect(1.5, 0.8, 6, 2, 12, 4)
         
-        # Top bar
-        bar_height = 4
+        bar_height = 3
         top_bar = pygame.Rect(content_rect.x, content_rect.y, content_rect.width, bar_height)
         pygame.draw.rect(self.screen, title_color, top_bar, border_radius=2)
         
-        # Title
-        title_y = content_rect.y + bar_height + 20
+        title_y = content_rect.y + bar_height + 25
         RotatedText.draw(self.screen, title, font_title, title_color,
                        (content_rect.centerx, title_y), panel.orientation)
         
-        # Card text
-        text_area = content_rect.inflate(-30, -80)
-        text_area.y = title_y + 30
+        text_area = content_rect.copy()
+        text_area.y = title_y + 40
+        text_area.height = content_rect.height - 70
+        text_area = text_area.inflate(-40, -40)
+        
         RotatedText.draw_wrapped(self.screen, card_text, font_text, Colors.WHITE,
                                text_area, panel.orientation)
         
-        # Draw button
         for btn in buttons:
             btn.draw(self.screen)
             for progress_info in btn.get_hover_progress():
@@ -139,16 +125,14 @@ class PopupDrawer:
         """Draw properties list popup."""
         player = popup_data["player"]
         
-        # Overlay
         overlay = pygame.Surface(panel.rect.size, pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 200))
         self.screen.blit(overlay, panel.rect)
         
-        # Fonts
-        font_title = pygame.font.SysFont("Arial", 20, bold=True)
-        font_label = pygame.font.SysFont("Arial", 14)
-        font_value = pygame.font.SysFont("Arial", 15, bold=True)
-        font_small = pygame.font.SysFont("Arial", 13)
+        font_title = pygame.font.SysFont("Arial", 18, bold=True)
+        font_label = pygame.font.SysFont("Arial", 13)
+        font_value = pygame.font.SysFont("Arial", 14, bold=True)
+        font_small = pygame.font.SysFont("Arial", 12)
         
         if not player.properties:
             no_props_text = "No properties owned"
@@ -158,28 +142,24 @@ class PopupDrawer:
             prop_idx = player.properties[property_scroll]
             prop = properties[prop_idx]
             
-            # Content area
             if panel.is_vertical():
-                content_rect = panel.get_grid_rect(0.3, 1.5, 1.4, 6, 4, 12)
+                content_rect = panel.get_grid_rect(0.4, 2, 1.2, 5, 4, 12)
             else:
-                content_rect = panel.get_grid_rect(1, 0.5, 7, 2.8, 12, 4)
+                content_rect = panel.get_grid_rect(1.5, 0.8, 6, 2, 12, 4)
             
-            # Color bar
             color = prop.data.get("color", (200, 200, 200))
-            bar_height = 6
+            bar_height = 5
             color_bar = pygame.Rect(content_rect.x, content_rect.y, content_rect.width, bar_height)
-            pygame.draw.rect(self.screen, color, color_bar, border_radius=3)
+            pygame.draw.rect(self.screen, color, color_bar, border_radius=2)
             
-            # Property name
             name = prop.data.get("name", "")
-            name_y = content_rect.y + bar_height + 20
+            name_y = content_rect.y + bar_height + 25
             RotatedText.draw(self.screen, name, font_title, Colors.WHITE,
                            (content_rect.centerx, name_y), panel.orientation,
                            max_width=content_rect.width - 20)
             
-            # Details
-            y_offset = name_y + 40
-            line_spacing = 25
+            y = name_y + 45
+            line_spacing = 28
             
             details = [
                 f"Type: {prop.data.get('type', 'property').title()}",
@@ -196,16 +176,14 @@ class PopupDrawer:
             
             for detail in details:
                 RotatedText.draw(self.screen, detail, font_label, Colors.WHITE,
-                               (content_rect.centerx, y_offset), panel.orientation)
-                y_offset += line_spacing
+                               (content_rect.centerx, y), panel.orientation)
+                y += line_spacing
             
-            # Page indicator
             page_text = f"Property {property_scroll + 1} of {len(player.properties)}"
-            page_y = content_rect.bottom - 15
+            page_y = content_rect.bottom - 20
             RotatedText.draw(self.screen, page_text, font_small, (120, 120, 120),
                            (content_rect.centerx, page_y), panel.orientation)
         
-        # Draw buttons
         for btn in buttons:
             btn.draw(self.screen)
             for progress_info in btn.get_hover_progress():
@@ -216,13 +194,11 @@ class PopupDrawer:
     
     def draw_build_popup(self, panel, buttons: list):
         """Draw building options popup."""
-        # Overlay
         overlay = pygame.Surface(panel.rect.size, pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 200))
         self.screen.blit(overlay, panel.rect)
         
-        # Title
-        font_title = pygame.font.SysFont("Arial", 24, bold=True)
+        font_title = pygame.font.SysFont("Arial", 22, bold=True)
         title_text = "Building (Coming Soon)"
         RotatedText.draw(self.screen, title_text, font_title, Colors.ACCENT,
                        (panel.rect.centerx, panel.rect.centery), panel.orientation)

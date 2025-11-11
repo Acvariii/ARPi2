@@ -15,7 +15,7 @@ class HoverButton:
         self.text = text
         self.font = font
         self.radius = radius
-        self.orientation = orientation  # 0, 90, 180, 270
+        self.orientation = orientation
         self.hover_start: Dict[str, float] = {}
         self.clicked = False
         self.enabled = True
@@ -56,7 +56,6 @@ class HoverButton:
     
     def draw(self, surface: pygame.Surface):
         """Draw the button with modern styling."""
-        # Determine colors
         if not self.enabled:
             bg_color = (60, 60, 60)
             text_color = (120, 120, 120)
@@ -70,35 +69,29 @@ class HoverButton:
             text_color = (220, 220, 220)
             border_color = (40, 80, 140)
         
-        # Shadow
         shadow_rect = self.rect.move(3, 3)
         shadow_surf = pygame.Surface((shadow_rect.width, shadow_rect.height), pygame.SRCALPHA)
         pygame.draw.rect(shadow_surf, (0, 0, 0, 60), shadow_surf.get_rect(), border_radius=self.radius)
         surface.blit(shadow_surf, shadow_rect)
         
-        # Background
         pygame.draw.rect(surface, bg_color, self.rect, border_radius=self.radius)
         
-        # Highlight
         if self.enabled:
             highlight_rect = self.rect.inflate(-4, -4)
             highlight_rect.height = highlight_rect.height // 3
             pygame.draw.rect(surface, tuple(min(255, c + 30) for c in bg_color), 
                            highlight_rect, border_radius=self.radius)
         
-        # Border
         pygame.draw.rect(surface, border_color, self.rect, width=2, border_radius=self.radius)
         
-        # Draw text - render normally first
         text_surf = self.font.render(self.text, True, text_color)
         
-        # Rotate based on orientation
         if self.orientation == 90:
-            text_surf = pygame.transform.rotate(text_surf, -90)  # Clockwise
+            text_surf = pygame.transform.rotate(text_surf, 90)
         elif self.orientation == 180:
             text_surf = pygame.transform.rotate(text_surf, 180)
         elif self.orientation == 270:
-            text_surf = pygame.transform.rotate(text_surf, 90)  # Counter-clockwise
+            text_surf = pygame.transform.rotate(text_surf, -90)
         
         text_rect = text_surf.get_rect(center=self.rect.center)
         surface.blit(text_surf, text_rect)
@@ -129,19 +122,6 @@ class RotatedText:
     def draw(surface: pygame.Surface, text: str, font: pygame.font.Font, 
             color: Tuple[int, int, int], pos: Tuple[int, int], 
             orientation: int, max_width: Optional[int] = None):
-        """
-        Draw text at position with given orientation.
-        
-        Args:
-            surface: Surface to draw on
-            text: Text to render
-            font: Font to use
-            color: Text color
-            pos: (x, y) center position
-            orientation: 0=bottom, 90=left, 180=top, 270=right
-            max_width: Maximum width before truncating
-        """
-        # Truncate if needed
         display_text = text
         if max_width:
             while display_text and font.size(display_text)[0] > max_width:
@@ -149,26 +129,15 @@ class RotatedText:
                 if len(display_text) <= 3:
                     break
         
-        # Render text normally first
         text_surf = font.render(display_text, True, color)
         
-        # Apply rotation based on orientation
-        # orientation 0 = bottom panels (no rotation)
-        # orientation 90 = left panel (rotate so text reads vertically from their view)
-        # orientation 180 = top panels (upside down)
-        # orientation 270 = right panel (rotate so text reads vertically from their view)
-        
         if orientation == 90:
-            # Left side: rotate -90 degrees (clockwise) so it reads bottom-to-top from left
-            text_surf = pygame.transform.rotate(text_surf, -90)
+            text_surf = pygame.transform.rotate(text_surf, 90)
         elif orientation == 180:
-            # Top: rotate 180 degrees
             text_surf = pygame.transform.rotate(text_surf, 180)
         elif orientation == 270:
-            # Right side: rotate 90 degrees (counter-clockwise) so it reads top-to-bottom from right
-            text_surf = pygame.transform.rotate(text_surf, 90)
+            text_surf = pygame.transform.rotate(text_surf, -90)
         
-        # Center at position
         text_rect = text_surf.get_rect(center=pos)
         surface.blit(text_surf, text_rect)
     
@@ -176,24 +145,11 @@ class RotatedText:
     def draw_wrapped(surface: pygame.Surface, text: str, font: pygame.font.Font,
                     color: Tuple[int, int, int], rect: pygame.Rect, 
                     orientation: int = 0):
-        """
-        Draw word-wrapped text within a rectangle.
-        
-        Args:
-            surface: Surface to draw on
-            text: Text to wrap and render
-            font: Font to use
-            color: Text color
-            rect: Rectangle to draw within
-            orientation: 0, 90, 180, or 270
-        """
-        # For vertical orientations, we need to wrap based on height dimension
         if orientation in (90, 270):
-            wrap_width = rect.height - 40
+            wrap_width = rect.height - 60
         else:
-            wrap_width = rect.width - 40
+            wrap_width = rect.width - 60
         
-        # Word wrap
         words = text.split()
         lines = []
         current_line = ""
@@ -209,11 +165,9 @@ class RotatedText:
         if current_line:
             lines.append(current_line)
         
-        # Calculate line spacing
-        line_height = font.get_linesize() + 6
+        line_height = font.get_linesize() + 10
         total_height = len(lines) * line_height
         
-        # Draw each line
         start_y = rect.centery - total_height // 2
         for i, line in enumerate(lines):
             y_pos = start_y + i * line_height
@@ -228,10 +182,8 @@ def draw_circular_progress(surface: pygame.Surface, center: Tuple[int, int],
     if progress <= 0:
         return
     
-    # Background circle
     pygame.draw.circle(surface, (40, 40, 40), center, radius, thickness)
     
-    # Progress arc
     if progress >= 0.01:
         angle = int(360 * progress)
         points = [center]
@@ -264,17 +216,23 @@ class PlayerSelectionUI:
         self.selected = [False] * 8
         self.hover_start: Dict[int, float] = {}
         
-        # Calculate slot positions (8 slots in a circle)
-        center_x = self.screen_w // 2
-        center_y = self.screen_h // 2
-        radius = min(self.screen_w, self.screen_h) // 3
+        slot_size = 70
+        spacing_x = self.screen_w // 4
+        spacing_y = self.screen_h // 3
         
         self.slot_positions = []
-        for i in range(8):
-            angle = (i * 45 - 90) * (3.14159 / 180)  # Start from top
-            x = center_x + int(radius * math.cos(angle))
-            y = center_y + int(radius * math.sin(angle))
-            self.slot_positions.append((x, y))
+        
+        self.slot_positions.append((spacing_x * 1, self.screen_h - spacing_y // 2))
+        self.slot_positions.append((spacing_x * 2, self.screen_h - spacing_y // 2))
+        self.slot_positions.append((spacing_x * 3, self.screen_h - spacing_y // 2))
+        
+        self.slot_positions.append((spacing_x * 1, spacing_y // 2))
+        self.slot_positions.append((spacing_x * 2, spacing_y // 2))
+        self.slot_positions.append((spacing_x * 3, spacing_y // 2))
+        
+        self.slot_positions.append((spacing_x // 2, self.screen_h // 2))
+        
+        self.slot_positions.append((self.screen_w - spacing_x // 2, self.screen_h // 2))
     
     def update_with_fingertips(self, fingertip_meta: List[Dict]):
         """Update selection state based on fingertip positions."""
@@ -284,21 +242,18 @@ class PlayerSelectionUI:
         for meta in fingertip_meta:
             pos = meta["pos"]
             
-            # Check which slot is being hovered
             for i, (sx, sy) in enumerate(self.slot_positions):
                 dist = math.sqrt((pos[0] - sx)**2 + (pos[1] - sy)**2)
-                if dist < 60:  # Hover radius
+                if dist < 60:
                     active_slots.add(i)
                     
                     if i not in self.hover_start:
                         self.hover_start[i] = now
                     elif (now - self.hover_start[i]) >= HOVER_TIME_THRESHOLD:
-                        # Toggle selection
                         self.selected[i] = not self.selected[i]
                         self.hover_start.pop(i)
                     break
         
-        # Remove hover for slots no longer being touched
         for slot in list(self.hover_start.keys()):
             if slot not in active_slots:
                 self.hover_start.pop(slot)
@@ -310,16 +265,12 @@ class PlayerSelectionUI:
         for i, (x, y) in enumerate(self.slot_positions):
             color = PLAYER_COLORS[i]
             
-            # Draw slot circle
             if self.selected[i]:
-                # Selected - filled circle with border
                 pygame.draw.circle(self.screen, color, (x, y), 55)
                 pygame.draw.circle(self.screen, Colors.WHITE, (x, y), 55, 5)
             else:
-                # Not selected - outline only
                 pygame.draw.circle(self.screen, (80, 80, 80), (x, y), 55, 3)
             
-            # Draw player number
             font = pygame.font.SysFont(None, 36, bold=True)
             text_color = Colors.WHITE if self.selected[i] else (150, 150, 150)
             text = font.render(f"P{i+1}", True, text_color)
