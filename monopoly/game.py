@@ -569,3 +569,34 @@ class MonopolyGame:
                     closest_color = panel.color
             
             draw_cursor(self.screen, pos, closest_color)
+    
+    def start_game(self, player_indices: List[int]):
+        self.active_players = sorted(player_indices)
+        self.current_player_idx = 0
+
+        for i in self.active_players:
+            p = self.players[i]
+            p.money = STARTING_MONEY
+            p.position = 0
+            p.properties = []
+            p.in_jail = False
+            p.jail_turns = 0
+            p.get_out_of_jail_cards = 0
+            p.consecutive_doubles = 0
+            p.is_bankrupt = False
+            p.move_path = []
+            p.move_start = 0.0
+            p.move_from = 0
+            p.is_moving = False
+
+        self.phase = "roll"
+        self.can_roll = True
+        self.dice_values = (0, 0)
+        self.dice_rolling = False
+        self.active_popup = None
+        self.popup_data = {}
+        self.popup_buttons = []
+        self.property_scroll = 0
+
+    def get_current_player(self) -> "Player":
+        return self.players[self.active_players[self.current_player_idx]]
