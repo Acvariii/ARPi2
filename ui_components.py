@@ -178,6 +178,71 @@ class RotatedText:
             line_y = start_y + (i * total_line_height)
             RotatedText.draw(surface, line, font, color, 
                            (rect.centerx, line_y), orientation)
+    
+    @staticmethod
+    def draw_stacked(surface: pygame.Surface, lines: List[str], font: pygame.font.Font,
+                     color: Tuple[int, int, int], panel_rect: pygame.Rect,
+                     orientation: int, top_offset: int = 40, spacing: int = 14):
+        """Draw multiple lines for vertical panels without overlap."""
+        y = panel_rect.top + top_offset
+        cx = panel_rect.centerx
+        for line in lines:
+            surf = font.render(line, True, color)
+            if orientation == 90:
+                surf = pygame.transform.rotate(surf, -90)
+            elif orientation == 180:
+                surf = pygame.transform.rotate(surf, 180)
+            elif orientation == 270:
+                surf = pygame.transform.rotate(surf, 90)
+            rect = surf.get_rect(center=(cx, y + surf.get_height() / 2))
+            surface.blit(surf, rect)
+            y += surf.get_height() + spacing
+    
+    @staticmethod
+    def draw_stacked_in_rect(surface: pygame.Surface,
+                             lines: List[str],
+                             font: pygame.font.Font,
+                             color: Tuple[int, int, int],
+                             rect: pygame.Rect,
+                             orientation: int,
+                             spacing: int = 14,
+                             top_padding: int = 10,
+                             center: bool = True):
+        """Stack multiple lines inside rect with rotation, no overlap."""
+        rendered = []
+        max_w = rect.width - 12
+        max_v = rect.height - 12
+        # For vertical orientations, width constraint uses rect.height due to rotation
+        constraint = max_v if orientation in (90, 270) else max_w
+        for raw in lines:
+            txt = raw
+            while txt and font.size(txt)[0] > constraint:
+                if len(txt) <= 4:
+                    break
+                txt = txt[:-4] + "..."
+            rendered.append(txt)
+        heights = []
+        for line in rendered:
+            h = font.size(line)[1]
+            heights.append(h)
+        total_height = sum(heights) + spacing * (len(rendered) - 1)
+        if center:
+            start_y = rect.top + (rect.height - total_height) // 2
+        else:
+            start_y = rect.top + top_padding
+        cy = start_y
+        cx = rect.centerx
+        for i, line in enumerate(rendered):
+            surf = font.render(line, True, color)
+            if orientation == 90:
+                surf = pygame.transform.rotate(surf, -90)
+            elif orientation == 180:
+                surf = pygame.transform.rotate(surf, 180)
+            elif orientation == 270:
+                surf = pygame.transform.rotate(surf, 90)
+            r = surf.get_rect(center=(cx, cy + heights[i] // 2))
+            surface.blit(surf, r)
+            cy += heights[i] + spacing
 
 
 def draw_circular_progress(surface: pygame.Surface, center: Tuple[int, int], 

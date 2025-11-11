@@ -625,23 +625,20 @@ class MonopolyGame:
             
             if is_active and not player.is_bankrupt:
                 if panel.is_vertical():
-                    info_rect = panel.get_grid_rect(0.5, 0.5, 3, 2.5, 4, 12)
                     font = pygame.font.SysFont("Arial", 18, bold=True)
-                    
                     money_text = f"${player.money}"
                     props_text = f"{len(player.properties)}p"
-                    
-                    RotatedText.draw(self.screen, money_text, font, Colors.BLACK,
-                                   (info_rect.centerx, info_rect.top + 20), panel.orientation)
-                    RotatedText.draw(self.screen, props_text, font, Colors.BLACK,
-                                   (info_rect.centerx, info_rect.top + 45), panel.orientation)
+                    RotatedText.draw_stacked(self.screen,
+                                             [money_text, props_text],
+                                             font, Colors.BLACK,
+                                             panel.rect, panel.orientation,
+                                             top_offset=50, spacing=18)
                 else:
                     info_rect = panel.get_grid_rect(0.3, 0.2, 2.5, 0.8, 12, 4)
                     font = pygame.font.SysFont("Arial", 18, bold=True)
-                    
                     combined = f"${player.money} | {len(player.properties)}p"
                     RotatedText.draw(self.screen, combined, font, Colors.BLACK,
-                                   (info_rect.centerx, info_rect.centery), panel.orientation)
+                                     (info_rect.centerx, info_rect.centery), panel.orientation)
                 
                 for btn in self.buttons[idx].values():
                     btn.draw(self.screen)
