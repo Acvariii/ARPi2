@@ -89,18 +89,19 @@ class BlackjackGame:
                 r_split = pygame.Rect(x + 3 * (btn_w + gap), y + margin, btn_w, btn_h)
             
             elif panel.orientation == 90:
-                info_height_frac = 0.35
-                button_area_height = int(panel.rect.height * (1 - info_height_frac))
-                x = panel.rect.x + margin
+                info_width_frac = 0.35
+                button_area_width = int(panel.rect.width * (1 - info_width_frac))
+                info_area_width = int(panel.rect.width * info_width_frac)
+                x = panel.rect.x + info_area_width
                 y = panel.rect.y + margin
-                avail_w = panel.rect.width - 2 * margin
-                btn_w = avail_w // 4 - gap
-                btn_h = button_area_height - 2 * margin
+                avail_h = panel.rect.height - 2 * margin
+                btn_h = (avail_h - 3 * gap) // 4
+                btn_w = button_area_width - 2 * margin
                 
-                r_hit = pygame.Rect(x, y, btn_w, btn_h)
-                r_stand = pygame.Rect(x + btn_w + gap, y, btn_w, btn_h)
-                r_double = pygame.Rect(x + 2 * (btn_w + gap), y, btn_w, btn_h)
-                r_split = pygame.Rect(x + 3 * (btn_w + gap), y, btn_w, btn_h)
+                r_hit = pygame.Rect(x + margin, y, btn_w, btn_h)
+                r_stand = pygame.Rect(x + margin, y + btn_h + gap, btn_w, btn_h)
+                r_double = pygame.Rect(x + margin, y + 2 * (btn_h + gap), btn_w, btn_h)
+                r_split = pygame.Rect(x + margin, y + 3 * (btn_h + gap), btn_w, btn_h)
             
             else:
                 info_width_frac = 0.35
@@ -371,13 +372,13 @@ class BlackjackGame:
                     RotatedText.draw(self.screen, f"${player.chips} | {bet_display}",
                                    font, Colors.BLACK, info_rect.center, panel.orientation)
                 elif panel.orientation == 90:
-                    info_height_frac = 0.35
-                    button_area_height = int(panel.rect.height * (1 - info_height_frac))
-                    y = panel.rect.y + button_area_height
-                    info_rect = pygame.Rect(panel.rect.x + 10, y,
-                                           panel.rect.width - 20, int(panel.rect.height * info_height_frac) - 10)
-                    RotatedText.draw(self.screen, f"${player.chips} | {bet_display}",
-                                   font, Colors.BLACK, info_rect.center, panel.orientation)
+                    info_width = int(panel.rect.width * 0.35)
+                    info_rect = pygame.Rect(panel.rect.x + 10, panel.rect.y + 10,
+                                           info_width - 10, panel.rect.height - 20)
+                    RotatedText.draw_block(self.screen,
+                                         [(f"${player.chips}", font, Colors.BLACK),
+                                          (bet_display, font, Colors.BLACK)],
+                                         info_rect, panel.orientation, line_spacing=12)
                 else:
                     info_width = int(panel.rect.width * 0.35)
                     info_rect = pygame.Rect(panel.rect.x + 10, panel.rect.y + 10,
