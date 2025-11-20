@@ -497,13 +497,10 @@ class MonopolyGame:
                 self._finish_turn_or_allow_double()
         
         elif self.active_popup == "card":
-            player = self.popup_data["player"]
-            card = self.popup_data["card"]
-            
             self.active_popup = None
             self.popup_buttons = []
-            self._execute_card_action(player, card)
-            self._finish_turn_or_allow_double()
+            if not self.get_current_player().is_moving:
+                self._finish_turn_or_allow_double()
         
         elif self.active_popup == "properties":
             player = self.popup_data["player"]
@@ -763,10 +760,14 @@ class MonopolyGame:
             self._send_to_jail(player)
 
         elif space_type == "chance":
-            self._show_card_popup(player, GameLogic.draw_card("chance", self.chance_deck, self.community_chest_deck), "chance")
+            card = GameLogic.draw_card("chance", self.chance_deck, self.community_chest_deck)
+            self._execute_card_action(player, card)
+            self._show_card_popup(player, card, "chance")
 
         elif space_type == "community_chest":
-            self._show_card_popup(player, GameLogic.draw_card("community_chest", self.chance_deck, self.community_chest_deck), "community_chest")
+            card = GameLogic.draw_card("community_chest", self.chance_deck, self.community_chest_deck)
+            self._execute_card_action(player, card)
+            self._show_card_popup(player, card, "community_chest")
 
         elif space_type == "income_tax":
             player.remove_money(INCOME_TAX)

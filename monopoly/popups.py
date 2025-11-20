@@ -1,4 +1,3 @@
-"""Popup UI drawing for Monopoly game."""
 import pygame
 from typing import Dict
 from config import Colors
@@ -6,43 +5,24 @@ from ui_components import RotatedText, draw_circular_progress
 
 
 class PopupDrawer:
-    """Handles drawing all game popups."""
     
     def __init__(self, screen: pygame.Surface):
         self.screen = screen
 
     def _draw_progress_indicator(self, progress_data: dict, orientation: int):
-        """Draw hover progress indicator in orientation-aware position."""
         rect = progress_data["rect"]
         progress = progress_data["progress"]
         
-        # Position indicator based on orientation
-        if orientation == 0:  # Bottom panel - indicator top-right
+        if orientation == 0:
             center = (rect.right - 18, rect.top + 18)
-        elif orientation == 180:  # Top panel - indicator bottom-right (from their view: top-right)
+        elif orientation == 180:
             center = (rect.right - 18, rect.bottom - 18)
-        elif orientation == 90:  # Left panel - indicator top-right
+        elif orientation == 90:
             center = (rect.right - 18, rect.top + 18)
-        else:  # 270 - Right panel - indicator bottom-right (from their view: top-right)
+        else:
             center = (rect.right - 18, rect.bottom - 18)
         
         draw_circular_progress(self.screen, center, 14, progress, Colors.ACCENT, thickness=4)
-
-    def _content_area(self, panel) -> pygame.Rect:
-        BUTTON_ROW_FRAC_VERTICAL = 0.22
-        BUTTON_ROW_FRAC_HORIZONTAL = 0.38
-        MARGIN = 8
-
-        if panel.is_vertical():
-            row_h = int(panel.rect.height * BUTTON_ROW_FRAC_VERTICAL)
-        else:
-            row_h = int(panel.rect.height * BUTTON_ROW_FRAC_HORIZONTAL)
-
-        x = panel.rect.x + MARGIN
-        y = panel.rect.y + MARGIN
-        w = max(20, panel.rect.width - 2 * MARGIN)
-        h = max(20, panel.rect.height - row_h - 2 * MARGIN)
-        return pygame.Rect(x, y, w, h)
 
     def draw_buy_prompt(self, popup_data: Dict, panel, buttons: list):
         from ui_components import RotatedText
@@ -96,14 +76,13 @@ class PopupDrawer:
                 )
         
         # Color bar at top (8px thick)
-        bar_h = 8
+        bar_h = 12
         bar_rect = pygame.Rect(content_rect.x, content_rect.y, content_rect.width, bar_h)
-        pygame.draw.rect(self.screen, color, bar_rect, border_radius=3)
+        pygame.draw.rect(self.screen, color, bar_rect, border_radius=5)
         
-        # Property name below color bar
-        name_y = content_rect.y + bar_h + 6
-        name_h = 32
-        font_name = pygame.font.SysFont("Arial", 16, bold=True)
+        name_y = content_rect.y + bar_h + 8
+        name_h = 38 if panel.is_vertical() else 34
+        font_name = pygame.font.SysFont("Arial", 22 if panel.is_vertical() else 16, bold=True)
         RotatedText.draw_block(
             self.screen,
             [(name, font_name, Colors.WHITE)],
@@ -113,14 +92,17 @@ class PopupDrawer:
             wrap=True
         )
         
-        # Details below name
-        details_y = name_y + name_h + 12
-        font_big = pygame.font.SysFont("Arial", 18, bold=True)
-        font_med = pygame.font.SysFont("Arial", 14, bold=True)
-        font_small = pygame.font.SysFont("Arial", 13)
-        
-        # Use larger spacing for vertical panels
-        spacing = 18 if panel.is_vertical() else 14
+        details_y = name_y + name_h + 14
+        if panel.is_vertical():
+            font_big = pygame.font.SysFont("Arial", 22, bold=True)
+            font_med = pygame.font.SysFont("Arial", 18, bold=True)
+            font_small = pygame.font.SysFont("Arial", 16)
+            spacing = 22
+        else:
+            font_big = pygame.font.SysFont("Arial", 16, bold=True)
+            font_med = pygame.font.SysFont("Arial", 14, bold=True)
+            font_small = pygame.font.SysFont("Arial", 12)
+            spacing = 16
         
         RotatedText.draw_block(
             self.screen,
@@ -132,7 +114,7 @@ class PopupDrawer:
             pygame.Rect(content_rect.x, details_y, content_rect.width, content_rect.bottom - details_y),
             panel.orientation,
             line_spacing=spacing,
-            padding=6
+            padding=4
         )
         
         # Draw buttons with progress indicators
@@ -150,8 +132,12 @@ class PopupDrawer:
         self.screen.blit(overlay, panel.rect)
 
         btn_area = buttons[0].rect if buttons else pygame.Rect(panel.rect.x, panel.rect.y, 0, 0)
-        font_title = pygame.font.SysFont("Arial", 17, bold=True)
-        font_text = pygame.font.SysFont("Arial", 13)
+        if panel.is_vertical():
+            font_title = pygame.font.SysFont("Arial", 20, bold=True)
+            font_text = pygame.font.SysFont("Arial", 16)
+        else:
+            font_title = pygame.font.SysFont("Arial", 15, bold=True)
+            font_text = pygame.font.SysFont("Arial", 12)
         title = "CHANCE" if deck_type == "chance" else "COMMUNITY CHEST"
         title_color = (255,200,60) if deck_type == "chance" else (100,180,255)
 
@@ -188,14 +174,12 @@ class PopupDrawer:
                     panel.rect.height - btn_area.height - margin * 3
                 )
 
-        # Title bar
-        bar_h = 6
+        bar_h = 10
         bar_rect = pygame.Rect(content_rect.x, content_rect.y, content_rect.width, bar_h)
-        pygame.draw.rect(self.screen, title_color, bar_rect, border_radius=3)
+        pygame.draw.rect(self.screen, title_color, bar_rect, border_radius=5)
 
-        # Title
-        title_y = content_rect.y + bar_h + 6
-        title_h = 28
+        title_y = content_rect.y + bar_h + 8
+        title_h = 32 if panel.is_vertical() else 28
         RotatedText.draw_block(
             self.screen,
             [(title, font_title, title_color)],
@@ -204,9 +188,8 @@ class PopupDrawer:
             line_spacing=4
         )
 
-        # Card text
-        text_y = title_y + title_h + 10
-        spacing = 14 if panel.is_vertical() else 10
+        text_y = title_y + title_h + 12
+        spacing = 18 if panel.is_vertical() else 14
         
         RotatedText.draw_block(
             self.screen,
@@ -214,7 +197,7 @@ class PopupDrawer:
             pygame.Rect(content_rect.x, text_y, content_rect.width, content_rect.bottom - text_y),
             panel.orientation,
             line_spacing=spacing,
-            padding=6,
+            padding=4,
             wrap=True
         )
 
@@ -265,9 +248,14 @@ class PopupDrawer:
                     panel.rect.height - btn_area.height - margin * 3
                 )
         
-        font_title = pygame.font.SysFont("Arial", 15, bold=True)
-        font_line = pygame.font.SysFont("Arial", 12)
-        font_small = pygame.font.SysFont("Arial", 10)
+        if panel.is_vertical():
+            font_title = pygame.font.SysFont("Arial", 20, bold=True)
+            font_line = pygame.font.SysFont("Arial", 16)
+            font_small = pygame.font.SysFont("Arial", 14)
+        else:
+            font_title = pygame.font.SysFont("Arial", 15, bold=True)
+            font_line = pygame.font.SysFont("Arial", 12)
+            font_small = pygame.font.SysFont("Arial", 10)
         
         if not player.properties:
             RotatedText.draw_block(
@@ -282,14 +270,12 @@ class PopupDrawer:
             prop = properties[prop_idx]
             color = prop.data.get("color",(180,180,180))
             
-            # Color bar at top
-            bar_h = 7
+            bar_h = 12
             bar_rect = pygame.Rect(content_rect.x, content_rect.y, content_rect.width, bar_h)
-            pygame.draw.rect(self.screen, color, bar_rect, border_radius=3)
+            pygame.draw.rect(self.screen, color, bar_rect, border_radius=5)
             
-            # Property name
-            name_y = content_rect.y + bar_h + 5
-            name_h = 30
+            name_y = content_rect.y + bar_h + 8
+            name_h = 36 if panel.is_vertical() else 30
             RotatedText.draw_block(
                 self.screen,
                 [(prop.data.get("name",""), font_title, Colors.WHITE)],
@@ -299,8 +285,7 @@ class PopupDrawer:
                 wrap=True
             )
             
-            # Details
-            details_y = name_y + name_h + 10
+            details_y = name_y + name_h + 14
             
             details = [
                 f"Type: {prop.data.get('type','property').title()}",
@@ -314,19 +299,18 @@ class PopupDrawer:
                     details.append(f"Rent: ${rent_val}")
             details.append(f"Status: {'Mortgaged' if prop.is_mortgaged else 'Active'}")
             
-            spacing = 15 if panel.is_vertical() else 11
+            spacing = 20 if panel.is_vertical() else 14
             
             RotatedText.draw_block(
                 self.screen,
                 [(d, font_line, Colors.WHITE) for d in details],
-                pygame.Rect(content_rect.x, details_y, content_rect.width, content_rect.bottom - details_y - 25),
+                pygame.Rect(content_rect.x, details_y, content_rect.width, content_rect.bottom - details_y - 30),
                 panel.orientation,
                 line_spacing=spacing,
-                padding=6
+                padding=4
             )
             
-            # Page indicator at bottom
-            page_y = content_rect.bottom - 20
+            page_y = content_rect.bottom - 24
             RotatedText.draw_block(
                 self.screen,
                 [(f"{property_scroll + 1}/{len(player.properties)}", font_small, (140,140,140))],
