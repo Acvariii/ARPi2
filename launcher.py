@@ -2,6 +2,7 @@ import pygame
 from typing import List, Dict
 from ui_components import HoverButton, draw_cursor, draw_circular_progress, PlayerSelectionUI
 from monopoly import MonopolyGame
+from monopoly2 import MonopolyGame as Monopoly2Game
 from blackjack import BlackjackGame
 from hand_tracking import HandTracker
 from config import SERVER_WS, WINDOW_SIZE, FPS, HOVER_TIME_THRESHOLD, Colors
@@ -32,12 +33,12 @@ class GameLauncher:
 
     def _create_game_buttons(self) -> List[HoverButton]:
         """Create game selection buttons."""
-        games = ["Monopoly", "Blackjack"]
+        games = ["Monopoly", "Monopoly2", "Blackjack"]
         buttons = []
         for i, game in enumerate(games):
             btn_rect = pygame.Rect(
                 WINDOW_SIZE[0] // 2 - 150,
-                WINDOW_SIZE[1] // 2 - 120 + i * 120,
+                WINDOW_SIZE[1] // 2 - 180 + i * 120,
                 300, 90
             )
             buttons.append(HoverButton(btn_rect, game, self.font))
@@ -73,7 +74,7 @@ class GameLauncher:
 
         for i, btn in enumerate(self.game_buttons):
             if btn.update(fingertip_meta):
-                self.selected_game = ["monopoly", "blackjack"][i]
+                self.selected_game = ["monopoly", "monopoly2", "blackjack"][i]
                 self.state = "player_select"
                 btn.reset()
             
@@ -150,6 +151,13 @@ class GameLauncher:
             )
             self.current_game.start_game(selected_indices)
             self.state = "monopoly_playing"
+        elif self.selected_game == "monopoly2":
+            self.current_game = Monopoly2Game(
+                self.screen,
+                lambda w, h: self.get_fingertip_meta()
+            )
+            self.current_game.start_game(selected_indices)
+            self.state = "monopoly2_playing"
         elif self.selected_game == "blackjack":
             self.current_game = BlackjackGame(
                 self.screen,
@@ -200,7 +208,7 @@ class GameLauncher:
                 self.handle_menu_state(fingertip_meta)
             elif self.state == "player_select":
                 self.handle_player_select_state(fingertip_meta)
-            elif self.state in ["monopoly_playing", "blackjack_playing"]:
+            elif self.state in ["monopoly_playing", "monopoly2_playing", "blackjack_playing"]:
                 self.handle_game_state(fingertip_meta)
 
             # Draw cursors
