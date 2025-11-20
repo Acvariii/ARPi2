@@ -1,4 +1,3 @@
-"""Drawing functions for Monopoly game board and UI elements."""
 import pygame
 import math
 import random
@@ -8,7 +7,6 @@ from ui_components import RotatedText, draw_circular_progress
 
 
 class BoardDrawer:
-    """Handles all board-related drawing."""
     
     def __init__(self, screen: pygame.Surface, board_rect: pygame.Rect, 
                  space_positions: List[Tuple[int, int, int, int]]):
@@ -17,12 +15,9 @@ class BoardDrawer:
         self.space_positions = space_positions
     
     def draw_board(self):
-        """Draw the Monopoly board background."""
-        # Board background
         pygame.draw.rect(self.screen, (220, 240, 220), self.board_rect)
         pygame.draw.rect(self.screen, Colors.BLACK, self.board_rect, 3)
         
-        # Center area with Monopoly logo
         space_size = self.space_positions[0][2]
         center_size = space_size * 9
         center_x = self.board_rect.x + space_size
@@ -31,14 +26,12 @@ class BoardDrawer:
         pygame.draw.rect(self.screen, (240, 250, 240), center_rect)
         pygame.draw.rect(self.screen, Colors.BLACK, center_rect, 2)
         
-        # Draw "MONOPOLY" in center
         font = pygame.font.SysFont(None, int(center_size * 0.12), bold=True)
         text = font.render("MONOPOLY", True, (180, 40, 40))
         text_rect = text.get_rect(center=center_rect.center)
         self.screen.blit(text, text_rect)
     
     def draw_space(self, idx: int, space_data: Dict):
-        """Draw a single board space with modern styling."""
         if idx >= len(self.space_positions):
             return
             
@@ -50,38 +43,30 @@ class BoardDrawer:
         
         space_type = space_data.get("type")
         if space_type in ("property", "railroad", "utility"):
-            # Modern gradient-like color strip
             color = space_data.get("color", (200, 200, 200))
             strip_height = h // 4
             
-            # Main strip
             strip_rect = pygame.Rect(rect.x, rect.y, rect.width, strip_height)
             pygame.draw.rect(self.screen, color, strip_rect)
             
-            # Subtle shadow under strip
             shadow_rect = pygame.Rect(rect.x, rect.y + strip_height, rect.width, 2)
             shadow_color = tuple(max(0, c - 40) for c in color)
             pygame.draw.rect(self.screen, shadow_color, shadow_rect)
             
-            # Clean white background
             main_rect = pygame.Rect(rect.x, rect.y + strip_height, rect.width, rect.height - strip_height)
             pygame.draw.rect(self.screen, (248, 248, 248), main_rect)
             
-            # Sleek border
             pygame.draw.rect(self.screen, (50, 50, 50), rect, 1)
         else:
-            # Special spaces with gradient background
             bg_color = (245, 245, 240)
             pygame.draw.rect(self.screen, bg_color, rect)
             pygame.draw.rect(self.screen, (80, 80, 80), rect, 1)
         
-        # Draw space name
         name = space_data.get("name", "")
         if name:
             font_size = max(8, min(12, w // 5))
             font = pygame.font.SysFont("Arial", font_size, bold=False)
             
-            # Word wrap
             words = name.split()
             lines = []
             current_line = ""
@@ -98,7 +83,6 @@ class BoardDrawer:
             if current_line:
                 lines.append(current_line)
             
-            # Center text vertically
             line_height = font.get_linesize()
             center_x = x + w // 2
             
@@ -116,7 +100,6 @@ class BoardDrawer:
                 self.screen.blit(text_surf, text_rect)
     
     def draw_houses(self, idx: int, houses: int):
-        """Draw houses/hotel on a property space."""
         if idx >= len(self.space_positions) or houses <= 0:
             return
         
@@ -133,52 +116,43 @@ class BoardDrawer:
             house_rect = pygame.Rect(house_x, house_y, house_size, house_size)
             
             if houses == 5:
-                # Hotel - red
                 pygame.draw.rect(self.screen, (220, 40, 40), house_rect, border_radius=2)
             else:
-                # House - green
                 pygame.draw.rect(self.screen, (60, 180, 60), house_rect, border_radius=2)
             
             pygame.draw.rect(self.screen, (30, 30, 30), house_rect, 1, border_radius=2)
 
 
 class TokenDrawer:
-    """Handles drawing player tokens on the board."""
     
     def __init__(self, screen: pygame.Surface, space_positions: List[Tuple[int, int, int, int]]):
         self.screen = screen
         self.space_positions = space_positions
     
     def get_space_center(self, space_idx: int) -> Tuple[int, int]:
-        """Get center coordinates of a space."""
         if space_idx >= len(self.space_positions):
             return (0, 0)
         x, y, w, h = self.space_positions[space_idx]
         return (x + w // 2, y + h // 2)
     
     def draw_tokens(self, active_players: List, is_moving_func, get_animated_pos_func):
-        """Draw all player tokens on board."""
-        # Group players by position
         positions: Dict[int, List] = {}
         
         for player in active_players:
             if player.is_bankrupt:
                 continue
             
-            # Handle moving animation
             if is_moving_func(player):
                 x, y = get_animated_pos_func(player)
                 token_radius = 15
                 pygame.draw.circle(self.screen, Colors.BLACK, (x+1, y+2), token_radius + 1)
                 pygame.draw.circle(self.screen, player.color, (x, y), token_radius)
             else:
-                # Static position
                 pos = player.position
                 if pos not in positions:
                     positions[pos] = []
                 positions[pos].append(player)
         
-        # Draw grouped tokens
         token_radius = 12
         for pos, players in positions.items():
             x, y = self.get_space_center(pos)
@@ -188,7 +162,6 @@ class TokenDrawer:
                 pygame.draw.circle(self.screen, Colors.BLACK, (x+1, y+2), token_radius + 1)
                 pygame.draw.circle(self.screen, player.color, (x, y), token_radius)
             else:
-                # Multiple tokens - arrange in circle
                 angle_step = 2 * math.pi / len(players)
                 radius = 18
                 for i, player in enumerate(players):
@@ -200,21 +173,17 @@ class TokenDrawer:
 
 
 class DiceDrawer:
-    """Handles drawing dice."""
     
     def __init__(self, screen: pygame.Surface, board_rect: pygame.Rect):
         self.screen = screen
         self.board_rect = board_rect
     
     def create_die_surface(self, value: int, size: int) -> pygame.Surface:
-        """Create a die face surface."""
         surf = pygame.Surface((size, size), pygame.SRCALPHA)
         
-        # White die with rounded corners
         pygame.draw.rect(surf, Colors.WHITE, surf.get_rect(), border_radius=8)
         pygame.draw.rect(surf, Colors.BLACK, surf.get_rect(), 2, border_radius=8)
         
-        # Dot positions
         dot_radius = size // 10
         positions = {
             1: [(0.5, 0.5)],
@@ -233,13 +202,11 @@ class DiceDrawer:
         return surf
     
     def draw_dice(self, dice_rolling: bool, dice_values: Tuple[int, int]):
-        """Draw dice in center of board."""
         center_x = self.board_rect.centerx
         center_y = self.board_rect.centery + 60
         die_size = 50
         
         if dice_rolling:
-            # Animated rolling
             for i in range(2):
                 x = center_x - die_size - 10 + i * (die_size + 20)
                 angle = random.randint(-15, 15)
@@ -250,7 +217,6 @@ class DiceDrawer:
                 rect = rotated.get_rect(center=(x, center_y))
                 self.screen.blit(rotated, rect)
         else:
-            # Static dice
             for i, value in enumerate(dice_values):
                 if value == 0:
                     continue

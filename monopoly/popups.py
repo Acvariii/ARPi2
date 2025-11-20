@@ -25,7 +25,6 @@ class PopupDrawer:
         draw_circular_progress(self.screen, center, 14, progress, Colors.ACCENT, thickness=4)
 
     def draw_buy_prompt(self, popup_data: Dict, panel, buttons: list):
-        from ui_components import RotatedText
         player = popup_data["player"]
         space = popup_data["space"]
         price = popup_data["price"]
@@ -174,7 +173,6 @@ class PopupDrawer:
                 self._draw_progress_indicator(pr, panel.orientation)
 
     def draw_card_popup(self, popup_data: Dict, panel, buttons: list):
-        from ui_components import RotatedText
         card = popup_data["card"]
         deck_type = popup_data["deck_type"]
         overlay = pygame.Surface(panel.rect.size, pygame.SRCALPHA)
@@ -242,7 +240,6 @@ class PopupDrawer:
                 self._draw_progress_indicator(pr, panel.orientation)
 
     def draw_properties_popup(self, popup_data: Dict, panel, properties, property_scroll: int, buttons: list):
-        from ui_components import RotatedText
         player = popup_data["player"]
         overlay = pygame.Surface(panel.rect.size, pygame.SRCALPHA)
         overlay.fill((0,0,0,200))
@@ -354,7 +351,6 @@ class PopupDrawer:
                 self._draw_progress_indicator(pr, panel.orientation)
 
     def draw_build_popup(self, panel, buttons: list):
-        from ui_components import RotatedText
         overlay = pygame.Surface(panel.rect.size, pygame.SRCALPHA)
         overlay.fill((0,0,0,200))
         self.screen.blit(overlay, panel.rect)

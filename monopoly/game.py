@@ -1,4 +1,3 @@
-"""Main Monopoly game class."""
 import time
 import random
 import pygame
@@ -22,31 +21,26 @@ from monopoly.popups import PopupDrawer
 
 
 class MonopolyGame:
-    """Main Monopoly game with complete rules implementation."""
     
     def __init__(self, screen: pygame.Surface, fingertip_callback: Callable):
         self.screen = screen
         self.get_fingertips = fingertip_callback
         self.screen_size = screen.get_size()
         
-        # Game state
         self.properties = [Property(data) if data else Property({"name": "", "type": "none"}) 
                           for data in BOARD_SPACES]
         self.players = [Player(i, PLAYER_COLORS[i]) for i in range(8)]
         self.active_players: List[int] = []
         self.current_player_idx = 0
         
-        # Card decks
         self.community_chest_deck = list(COMMUNITY_CHEST_CARDS)
         self.chance_deck = list(CHANCE_CARDS)
         random.shuffle(self.community_chest_deck)
         random.shuffle(self.chance_deck)
         
-        # UI
         self.panels = calculate_all_panels(self.screen_size)
         self.buttons: Dict[int, Dict[str, HoverButton]] = {}
         
-        # Game flow
         self.phase = "roll"
         self.can_roll = True
         self.dice_values = (0, 0)
@@ -54,26 +48,21 @@ class MonopolyGame:
         self.dice_roll_start = 0.0
         self.dice_roll_duration = 1.2
         
-        # UI popups
         self.active_popup: Optional[str] = None
         self.popup_data: Dict = {}
         self.popup_buttons: List[HoverButton] = []
         self.property_scroll = 0
         
-        # Board geometry
         self._calculate_board_geometry()
         
-        # Initialize drawing helpers
         self.board_drawer = BoardDrawer(self.screen, self.board_rect, self.space_positions)
         self.token_drawer = TokenDrawer(self.screen, self.space_positions)
         self.dice_drawer = DiceDrawer(self.screen, self.board_rect)
         self.popup_drawer = PopupDrawer(self.screen)
         
-        # Initialize buttons
         self._init_buttons()
     
     def _calculate_board_geometry(self):
-        """Calculate board layout ensuring it doesn't overlap player panels."""
         w, h = self.screen_size
         
         horizontal_panel_height = int(h * 0.10)
@@ -92,37 +81,41 @@ class MonopolyGame:
         self.space_positions = self._calculate_space_positions()
     
     def _calculate_space_positions(self) -> List[Tuple[int, int, int, int]]:
-        """Calculate exact positions for all 40 spaces."""
         positions = []
         board_x = self.board_rect.x
         board_y = self.board_rect.y
         board_size = self.board_rect.width
         
-        space_size = board_size // 11
+        corner_size = int(board_size / 11)
+        edge_size = int(board_size / 11)
         
-        # Bottom row: 0-10 (GO to Just Visiting, right to left)
         for i in range(11):
-            x = board_x + board_size - ((i + 1) * space_size)
-            y = board_y + board_size - space_size
-            positions.append((x, y, space_size, space_size))
+            if i == 0 or i == 10:
+                w = corner_size
+            else:
+                w = edge_size
+            x = board_x + board_size - sum([corner_size if j in [0, 10] else edge_size for j in range(i+1)])
+            y = board_y + board_size - corner_size
+            positions.append((x, y, w, corner_size))
         
-        # Left column: 11-19
         for i in range(1, 10):
             x = board_x
-            y = board_y + board_size - ((i + 1) * space_size)
-            positions.append((x, y, space_size, space_size))
+            y = board_y + board_size - sum([corner_size if j in [0, 10] else edge_size for j in range(i+1)])
+            positions.append((x, y, corner_size, edge_size))
         
-        # Top row: 20-30
         for i in range(11):
-            x = board_x + (i * space_size)
+            if i == 0 or i == 10:
+                w = corner_size
+            else:
+                w = edge_size
+            x = board_x + sum([corner_size if j in [0, 10] else edge_size for j in range(i)])
             y = board_y
-            positions.append((x, y, space_size, space_size))
+            positions.append((x, y, w, corner_size))
         
-        # Right column: 31-39
         for i in range(1, 10):
-            x = board_x + board_size - space_size
-            y = board_y + (i * space_size)
-            positions.append((x, y, space_size, space_size))
+            x = board_x + board_size - corner_size
+            y = board_y + sum([corner_size if j in [0, 10] else edge_size for j in range(i)])
+            positions.append((x, y, corner_size, edge_size))
         
         return positions
     
@@ -161,7 +154,7 @@ class MonopolyGame:
             elif panel.orientation == 90:
                 info_width_frac = 0.35
                 button_area_width = int(panel.rect.width * (1 - info_width_frac))
-                x = panel.rect.x + panel.rect.width - button_area_width
+                x = panel.rect.x
                 y = panel.rect.y + margin
                 avail_h = panel.rect.height - 2 * margin
                 btn_h = (avail_h - 2 * gap) // 3
@@ -243,7 +236,6 @@ class MonopolyGame:
         panel = self.panels[player.idx]
         font = pygame.font.SysFont(None, 24)
         rects = self._popup_button_column(panel, 2)
-        # Buy button first (top from player's perspective)
         self.popup_buttons = [
             HoverButton(rects[0], "Buy", font, orientation=panel.orientation),
             HoverButton(rects[1], "Pass", font, orientation=panel.orientation)
@@ -265,11 +257,11 @@ class MonopolyGame:
         self.property_scroll = 0
         panel = self.panels[player.idx]
         font = pygame.font.SysFont(None, 22)
-        rects = self._popup_button_column(panel, 3, small=True)
+        rects = self._popup_button_column(panel, 3, small=False)
         self.popup_buttons = [
-            HoverButton(rects[0], "◀", font, orientation=panel.orientation),
-            HoverButton(rects[1], "▶", font, orientation=panel.orientation),
-            HoverButton(rects[2], "✕", font, orientation=panel.orientation)
+            HoverButton(rects[0], "Prev", font, orientation=panel.orientation),
+            HoverButton(rects[1], "Next", font, orientation=panel.orientation),
+            HoverButton(rects[2], "Close", font, orientation=panel.orientation)
         ]
 
     def _show_build_popup(self, player: Player):
@@ -277,13 +269,12 @@ class MonopolyGame:
         self.popup_data = {"player": player}
         panel = self.panels[player.idx]
         font = pygame.font.SysFont(None, 22)
-        rects = self._popup_button_column(panel, 1, small=True)
+        rects = self._popup_button_column(panel, 1, small=False)
         self.popup_buttons = [
-            HoverButton(rects[0], "✕ Close", font, orientation=panel.orientation)
+            HoverButton(rects[0], "Close", font, orientation=panel.orientation)
         ]
     
     def _buy_property(self, player: Player, position: int):
-        """Buy property."""
         space = self.properties[position]
         price = space.data.get("price", 0)
         
@@ -296,7 +287,6 @@ class MonopolyGame:
         self._finish_turn_or_allow_double()
     
     def _pay_rent(self, player: Player, position: int):
-        """Pay rent."""
         space = self.properties[position]
         owner = self.players[space.owner]
         
@@ -311,11 +301,9 @@ class MonopolyGame:
         self._finish_turn_or_allow_double()
     
     def _send_to_jail(self, player: Player):
-        """Send to jail."""
         GameLogic.send_to_jail(player)
     
     def _handle_bankruptcy(self, player: Player, owed_to: Optional[Player] = None):
-        """Handle bankruptcy."""
         player.is_bankrupt = True
         
         if owed_to:
@@ -332,7 +320,6 @@ class MonopolyGame:
         player.properties = []
     
     def _execute_card_action(self, player: Player, card: Dict):
-        """Execute the action from a Chance or Community Chest card."""
         action = card.get("action")
         if not action:
             return
@@ -356,7 +343,6 @@ class MonopolyGame:
             target_position = action[1]
             collect_go = action[2] if len(action) > 2 else False
             
-            # Calculate spaces to move
             if target_position >= player.position:
                 spaces = target_position - player.position
             else:
@@ -379,7 +365,7 @@ class MonopolyGame:
                 railroad_positions = [5, 15, 25, 35]
                 nearest = min(railroad_positions, 
                              key=lambda p: (p - current_pos) % 40)
-            else:  # utility
+            else:
                 utility_positions = [12, 28]
                 nearest = min(utility_positions,
                              key=lambda p: (p - current_pos) % 40)
@@ -414,17 +400,15 @@ class MonopolyGame:
             total_cost = 0
             for prop_idx in player.properties:
                 prop = self.properties[prop_idx]
-                if prop.houses == 5:  # Hotel
+                if prop.houses == 5:
                     total_cost += hotel_cost
                 else:
                     total_cost += prop.houses * house_cost
             player.remove_money(total_cost)
     
     def update(self, fingertip_meta: List[Dict]):
-        """Update game state."""
         current_player = self.get_current_player()
         
-        # Update dice rolling
         if self.dice_rolling:
             elapsed = time.time() - self.dice_roll_start
             if elapsed >= self.dice_roll_duration:
@@ -443,7 +427,6 @@ class MonopolyGame:
                 spaces = sum(self.dice_values)
                 self.move_player(current_player, spaces)
         
-        # Update player movement
         if current_player.is_moving:
             elapsed = time.time() - current_player.move_start
             move_duration = 0.3 * len(current_player.move_path)
@@ -454,7 +437,6 @@ class MonopolyGame:
                 current_player.move_path = []
                 self.land_on_space(current_player)
         
-        # Update buttons
         for player_idx in range(8):
             player = self.players[player_idx]
             is_active = player_idx in self.active_players
@@ -471,14 +453,15 @@ class MonopolyGame:
                     if is_current and self.phase == "roll" and not current_player.is_moving and not self.dice_rolling:
                         enabled = True
                         btn.text = "Roll" if self.can_roll else "End Turn"
-                elif btn_name in ("props", "build"):
+                elif btn_name == "props":
+                    enabled = self.active_popup is None
+                elif btn_name == "build":
                     enabled = is_current and not current_player.is_moving and self.active_popup is None
                 
                 if btn.update(fingertip_meta, enabled):
                     self._handle_button_click(player_idx, btn_name)
                     btn.reset()
         
-        # Update popup buttons
         if self.active_popup:
             for i, btn in enumerate(self.popup_buttons):
                 if btn.update(fingertip_meta):
@@ -486,7 +469,6 @@ class MonopolyGame:
                     btn.reset()
     
     def _handle_button_click(self, player_idx: int, button_name: str):
-        """Handle button click."""
         player = self.players[player_idx]
         
         if button_name == "action":
@@ -502,14 +484,13 @@ class MonopolyGame:
             self._show_build_popup(player)
     
     def _handle_popup_button(self, button_idx: int):
-        """Handle popup button click."""
         if self.active_popup == "buy_prompt":
             player = self.popup_data["player"]
             position = self.popup_data["position"]
             
-            if button_idx == 0:  # Buy
+            if button_idx == 0:
                 self._buy_property(player, position)
-            else:  # Pass
+            else:
                 self.active_popup = None
                 self.popup_buttons = []
                 self._finish_turn_or_allow_double()
@@ -523,13 +504,13 @@ class MonopolyGame:
         elif self.active_popup == "properties":
             player = self.popup_data["player"]
             
-            if button_idx == 0:  # Previous
+            if button_idx == 0:
                 if player.properties:
                     self.property_scroll = (self.property_scroll - 1) % len(player.properties)
-            elif button_idx == 1:  # Next
+            elif button_idx == 1:
                 if player.properties:
                     self.property_scroll = (self.property_scroll + 1) % len(player.properties)
-            else:  # Close
+            else:
                 self.active_popup = None
                 self.popup_buttons = []
         
@@ -538,41 +519,32 @@ class MonopolyGame:
             self.popup_buttons = []
     
     def draw(self):
-        """Draw the game."""
         self.screen.fill((32, 96, 36))
         
-        # Draw panels
         self._draw_all_panels()
         
-        # Draw board
         self.board_drawer.draw_board()
         
-        # Draw spaces
         for i in range(40):
             self.board_drawer.draw_space(i, self.properties[i].data)
             if self.properties[i].houses > 0:
                 self.board_drawer.draw_houses(i, self.properties[i].houses)
         
-        # Draw tokens
         self.token_drawer.draw_tokens(
             [self.players[i] for i in self.active_players],
             lambda p: p.is_moving,
             self._get_animated_token_pos
         )
         
-        # Draw dice
         if self.dice_rolling or self.dice_values != (0, 0):
             self.dice_drawer.draw_dice(self.dice_rolling, self.dice_values)
         
-        # Draw popups
         if self.active_popup:
             self._draw_popup()
         
-        # Draw cursors
         self._draw_cursors()
     
     def _draw_all_panels(self):
-        """Draw all player panels."""
         from ui_components import RotatedText
         current_player_idx = self.active_players[self.current_player_idx] if self.active_players else -1
         for idx in range(8):
@@ -605,7 +577,6 @@ class MonopolyGame:
                                      panel.orientation)
                 elif panel.orientation == 180:
                     info_height = int(panel.rect.height * 0.45)
-                    btn_area_height = panel.rect.height - info_height
                     info_rect = pygame.Rect(
                         panel.rect.x + 10,
                         panel.rect.y + 10,
@@ -618,9 +589,11 @@ class MonopolyGame:
                                      info_rect.center,
                                      panel.orientation)
                 elif panel.orientation == 90:
-                    info_width = int(panel.rect.width * 0.35)
+                    info_width_frac = 0.35
+                    button_area_width = int(panel.rect.width * (1 - info_width_frac))
+                    info_width = int(panel.rect.width * info_width_frac)
                     info_rect = pygame.Rect(
-                        panel.rect.x + 10,
+                        panel.rect.x + button_area_width,
                         panel.rect.y + 10,
                         info_width - 10,
                         panel.rect.height - 20
@@ -662,7 +635,6 @@ class MonopolyGame:
                 self.screen.blit(text_surf, text_rect)
     
     def _get_animated_token_pos(self, player: Player) -> Tuple[int, int]:
-        """Get animated position for moving token."""
         elapsed = time.time() - player.move_start
         move_duration = 0.3 * len(player.move_path)
         progress = min(1.0, elapsed / move_duration)
@@ -691,7 +663,6 @@ class MonopolyGame:
         return (x + w // 2, y + h // 2)
     
     def _draw_popup(self):
-        """Draw active popup."""
         player = self.popup_data.get("player")
         if not player:
             return
@@ -711,7 +682,6 @@ class MonopolyGame:
             self.popup_drawer.draw_build_popup(panel, self.popup_buttons)
     
     def _draw_cursors(self):
-        """Draw cursors for all fingertips."""
         from ui_components import draw_cursor
         import math
         
@@ -764,7 +734,6 @@ class MonopolyGame:
         return self.players[self.active_players[self.current_player_idx]]
     
     def roll_dice(self):
-        """Start a dice roll animation, then move the current player in update()."""
         if not self.can_roll or self.dice_rolling:
             return
         self.dice_rolling = True
@@ -772,15 +741,10 @@ class MonopolyGame:
         self.can_roll = False
 
     def move_player(self, player: "Player", spaces: int):
-        """Animate player movement using GameLogic and set phase."""
         GameLogic.move_player(player, spaces)
         self.phase = "moving"
 
     def land_on_space(self, player: "Player"):
-        """Resolve effects after movement ends."""
-        from monopoly_data import PASSING_GO_MONEY
-        from constants import COMMUNITY_CHEST_CARDS, CHANCE_CARDS  # just to ensure deps
-
         if GameLogic.check_passed_go(player):
             player.add_money(PASSING_GO_MONEY)
 
@@ -830,7 +794,6 @@ class MonopolyGame:
             self._handle_bankruptcy(player)
 
     def _finish_turn_or_allow_double(self):
-        """If doubles were rolled, allow another roll; otherwise advance turn."""
         current = self.get_current_player()
         if current.consecutive_doubles > 0:
             self.phase = "roll"
@@ -839,7 +802,6 @@ class MonopolyGame:
             self.advance_turn()
 
     def advance_turn(self):
-        """Advance to next non-bankrupt active player."""
         if not self.active_players:
             return
 

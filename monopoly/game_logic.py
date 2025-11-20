@@ -1,4 +1,3 @@
-"""Game logic for Monopoly - movement, turns, and card actions."""
 import time
 import random
 from typing import Dict, Optional
@@ -10,15 +9,12 @@ from constants import COMMUNITY_CHEST_CARDS, CHANCE_CARDS
 
 
 class GameLogic:
-    """Handles game logic operations."""
     
     @staticmethod
     def move_player(player, spaces: int):
-        """Move player forward by spaces."""
         old_pos = player.position
         player.move_from = old_pos
         
-        # Create path
         player.move_path = []
         for i in range(1, abs(spaces) + 1):
             if spaces > 0:
@@ -31,14 +27,12 @@ class GameLogic:
     
     @staticmethod
     def check_passed_go(player) -> bool:
-        """Check if player passed GO and return True if they did."""
         if player.move_from > player.position and len(player.move_path) > 0:
             return True
         return False
     
     @staticmethod
     def send_to_jail(player):
-        """Send player to jail."""
         player.position = JAIL_POSITION
         player.in_jail = True
         player.jail_turns = 0
@@ -47,7 +41,6 @@ class GameLogic:
     
     @staticmethod
     def draw_card(deck_type: str, chance_deck: list, community_chest_deck: list) -> Dict:
-        """Draw a card from specified deck."""
         if deck_type == "chance":
             if not chance_deck:
                 chance_deck.extend(CHANCE_CARDS)
@@ -61,7 +54,6 @@ class GameLogic:
     
     @staticmethod
     def calculate_rent(space, dice_roll: Optional[int], owner, properties) -> int:
-        """Calculate rent for a property."""
         group = space.data.get("group")
         owned_in_group = 1
         
@@ -71,7 +63,6 @@ class GameLogic:
         
         rent = space.get_rent(dice_roll, owned_in_group)
         
-        # Double rent for monopoly without houses
         if group and group not in ("Railroad", "Utility"):
             if owner.has_monopoly(group, properties) and space.houses == 0:
                 rent *= 2
