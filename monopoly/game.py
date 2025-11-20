@@ -134,16 +134,20 @@ class MonopolyGame:
             gap = 12
             
             if panel.is_vertical():
-                # Vertical panels (left/right): buttons arranged horizontally at bottom
-                row_h = int(panel.rect.width * 0.26)
-                y = panel.rect.y + int(panel.rect.height * 0.70)
+                # Vertical panels (left/right): buttons stacked vertically at bottom
+                # From their POV (rotated 90/270), this appears as a horizontal row
+                btn_h = int(panel.rect.width * 0.26)
+                y_start = panel.rect.y + int(panel.rect.height * 0.70)
                 x = panel.rect.x + margin
-                avail_w = panel.rect.width - 2 * margin
-                btn_w = (avail_w - 2 * gap) // 3
-                btn_h = row_h
-                r_roll = pygame.Rect(x, y, btn_w, btn_h)
-                r_props = pygame.Rect(x + (btn_w + gap), y, btn_w, btn_h)
-                r_build = pygame.Rect(x + 2 * (btn_w + gap), y, btn_w, btn_h)
+                avail_h = panel.rect.height - y_start + panel.rect.y - margin
+                btn_w = panel.rect.width - 2 * margin
+                # Calculate button height so 3 buttons fit vertically
+                total_gap_height = 2 * gap
+                btn_h = (avail_h - total_gap_height) // 3
+                
+                r_roll = pygame.Rect(x, y_start, btn_w, btn_h)
+                r_props = pygame.Rect(x, y_start + (btn_h + gap), btn_w, btn_h)
+                r_build = pygame.Rect(x, y_start + 2 * (btn_h + gap), btn_w, btn_h)
             else:
                 # Horizontal panels (top/bottom): buttons arranged horizontally at bottom
                 row_h = int(panel.rect.height * 0.55)
@@ -300,6 +304,95 @@ class MonopolyGame:
                 prop.is_mortgaged = False
         
         player.properties = []
+    
+    def _execute_card_action(self, player: Player, card: Dict):
+        """Execute the action from a Chance or Community Chest card."""
+        action = card.get("action")
+        if not action:
+            return
+        
+        action_type = action[0]
+        
+        if action_type == "money":
+            amount = action[1]
+            if amount > 0:
+                player.add_money(amount)
+            else:
+                player.remove_money(abs(amount))
+        
+        elif action_type == "jail_free":
+            player.get_out_of_jail_cards += 1
+        
+        elif action_type == "go_to_jail":
+            self._send_to_jail(player)
+        
+        elif action_type == "advance":
+            target_position = action[1]
+            collect_go = action[2] if len(action) > 2 else False
+            
+            # Calculate spaces to move
+            if target_position >= player.position:
+                spaces = target_position - player.position
+            else:
+                spaces = (40 - player.position) + target_position
+            
+            self.move_player(player, spaces)
+            
+            if collect_go and target_position < player.position:
+                player.add_money(PASSING_GO_MONEY)
+        
+        elif action_type == "advance_relative":
+            spaces = action[1]
+            self.move_player(player, spaces)
+        
+        elif action_type == "advance_nearest":
+            target_type = action[1]
+            current_pos = player.position
+            
+            if target_type == "railroad":
+                railroad_positions = [5, 15, 25, 35]
+                nearest = min(railroad_positions, 
+                             key=lambda p: (p - current_pos) % 40)
+            else:  # utility
+                utility_positions = [12, 28]
+                nearest = min(utility_positions,
+                             key=lambda p: (p - current_pos) % 40)
+            
+            if nearest >= current_pos:
+                spaces = nearest - current_pos
+            else:
+                spaces = (40 - current_pos) + nearest
+            
+            self.move_player(player, spaces)
+        
+        elif action_type == "collect_from_each":
+            amount = action[1]
+            for other_idx in self.active_players:
+                if other_idx != player.idx:
+                    other = self.players[other_idx]
+                    transfer = min(amount, other.money)
+                    other.remove_money(transfer)
+                    player.add_money(transfer)
+        
+        elif action_type == "pay_each_player":
+            amount = action[1]
+            for other_idx in self.active_players:
+                if other_idx != player.idx:
+                    other = self.players[other_idx]
+                    payment = min(amount, player.money)
+                    player.remove_money(payment)
+                    other.add_money(payment)
+        
+        elif action_type == "pay_per_house_hotel":
+            house_cost, hotel_cost = action[1]
+            total_cost = 0
+            for prop_idx in player.properties:
+                prop = self.properties[prop_idx]
+                if prop.houses == 5:  # Hotel
+                    total_cost += hotel_cost
+                else:
+                    total_cost += prop.houses * house_cost
+            player.remove_money(total_cost)
     
     def update(self, fingertip_meta: List[Dict]):
         """Update game state."""

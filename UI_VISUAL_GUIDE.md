@@ -28,33 +28,33 @@ From top player's view (rotated 180°):
 
 ### Left Player (Orientation 90) - FIXED
 
-**Before:** Inconsistent button and popup layouts
-**After:** Same relative layout as bottom players
+**Before:** Buttons were arranged horizontally in screen space, appearing vertical to the player
+**After:** Buttons stacked vertically in screen space, appearing as a horizontal row to the player (when rotated)
 
 ```
-From left player's view (rotated 90°):
-┌──────┐
-│ Info │
-│      │
-│ Roll │
-│Props │
-│Build │
+Screen space (actual):     From left player's view (rotated 90°):
+┌──────┐                   ┌─────────────────────────────────┐
+│ Info │                   │  Player Info: $1500 | 5p        │
+│      │                   │                                  │
+│[Roll]│         →         │  [Roll]  [Props]  [Build]       │
+│[Prop]│                   └─────────────────────────────────┘
+│[Bld ]│
 └──────┘
 ```
 
 ### Right Player (Orientation 270) - FIXED
 
-**Before:** Inconsistent layouts
-**After:** Mirror of left player (same from their POV)
+**Before:** Buttons arranged horizontally in screen space
+**After:** Buttons stacked vertically in screen space, appearing horizontal when rotated
 
 ```
-From right player's view (rotated 270°):
-┌──────┐
-│ Info │
-│      │
-│ Roll │
-│Props │
-│Build │
+Screen space (actual):     From right player's view (rotated 270°):
+┌──────┐                   ┌─────────────────────────────────┐
+│ Info │                   │  Player Info: $1500 | 5p        │
+│      │                   │                                  │
+│[Roll]│         →         │  [Roll]  [Props]  [Build]       │
+│[Prop]│                   └─────────────────────────────────┘
+│[Bld ]│
 └──────┘
 ```
 
