@@ -130,9 +130,11 @@ class MonopolyGame:
         font = pygame.font.SysFont(None, 26)
         for idx in range(8):
             panel = self.panels[idx]
+            margin = 10
+            gap = 12
+            
             if panel.is_vertical():
-                margin = 6
-                gap = 6
+                # Vertical panels (left/right): buttons arranged horizontally at bottom
                 row_h = int(panel.rect.width * 0.26)
                 y = panel.rect.y + int(panel.rect.height * 0.70)
                 x = panel.rect.x + margin
@@ -143,8 +145,7 @@ class MonopolyGame:
                 r_props = pygame.Rect(x + (btn_w + gap), y, btn_w, btn_h)
                 r_build = pygame.Rect(x + 2 * (btn_w + gap), y, btn_w, btn_h)
             else:
-                margin = 10
-                gap = 12
+                # Horizontal panels (top/bottom): buttons arranged horizontally at bottom
                 row_h = int(panel.rect.height * 0.55)
                 y = panel.rect.y + panel.rect.height - row_h - margin
                 x = panel.rect.x + margin
@@ -154,6 +155,7 @@ class MonopolyGame:
                 r_roll = pygame.Rect(x, y, btn_w, btn_h)
                 r_props = pygame.Rect(x + (btn_w + gap), y, btn_w, btn_h)
                 r_build = pygame.Rect(x + 2 * (btn_w + gap), y, btn_w, btn_h)
+            
             self.buttons[idx] = {
                 "action": HoverButton(r_roll, "Roll", font, orientation=panel.orientation),
                 "props": HoverButton(r_props, "Props", font, orientation=panel.orientation),
@@ -161,44 +163,47 @@ class MonopolyGame:
             }
 
     def _popup_button_column(self, panel, count: int, small: bool = False) -> list:
-        col_ratio = 0.32
+        """Create popup buttons arranged consistently for all orientations."""
         margin = 6
         gap = 8
-        if panel.orientation == 0:  # bottom
-            col_w = int(panel.rect.width * col_ratio)
+        
+        if panel.orientation == 0:  # bottom - buttons on left side vertically
+            col_w = int(panel.rect.width * 0.32)
             col_h = panel.rect.height - 2 * margin
             x = panel.rect.x + margin
             y = panel.rect.y + margin
             btn_h = (col_h - (count - 1) * gap) // count
             btn_w = col_w - 2 * margin
             rects = [pygame.Rect(x + margin, y + i * (btn_h + gap), btn_w, btn_h) for i in range(count)]
-        elif panel.orientation == 180:  # top (flipped)
-            col_w = int(panel.rect.width * col_ratio)
+        elif panel.orientation == 180:  # top - buttons on right side vertically (from top player's view: left)
+            col_w = int(panel.rect.width * 0.32)
             col_h = panel.rect.height - 2 * margin
             x = panel.rect.right - col_w - margin
             y = panel.rect.y + margin
             btn_h = (col_h - (count - 1) * gap) // count
             btn_w = col_w - 2 * margin
             rects = [pygame.Rect(x + margin, y + i * (btn_h + gap), btn_w, btn_h) for i in range(count)]
-        elif panel.orientation == 90:  # left (rotated)
-            col_h = int(panel.rect.height * col_ratio)
+        elif panel.orientation == 90:  # left - buttons on bottom horizontally (from left player's view: left)
+            col_h = int(panel.rect.height * 0.32)
             col_w = panel.rect.width - 2 * margin
             y = panel.rect.bottom - col_h - margin
             x = panel.rect.x + margin
             btn_w = (col_w - (count - 1) * gap) // count
             btn_h = col_h - 2 * margin
             rects = [pygame.Rect(x + i * (btn_w + gap), y + margin, btn_w, btn_h) for i in range(count)]
-        else:  # 270 right
-            col_h = int(panel.rect.height * col_ratio)
+        else:  # 270 right - buttons on top horizontally (from right player's view: left)
+            col_h = int(panel.rect.height * 0.32)
             col_w = panel.rect.width - 2 * margin
             y = panel.rect.y + margin
             x = panel.rect.x + margin
             btn_w = (col_w - (count - 1) * gap) // count
             btn_h = col_h - 2 * margin
             rects = [pygame.Rect(x + i * (btn_w + gap), y + margin, btn_w, btn_h) for i in range(count)]
+        
         if small:
             for r in rects:
                 r.height = int(r.height * 0.55)
+        
         return rects
 
     def _show_buy_prompt(self, player: Player, position: int):
