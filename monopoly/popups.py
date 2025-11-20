@@ -42,38 +42,35 @@ class PopupDrawer:
         # Get button area
         btn_area = buttons[0].rect.union(buttons[-1].rect) if buttons else pygame.Rect(panel.rect.x, panel.rect.y, 0, 0)
         
-        # Content area - mirrored for opposite sides
         margin = 10
-        if panel.orientation in (0, 180):  # Horizontal panels
-            if panel.orientation == 0:  # Bottom - content to right of buttons
-                content_rect = pygame.Rect(
-                    btn_area.right + margin,
-                    panel.rect.y + margin,
-                    panel.rect.width - btn_area.width - margin * 3,
-                    panel.rect.height - margin * 2
-                )
-            else:  # Top (180) - content to left of buttons (mirrored)
-                content_rect = pygame.Rect(
-                    panel.rect.x + margin,
-                    panel.rect.y + margin,
-                    panel.rect.width - btn_area.width - margin * 3,
-                    panel.rect.height - margin * 2
-                )
-        else:  # Vertical panels
-            if panel.orientation == 90:  # Left - content above buttons
-                content_rect = pygame.Rect(
-                    panel.rect.x + margin,
-                    panel.rect.y + margin,
-                    panel.rect.width - margin * 2,
-                    panel.rect.height - btn_area.height - margin * 3
-                )
-            else:  # Right (270) - content below buttons (mirrored)
-                content_rect = pygame.Rect(
-                    panel.rect.x + margin,
-                    btn_area.bottom + margin,
-                    panel.rect.width - margin * 2,
-                    panel.rect.height - btn_area.height - margin * 3
-                )
+        if panel.orientation == 0:
+            content_rect = pygame.Rect(
+                btn_area.right + margin,
+                panel.rect.y + margin,
+                panel.rect.width - btn_area.width - margin * 3,
+                panel.rect.height - margin * 2
+            )
+        elif panel.orientation == 180:
+            content_rect = pygame.Rect(
+                btn_area.right + margin,
+                panel.rect.y + margin,
+                panel.rect.width - btn_area.width - margin * 3,
+                panel.rect.height - margin * 2
+            )
+        elif panel.orientation == 90:
+            content_rect = pygame.Rect(
+                panel.rect.x + margin,
+                btn_area.bottom + margin,
+                panel.rect.width - margin * 2,
+                panel.rect.height - btn_area.height - margin * 3
+            )
+        else:
+            content_rect = pygame.Rect(
+                panel.rect.x + margin,
+                btn_area.bottom + margin,
+                panel.rect.width - margin * 2,
+                panel.rect.height - btn_area.height - margin * 3
+            )
         
         # Color bar at top (8px thick)
         bar_h = 12
@@ -141,38 +138,35 @@ class PopupDrawer:
         title = "CHANCE" if deck_type == "chance" else "COMMUNITY CHEST"
         title_color = (255,200,60) if deck_type == "chance" else (100,180,255)
 
-        # Content area - mirrored for opposite sides
         margin = 10
-        if panel.orientation in (0, 180):
-            if panel.orientation == 0:  # Bottom
-                content_rect = pygame.Rect(
-                    btn_area.right + margin,
-                    panel.rect.y + margin,
-                    panel.rect.width - btn_area.width - margin * 3,
-                    panel.rect.height - margin * 2
-                )
-            else:  # Top (180) - mirrored
-                content_rect = pygame.Rect(
-                    panel.rect.x + margin,
-                    panel.rect.y + margin,
-                    panel.rect.width - btn_area.width - margin * 3,
-                    panel.rect.height - margin * 2
-                )
+        if panel.orientation == 0:
+            content_rect = pygame.Rect(
+                btn_area.right + margin,
+                panel.rect.y + margin,
+                panel.rect.width - btn_area.width - margin * 3,
+                panel.rect.height - margin * 2
+            )
+        elif panel.orientation == 180:
+            content_rect = pygame.Rect(
+                btn_area.right + margin,
+                panel.rect.y + margin,
+                panel.rect.width - btn_area.width - margin * 3,
+                panel.rect.height - margin * 2
+            )
+        elif panel.orientation == 90:
+            content_rect = pygame.Rect(
+                panel.rect.x + margin,
+                btn_area.bottom + margin,
+                panel.rect.width - margin * 2,
+                panel.rect.height - btn_area.height - margin * 3
+            )
         else:
-            if panel.orientation == 90:  # Left
-                content_rect = pygame.Rect(
-                    panel.rect.x + margin,
-                    panel.rect.y + margin,
-                    panel.rect.width - margin * 2,
-                    panel.rect.height - btn_area.height - margin * 3
-                )
-            else:  # Right (270) - mirrored
-                content_rect = pygame.Rect(
-                    panel.rect.x + margin,
-                    btn_area.bottom + margin,
-                    panel.rect.width - margin * 2,
-                    panel.rect.height - btn_area.height - margin * 3
-                )
+            content_rect = pygame.Rect(
+                panel.rect.x + margin,
+                btn_area.bottom + margin,
+                panel.rect.width - margin * 2,
+                panel.rect.height - btn_area.height - margin * 3
+            )
 
         bar_h = 10
         bar_rect = pygame.Rect(content_rect.x, content_rect.y, content_rect.width, bar_h)
@@ -215,38 +209,35 @@ class PopupDrawer:
         
         btn_area = buttons[0].rect.union(buttons[-1].rect) if buttons else pygame.Rect(panel.rect.x, panel.rect.y, 0, 0)
         
-        # Content area - mirrored for opposite sides
         margin = 10
-        if panel.orientation in (0, 180):
-            if panel.orientation == 0:  # Bottom
-                content_rect = pygame.Rect(
-                    btn_area.right + margin,
-                    panel.rect.y + margin,
-                    panel.rect.width - btn_area.width - margin * 3,
-                    panel.rect.height - margin * 2
-                )
-            else:  # Top (180) - mirrored
-                content_rect = pygame.Rect(
-                    panel.rect.x + margin,
-                    panel.rect.y + margin,
-                    panel.rect.width - btn_area.width - margin * 3,
-                    panel.rect.height - margin * 2
-                )
+        if panel.orientation == 0:
+            content_rect = pygame.Rect(
+                btn_area.right + margin,
+                panel.rect.y + margin,
+                panel.rect.width - btn_area.width - margin * 3,
+                panel.rect.height - margin * 2
+            )
+        elif panel.orientation == 180:
+            content_rect = pygame.Rect(
+                btn_area.right + margin,
+                panel.rect.y + margin,
+                panel.rect.width - btn_area.width - margin * 3,
+                panel.rect.height - margin * 2
+            )
+        elif panel.orientation == 90:
+            content_rect = pygame.Rect(
+                panel.rect.x + margin,
+                btn_area.bottom + margin,
+                panel.rect.width - margin * 2,
+                panel.rect.height - btn_area.height - margin * 3
+            )
         else:
-            if panel.orientation == 90:  # Left
-                content_rect = pygame.Rect(
-                    panel.rect.x + margin,
-                    panel.rect.y + margin,
-                    panel.rect.width - margin * 2,
-                    panel.rect.height - btn_area.height - margin * 3
-                )
-            else:  # Right (270) - mirrored
-                content_rect = pygame.Rect(
-                    panel.rect.x + margin,
-                    btn_area.bottom + margin,
-                    panel.rect.width - margin * 2,
-                    panel.rect.height - btn_area.height - margin * 3
-                )
+            content_rect = pygame.Rect(
+                panel.rect.x + margin,
+                btn_area.bottom + margin,
+                panel.rect.width - margin * 2,
+                panel.rect.height - btn_area.height - margin * 3
+            )
         
         if panel.is_vertical():
             font_title = pygame.font.SysFont("Arial", 20, bold=True)
@@ -332,38 +323,35 @@ class PopupDrawer:
         font_title = pygame.font.SysFont("Arial", 20, bold=True)
         btn_area = buttons[0].rect if buttons else pygame.Rect(panel.rect.x, panel.rect.y, 0, 0)
         
-        # Content area - mirrored for opposite sides
         margin = 10
-        if panel.orientation in (0, 180):
-            if panel.orientation == 0:
-                content_rect = pygame.Rect(
-                    btn_area.right + margin,
-                    panel.rect.y + margin,
-                    panel.rect.width - btn_area.width - margin * 3,
-                    panel.rect.height - margin * 2
-                )
-            else:  # 180 - mirrored
-                content_rect = pygame.Rect(
-                    panel.rect.x + margin,
-                    panel.rect.y + margin,
-                    panel.rect.width - btn_area.width - margin * 3,
-                    panel.rect.height - margin * 2
-                )
+        if panel.orientation == 0:
+            content_rect = pygame.Rect(
+                btn_area.right + margin,
+                panel.rect.y + margin,
+                panel.rect.width - btn_area.width - margin * 3,
+                panel.rect.height - margin * 2
+            )
+        elif panel.orientation == 180:
+            content_rect = pygame.Rect(
+                btn_area.right + margin,
+                panel.rect.y + margin,
+                panel.rect.width - btn_area.width - margin * 3,
+                panel.rect.height - margin * 2
+            )
+        elif panel.orientation == 90:
+            content_rect = pygame.Rect(
+                panel.rect.x + margin,
+                btn_area.bottom + margin,
+                panel.rect.width - margin * 2,
+                panel.rect.height - btn_area.height - margin * 3
+            )
         else:
-            if panel.orientation == 90:
-                content_rect = pygame.Rect(
-                    panel.rect.x + margin,
-                    panel.rect.y + margin,
-                    panel.rect.width - margin * 2,
-                    panel.rect.height - btn_area.height - margin * 3
-                )
-            else:  # 270 - mirrored
-                content_rect = pygame.Rect(
-                    panel.rect.x + margin,
-                    btn_area.bottom + margin,
-                    panel.rect.width - margin * 2,
-                    panel.rect.height - btn_area.height - margin * 3
-                )
+            content_rect = pygame.Rect(
+                panel.rect.x + margin,
+                btn_area.bottom + margin,
+                panel.rect.width - margin * 2,
+                panel.rect.height - btn_area.height - margin * 3
+            )
         
         RotatedText.draw_block(self.screen,
                                [("Building (Coming Soon)", font_title, Colors.ACCENT)],

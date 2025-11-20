@@ -133,36 +133,53 @@ class MonopolyGame:
             margin = 10
             gap = 8
             
-            if panel.is_vertical():
-                # Vertical panels: info at top, buttons below
-                # Buttons span full width, stacked vertically
-                info_height_frac = 0.35  # Top 35% for info
-                button_area_start = int(panel.rect.height * info_height_frac)
-                
-                btn_w = panel.rect.width - 2 * margin
-                avail_h = panel.rect.height - button_area_start - margin
-                btn_h = (avail_h - 2 * gap) // 3
-                
-                x = panel.rect.x + margin
-                y_start = panel.rect.y + button_area_start
-                
-                r_roll = pygame.Rect(x, y_start, btn_w, btn_h)
-                r_props = pygame.Rect(x, y_start + btn_h + gap, btn_w, btn_h)
-                r_build = pygame.Rect(x, y_start + 2 * (btn_h + gap), btn_w, btn_h)
-            else:
-                # Horizontal panels: info at top, buttons at bottom
-                info_height_frac = 0.45  # Top 45% for info
+            if panel.orientation == 0:
+                info_height_frac = 0.45
                 button_area_height = int(panel.rect.height * (1 - info_height_frac))
-                
                 y = panel.rect.y + panel.rect.height - button_area_height
                 x = panel.rect.x + margin
                 avail_w = panel.rect.width - 2 * margin
                 btn_w = (avail_w - 2 * gap) // 3
                 btn_h = button_area_height - 2 * margin
-                
                 r_roll = pygame.Rect(x, y + margin, btn_w, btn_h)
                 r_props = pygame.Rect(x + btn_w + gap, y + margin, btn_w, btn_h)
                 r_build = pygame.Rect(x + 2 * (btn_w + gap), y + margin, btn_w, btn_h)
+            
+            elif panel.orientation == 180:
+                info_height_frac = 0.45
+                button_area_height = int(panel.rect.height * (1 - info_height_frac))
+                y = panel.rect.y
+                x = panel.rect.x + margin
+                avail_w = panel.rect.width - 2 * margin
+                btn_w = (avail_w - 2 * gap) // 3
+                btn_h = button_area_height - 2 * margin
+                r_roll = pygame.Rect(x, y + margin, btn_w, btn_h)
+                r_props = pygame.Rect(x + btn_w + gap, y + margin, btn_w, btn_h)
+                r_build = pygame.Rect(x + 2 * (btn_w + gap), y + margin, btn_w, btn_h)
+            
+            elif panel.orientation == 90:
+                info_width_frac = 0.35
+                button_area_width = int(panel.rect.width * (1 - info_width_frac))
+                x = panel.rect.x + panel.rect.width - button_area_width
+                y = panel.rect.y + margin
+                avail_h = panel.rect.height - 2 * margin
+                btn_h = (avail_h - 2 * gap) // 3
+                btn_w = button_area_width - 2 * margin
+                r_roll = pygame.Rect(x + margin, y, btn_w, btn_h)
+                r_props = pygame.Rect(x + margin, y + btn_h + gap, btn_w, btn_h)
+                r_build = pygame.Rect(x + margin, y + 2 * (btn_h + gap), btn_w, btn_h)
+            
+            else:
+                info_width_frac = 0.35
+                button_area_width = int(panel.rect.width * (1 - info_width_frac))
+                x = panel.rect.x
+                y = panel.rect.y + margin
+                avail_h = panel.rect.height - 2 * margin
+                btn_h = (avail_h - 2 * gap) // 3
+                btn_w = button_area_width - 2 * margin
+                r_roll = pygame.Rect(x + margin, y, btn_w, btn_h)
+                r_props = pygame.Rect(x + margin, y + btn_h + gap, btn_w, btn_h)
+                r_build = pygame.Rect(x + margin, y + 2 * (btn_h + gap), btn_w, btn_h)
             
             self.buttons[idx] = {
                 "action": HoverButton(r_roll, "Roll", font, orientation=panel.orientation),
@@ -171,11 +188,10 @@ class MonopolyGame:
             }
 
     def _popup_button_column(self, panel, count: int, small: bool = False) -> list:
-        """Create popup buttons arranged consistently for all orientations - mirrored for opposite sides."""
         margin = 8
         gap = 10
         
-        if panel.orientation == 0:  # bottom - buttons on left side vertically
+        if panel.orientation == 0:
             col_w = int(panel.rect.width * 0.28)
             col_h = panel.rect.height - 2 * margin
             x = panel.rect.x + margin
@@ -183,26 +199,26 @@ class MonopolyGame:
             btn_h = (col_h - (count - 1) * gap) // count
             btn_w = col_w
             rects = [pygame.Rect(x, y + i * (btn_h + gap), btn_w, btn_h) for i in range(count)]
-        elif panel.orientation == 180:  # top - buttons on left side from THEIR view (right side in screen space)
+        elif panel.orientation == 180:
             col_w = int(panel.rect.width * 0.28)
             col_h = panel.rect.height - 2 * margin
-            x = panel.rect.right - col_w - margin  # Right side in screen space
+            x = panel.rect.x + margin
             y = panel.rect.y + margin
             btn_h = (col_h - (count - 1) * gap) // count
             btn_w = col_w
             rects = [pygame.Rect(x, y + i * (btn_h + gap), btn_w, btn_h) for i in range(count)]
-        elif panel.orientation == 90:  # left - buttons on left from THEIR view (bottom in screen space)
+        elif panel.orientation == 90:
             col_h = int(panel.rect.height * 0.28)
             col_w = panel.rect.width - 2 * margin
-            y = panel.rect.bottom - col_h - margin  # Bottom in screen space
+            y = panel.rect.y + margin
             x = panel.rect.x + margin
             btn_w = (col_w - (count - 1) * gap) // count
             btn_h = col_h
             rects = [pygame.Rect(x + i * (btn_w + gap), y, btn_w, btn_h) for i in range(count)]
-        else:  # 270 right - buttons on left from THEIR view (top in screen space)
+        else:
             col_h = int(panel.rect.height * 0.28)
             col_w = panel.rect.width - 2 * margin
-            y = panel.rect.y + margin  # Top in screen space
+            y = panel.rect.y + margin
             x = panel.rect.x + margin
             btn_w = (col_w - (count - 1) * gap) // count
             btn_h = col_h
@@ -571,27 +587,9 @@ class MonopolyGame:
                 pygame.draw.rect(self.screen, (40, 40, 40), panel.rect, width=1, border_radius=8)
             
             if is_active and not player.is_bankrupt:
-                # Info always in top portion of panel
                 font = pygame.font.SysFont("Arial", 18, bold=True)
                 
-                if panel.is_vertical():
-                    # Vertical: info in top 35%
-                    info_rect = pygame.Rect(
-                        panel.rect.x + 10,
-                        panel.rect.y + 10,
-                        panel.rect.width - 20,
-                        int(panel.rect.height * 0.30)
-                    )
-                    RotatedText.draw_block(
-                        self.screen,
-                        [(f"${player.money}", font, Colors.BLACK),
-                         (f"{len(player.properties)}p", font, Colors.BLACK)],
-                        info_rect,
-                        panel.orientation,
-                        line_spacing=12
-                    )
-                else:
-                    # Horizontal: info in top 45%
+                if panel.orientation == 0:
                     info_rect = pygame.Rect(
                         panel.rect.x + 10,
                         panel.rect.y + 10,
@@ -603,6 +601,53 @@ class MonopolyGame:
                                      font, Colors.BLACK,
                                      info_rect.center,
                                      panel.orientation)
+                elif panel.orientation == 180:
+                    info_height = int(panel.rect.height * 0.45)
+                    btn_area_height = panel.rect.height - info_height
+                    info_rect = pygame.Rect(
+                        panel.rect.x + 10,
+                        panel.rect.y + btn_area_height + 10,
+                        panel.rect.width - 20,
+                        info_height - 20
+                    )
+                    RotatedText.draw(self.screen,
+                                     f"${player.money} | {len(player.properties)}p",
+                                     font, Colors.BLACK,
+                                     info_rect.center,
+                                     panel.orientation)
+                elif panel.orientation == 90:
+                    info_width = int(panel.rect.width * 0.35)
+                    info_rect = pygame.Rect(
+                        panel.rect.x + 10,
+                        panel.rect.y + 10,
+                        info_width - 10,
+                        panel.rect.height - 20
+                    )
+                    RotatedText.draw_block(
+                        self.screen,
+                        [(f"${player.money}", font, Colors.BLACK),
+                         (f"{len(player.properties)}p", font, Colors.BLACK)],
+                        info_rect,
+                        panel.orientation,
+                        line_spacing=12
+                    )
+                else:
+                    info_width = int(panel.rect.width * 0.35)
+                    btn_area_width = panel.rect.width - info_width
+                    info_rect = pygame.Rect(
+                        panel.rect.x + btn_area_width + 10,
+                        panel.rect.y + 10,
+                        info_width - 20,
+                        panel.rect.height - 20
+                    )
+                    RotatedText.draw_block(
+                        self.screen,
+                        [(f"${player.money}", font, Colors.BLACK),
+                         (f"{len(player.properties)}p", font, Colors.BLACK)],
+                        info_rect,
+                        panel.orientation,
+                        line_spacing=12
+                    )
                 
                 for btn in self.buttons[idx].values():
                     btn.draw(self.screen)
