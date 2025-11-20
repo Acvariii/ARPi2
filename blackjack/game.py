@@ -283,7 +283,7 @@ class BlackjackGame:
                         player.place_bet(100)
                         buttons["bet100"].reset()
                     
-                    ready_enabled = player.current_bet > 0 or player.current_bet == -1
+                    ready_enabled = True
                     if buttons["ready"].update(fingertip_meta, enabled=ready_enabled):
                         if player.current_bet == 0:
                             player.skip_round()
@@ -435,8 +435,8 @@ class BlackjackGame:
             return
         
         positions = [
-            (self.table_rect.centerx, self.table_rect.bottom - 80),
             (self.table_rect.centerx - 200, self.table_rect.bottom - 80),
+            (self.table_rect.centerx, self.table_rect.bottom - 80),
             (self.table_rect.centerx + 200, self.table_rect.bottom - 80),
             (self.table_rect.centerx - 200, self.table_rect.top + 80),
             (self.table_rect.centerx, self.table_rect.top + 80),
@@ -455,14 +455,14 @@ class BlackjackGame:
             
             if len(hand) > 0:
                 px, py = positions[idx]
-                hand_width = CardDrawer.get_hand_width(len(hand), 15)
+                hand_width = CardDrawer.get_hand_width(len(hand), 25)
                 start_x = px - hand_width // 2
                 
                 bg_rect = pygame.Rect(start_x - 10, py - 35, hand_width + 20, CardDrawer.CARD_HEIGHT + 50)
                 pygame.draw.rect(self.screen, (*player.color, 100), bg_rect, border_radius=8)
                 pygame.draw.rect(self.screen, player.color, bg_rect, width=3, border_radius=8)
                 
-                CardDrawer.draw_hand(self.screen, hand, start_x, py, spacing=15, outline_color=player.color)
+                CardDrawer.draw_hand(self.screen, hand, start_x, py, spacing=25, outline_color=player.color)
                 
                 hand_value = BlackjackLogic.hand_value(hand)
                 font_value = pygame.font.SysFont(None, 24, bold=True)
