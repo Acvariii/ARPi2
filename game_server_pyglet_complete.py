@@ -1,0 +1,387 @@
+"""
+ARPi2 Game Server - Pyglet/OpenGL Version (Clean & Organized)
+High-performance OpenGL-accelerated game server with complete UI
+All games include player selection and player panels matching Pygame version
+"""
+import asyncio
+import websockets
+import pyglet
+from pyglet import gl
+import cv2
+import numpy as np
+import json
+import base64
+import time
+from typing import Dict, List
+import mediapipe as mp
+
+from config import WINDOW_SIZE, FPS, HOVER_TIME_THRESHOLD, Colors
+from pyglet_games.renderer import PygletRenderer
+from pyglet_games import MonopolyGame, BlackjackGame
+from pyglet_games.dnd_complete import DnDCharacterCreation
+
+
+class HandTrackingServer:
+    """MediaPipe hand tracking processor"""
+    
+    def __init__(self):
+        self.mp_hands = mp.solutions.hands
+        self.hands = self.mp_hands.Hands(
+            static_image_mode=False,
+            max_num_hands=8,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
+        self.fingertip_data = []
+    
+    def process_frame(self, frame_bgr):
+        """Process camera frame and extract fingertip positions"""
+        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        results = self.hands.process(frame_rgb)
+        
+        fingertips = []
+        
+        if results.multi_hand_landmarks:
+            h, w = frame_bgr.shape[:2]
+            
+            for hand_idx, hand_landmarks in enumerate(results.multi_hand_landmarks):
+                index_tip = hand_landmarks.landmark[8]
+                
+                x = int(index_tip.x * WINDOW_SIZE[0])
+                y = int(index_tip.y * WINDOW_SIZE[1])
+                
+                fingertips.append({
+                    "pos": (x, y),
+                    "hand": hand_idx,
+                    "name": f"hand_{hand_idx}"
+                })
+        
+        return fingertips
+
+
+class PygletGameServer:
+    """OpenGL-accelerated game server using Pyglet with complete UI"""
+    
+    def __init__(self, host="0.0.0.0", port=8765):
+        self.host = host
+        self.port = port
+        self.clients: Dict[str, websockets.WebSocketServerProtocol] = {}
+        
+        # Create Pyglet window with OpenGL
+        config = pyglet.gl.Config(double_buffer=True, sample_buffers=1, samples=4)
+        self.window = pyglet.window.Window(
+            width=WINDOW_SIZE[0],
+            height=WINDOW_SIZE[1],
+            caption="ARPi2 Game Server - Pyglet/OpenGL (Complete UI)",
+            config=config,
+            vsync=True
+        )
+        
+        # Setup OpenGL state
+        gl.glEnable(gl.GL_BLEND)
+        gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
+        gl.glClearColor(0.0, 0.0, 0.0, 1.0)
+        
+        # Renderer
+        self.renderer = PygletRenderer(WINDOW_SIZE[0], WINDOW_SIZE[1])
+        
+        # Hand tracking
+        self.hand_tracker = HandTrackingServer()
+        self.fingertip_data = []
+        self.running = True
+        
+        # FPS tracking
+        self.frame_count = 0
+        self.last_fps_time = time.time()
+        self.current_fps = 0
+        
+        # Input state
+        self.last_keyboard_event = None
+        self.mouse_x = 0
+        self.mouse_y = 0
+        
+        # Game state
+        self.state = "menu"  # menu, monopoly, blackjack, dnd_creation
+        
+        # Menu buttons
+        self.game_buttons = self._create_game_buttons()
+        self.hover_states = {}
+        
+        # Game instances
+        self.dnd_creation = DnDCharacterCreation(WINDOW_SIZE[0], WINDOW_SIZE[1], self.renderer)
+        self.monopoly_game = MonopolyGame(WINDOW_SIZE[0], WINDOW_SIZE[1], self.renderer)
+        self.blackjack_game = BlackjackGame(WINDOW_SIZE[0], WINDOW_SIZE[1], self.renderer)
+        
+        # Setup event handlers
+        self.window.on_draw = self.on_draw
+        self.window.on_mouse_motion = self.on_mouse_motion
+        self.window.on_key_press = self.on_key_press
+        
+        print(f"Pyglet/OpenGL game server initialized")
+        print(f"OpenGL Version: {gl.gl_info.get_version()}")
+        print(f"OpenGL Renderer: {gl.gl_info.get_renderer()}")
+    
+    def _create_game_buttons(self):
+        """Create game selection buttons"""
+        games = ["Monopoly", "Blackjack", "D&D"]
+        buttons = []
+        for i, game in enumerate(games):
+            btn_rect = (
+                WINDOW_SIZE[0] // 2 - 150,
+                WINDOW_SIZE[1] // 2 - 180 + i * 120,
+                300, 90
+            )
+            buttons.append({"text": game, "rect": btn_rect, "key": game.lower()})
+        return buttons
+    
+    def on_draw(self):
+        """Pyglet draw callback"""
+        self.window.clear()
+        
+        if self.state == "menu":
+            self._draw_menu()
+        elif self.state == "monopoly":
+            self.monopoly_game.draw()
+        elif self.state == "blackjack":
+            self.blackjack_game.draw()
+        elif self.state == "dnd_creation":
+            self.dnd_creation.draw()
+        
+        # Draw cursors
+        self._draw_cursors()
+        
+        # Update FPS counter
+        self._update_fps()
+    
+    def on_mouse_motion(self, x, y, dx, dy):
+        """Handle mouse motion (for testing without hand tracking)"""
+        # Convert from OpenGL coordinates (bottom-left origin) to Pygame coordinates (top-left origin)
+        self.mouse_x = x
+        self.mouse_y = WINDOW_SIZE[1] - y
+    
+    def on_key_press(self, symbol, modifiers):
+        """Handle keyboard input"""
+        if symbol == pyglet.window.key.ESCAPE:
+            print("ESC pressed - Returning to menu")
+            self.state = "menu"
+            self.monopoly_game.state = "player_select"
+            self.monopoly_game.selection_ui.reset()
+            self.blackjack_game.state = "player_select"
+            self.blackjack_game.selection_ui.reset()
+    
+    def update(self, dt: float):
+        """Update game state"""
+        # Get fingertip data (or use mouse for testing)
+        if self.fingertip_data:
+            fingertip_meta = self.fingertip_data
+        else:
+            # Use mouse position for testing
+            fingertip_meta = [{"pos": (self.mouse_x, self.mouse_y), "hand": -1, "name": "mouse"}]
+        
+        # Handle input based on state
+        if self.state == "menu":
+            self._handle_menu_input(fingertip_meta)
+        elif self.state == "monopoly":
+            should_exit = self.monopoly_game.handle_input(fingertip_meta)
+            if should_exit:
+                print("Exiting Monopoly to menu")
+                self.state = "menu"
+                self.monopoly_game.state = "player_select"
+                self.monopoly_game.selection_ui.reset()
+            self.monopoly_game.update(dt)
+        elif self.state == "blackjack":
+            should_exit = self.blackjack_game.handle_input(fingertip_meta)
+            if should_exit:
+                print("Exiting Blackjack to menu")
+                self.state = "menu"
+                self.blackjack_game.state = "player_select"
+                self.blackjack_game.selection_ui.reset()
+            self.blackjack_game.update(dt)
+        elif self.state == "dnd_creation":
+            should_exit = self.dnd_creation.handle_input(fingertip_meta)
+            if should_exit:
+                print("Exiting D&D to menu")
+                self.state = "menu"
+            self.dnd_creation.update(dt)
+    
+    def _handle_menu_input(self, fingertip_meta: List[Dict]):
+        """Handle menu input"""
+        current_time = time.time()
+        active_hovers = set()
+        
+        for meta in fingertip_meta:
+            pos = meta["pos"]
+            
+            for i, btn in enumerate(self.game_buttons):
+                btn_rect = btn["rect"]
+                if (btn_rect[0] <= pos[0] <= btn_rect[0] + btn_rect[2] and
+                    btn_rect[1] <= pos[1] <= btn_rect[1] + btn_rect[3]):
+                    key = f"game_{i}"
+                    active_hovers.add(key)
+                    
+                    if key not in self.hover_states:
+                        self.hover_states[key] = {"start_time": current_time, "pos": pos}
+                    
+                    hover_duration = current_time - self.hover_states[key]["start_time"]
+                    if hover_duration >= HOVER_TIME_THRESHOLD:
+                        game_key = btn["key"]
+                        if game_key == "monopoly":
+                            self.state = "monopoly"
+                            self.monopoly_game.state = "player_select"
+                        elif game_key == "blackjack":
+                            self.state = "blackjack"
+                            self.blackjack_game.state = "player_select"
+                        elif game_key == "d&d":
+                            self.state = "dnd_creation"
+                        del self.hover_states[key]
+        
+        # Remove stale hovers
+        for key in list(self.hover_states.keys()):
+            if key not in active_hovers:
+                del self.hover_states[key]
+    
+    def _draw_menu(self):
+        """Draw main menu"""
+        # Background
+        self.renderer.draw_rect((25, 35, 25), (0, 0, WINDOW_SIZE[0], WINDOW_SIZE[1]))
+        
+        # Panel
+        panel_rect = (80, 60, WINDOW_SIZE[0] - 160, WINDOW_SIZE[1] - 120)
+        self.renderer.draw_rect(Colors.PANEL, panel_rect)
+        
+        # Title
+        self.renderer.draw_text(
+            "ARPi2 Game Launcher",
+            WINDOW_SIZE[0] // 2, WINDOW_SIZE[1] - 90,
+            font_name='Arial', font_size=64,
+            color=Colors.WHITE,
+            anchor_x='center', anchor_y='center'
+        )
+        
+        # Subtitle
+        self.renderer.draw_text(
+            "Pyglet/OpenGL - Complete UI with Player Selection",
+            WINDOW_SIZE[0] // 2, WINDOW_SIZE[1] - 150,
+            font_name='Arial', font_size=24,
+            color=(200, 200, 200),
+            anchor_x='center', anchor_y='center'
+        )
+        
+        # Game buttons
+        for i, btn in enumerate(self.game_buttons):
+            x, y, w, h = btn["rect"]
+            
+            # Button background
+            self.renderer.draw_rect((80, 100, 120), (x, y, w, h))
+            self.renderer.draw_rect((150, 170, 190), (x, y, w, h), width=3)
+            
+            # Button text
+            self.renderer.draw_text(
+                btn["text"],
+                x + w // 2, y + h // 2,
+                font_name='Arial', font_size=40,
+                color=Colors.WHITE,
+                anchor_x='center', anchor_y='center'
+            )
+        
+        # Hover indicators
+        current_time = time.time()
+        for key, state in self.hover_states.items():
+            hover_duration = current_time - state["start_time"]
+            progress = min(1.0, hover_duration / HOVER_TIME_THRESHOLD)
+            pos = state["pos"]
+            self.renderer.draw_circular_progress((pos[0] + 28, pos[1] - 28), 20, progress, Colors.ACCENT, thickness=6)
+    
+    def _draw_cursors(self):
+        """Draw cursor for each fingertip"""
+        if self.fingertip_data:
+            for meta in self.fingertip_data:
+                pos = meta["pos"]
+                self.renderer.draw_circle(Colors.ACCENT, pos, 8)
+                self.renderer.draw_circle(Colors.WHITE, pos, 8, width=2)
+        else:
+            # Draw mouse cursor
+            self.renderer.draw_circle((255, 100, 100), (self.mouse_x, self.mouse_y), 8)
+            self.renderer.draw_circle((255, 255, 255), (self.mouse_x, self.mouse_y), 8, width=2)
+    
+    def _update_fps(self):
+        """Update FPS counter"""
+        self.frame_count += 1
+        current_time = time.time()
+        if current_time - self.last_fps_time >= 1.0:
+            self.current_fps = self.frame_count / (current_time - self.last_fps_time)
+            self.frame_count = 0
+            self.last_fps_time = current_time
+            print(f"Server FPS: {self.current_fps:.1f} | Hands tracked: {len(self.fingertip_data)}")
+    
+    async def handle_client(self, websocket, path):
+        """Handle WebSocket client connection"""
+        client_id = f"{websocket.remote_address[0]}:{websocket.remote_address[1]}"
+        self.clients[client_id] = websocket
+        print(f"Client connected: {client_id}")
+        
+        try:
+            async for message in websocket:
+                try:
+                    data = json.loads(message)
+                    
+                    if data.get("type") == "frame":
+                        # Decode frame
+                        frame_data = base64.b64decode(data["frame"])
+                        nparr = np.frombuffer(frame_data, np.uint8)
+                        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                        
+                        if frame is not None:
+                            # Process hand tracking
+                            self.fingertip_data = self.hand_tracker.process_frame(frame)
+                
+                except Exception as e:
+                    print(f"Error processing message: {e}")
+        
+        except websockets.exceptions.ConnectionClosed:
+            print(f"Client disconnected: {client_id}")
+        finally:
+            del self.clients[client_id]
+    
+    async def start_server(self):
+        """Start WebSocket server"""
+        server = await websockets.serve(self.handle_client, self.host, self.port)
+        print(f"Server started on ws://{self.host}:{self.port}")
+        print("Press ESC to exit")
+        
+        await server.wait_closed()
+    
+    def run(self):
+        """Run the game server"""
+        print("Starting Pyglet/OpenGL Game Server...")
+        print("This version includes complete UI with player selection and panels")
+        
+        # Schedule update function
+        pyglet.clock.schedule_interval(self.update, 1.0 / FPS)
+        
+        # Run asyncio event loop with Pyglet
+        async def main():
+            # Start server
+            server_task = asyncio.create_task(self.start_server())
+            
+            # Run Pyglet in async context
+            while self.running:
+                pyglet.clock.tick()
+                
+                for window in pyglet.app.windows:
+                    window.switch_to()
+                    window.dispatch_events()
+                    window.dispatch_event('on_draw')
+                    window.flip()
+                
+                await asyncio.sleep(0)
+        
+        try:
+            asyncio.run(main())
+        except KeyboardInterrupt:
+            print("\nServer stopped by user")
+
+
+if __name__ == "__main__":
+    server = PygletGameServer()
+    server.run()
