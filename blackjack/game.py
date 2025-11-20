@@ -91,8 +91,7 @@ class BlackjackGame:
             elif panel.orientation == 90:
                 info_width_frac = 0.35
                 button_area_width = int(panel.rect.width * (1 - info_width_frac))
-                info_area_width = int(panel.rect.width * info_width_frac)
-                x = panel.rect.x + info_area_width
+                x = panel.rect.x
                 y = panel.rect.y + margin
                 avail_h = panel.rect.height - 2 * margin
                 btn_h = (avail_h - 3 * gap) // 4
@@ -372,8 +371,10 @@ class BlackjackGame:
                     RotatedText.draw(self.screen, f"${player.chips} | {bet_display}",
                                    font, Colors.BLACK, info_rect.center, panel.orientation)
                 elif panel.orientation == 90:
-                    info_width = int(panel.rect.width * 0.35)
-                    info_rect = pygame.Rect(panel.rect.x + 10, panel.rect.y + 10,
+                    info_width_frac = 0.35
+                    button_area_width = int(panel.rect.width * (1 - info_width_frac))
+                    info_width = int(panel.rect.width * info_width_frac)
+                    info_rect = pygame.Rect(panel.rect.x + button_area_width, panel.rect.y + 10,
                                            info_width - 10, panel.rect.height - 20)
                     RotatedText.draw_block(self.screen,
                                          [(f"${player.chips}", font, Colors.BLACK),
