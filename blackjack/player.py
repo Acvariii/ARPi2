@@ -19,6 +19,8 @@ class BlackjackPlayer:
         return False
     
     def skip_round(self):
+        if self.current_bet > 0:
+            self.chips += self.current_bet
         self.current_bet = -1
     
     def is_sitting_out(self) -> bool:
@@ -41,7 +43,8 @@ class BlackjackPlayer:
         self.is_busted = False
         self.is_standing = False
         self.current_hand_idx = 0
-    
+        self.is_ready = False
+        
     def get_current_hand(self):
         if self.current_hand_idx < len(self.hands):
             return self.hands[self.current_hand_idx]

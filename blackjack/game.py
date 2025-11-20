@@ -125,7 +125,7 @@ class BlackjackGame:
                 "bet5": HoverButton(r_hit, "$5", font, orientation=panel.orientation),
                 "bet25": HoverButton(r_stand, "$25", font, orientation=panel.orientation),
                 "bet100": HoverButton(r_double, "$100", font, orientation=panel.orientation),
-                "skip": HoverButton(r_split, "Skip", font, orientation=panel.orientation)
+                "ready": HoverButton(r_split, "Ready", font, orientation=panel.orientation)
             }
     
     def start_game(self, player_indices: List[int]):
@@ -136,6 +136,7 @@ class BlackjackGame:
             p = self.players[i]
             p.chips = 1000
             p.is_active = True
+            p.is_ready = False
         
         self.phase = "betting"
         self.round_active = False
@@ -235,6 +236,7 @@ class BlackjackGame:
             
             if player.is_sitting_out():
                 player.current_bet = 0
+                player.is_ready = False
                 continue
             
             hand = player.get_current_hand()
@@ -256,6 +258,8 @@ class BlackjackGame:
                 player.push_bet()
             else:
                 player.lose_bet()
+            
+            player.is_ready = False
         
         self.phase = "betting"
         self.round_active = False
@@ -266,24 +270,28 @@ class BlackjackGame:
                 player = self.players[idx]
                 buttons = self.buttons[idx]
                 
-                if buttons["bet5"].update(fingertip_meta, enabled=player.chips >= 5):
-                    player.place_bet(5)
-                    buttons["bet5"].reset()
-                
-                if buttons["bet25"].update(fingertip_meta, enabled=player.chips >= 25):
-                    player.place_bet(25)
-                    buttons["bet25"].reset()
-                
-                if buttons["bet100"].update(fingertip_meta, enabled=player.chips >= 100):
-                    player.place_bet(100)
-                    buttons["bet100"].reset()
-                
-                if buttons["skip"].update(fingertip_meta):
-                    player.skip_round()
-                    buttons["skip"].reset()
+                if not player.is_ready:
+                    if buttons["bet5"].update(fingertip_meta, enabled=player.chips >= 5 and not player.is_sitting_out()):
+                        player.place_bet(5)
+                        buttons["bet5"].reset()
+                    
+                    if buttons["bet25"].update(fingertip_meta, enabled=player.chips >= 25 and not player.is_sitting_out()):
+                        player.place_bet(25)
+                        buttons["bet25"].reset()
+                    
+                    if buttons["bet100"].update(fingertip_meta, enabled=player.chips >= 100 and not player.is_sitting_out()):
+                        player.place_bet(100)
+                        buttons["bet100"].reset()
+                    
+                    ready_enabled = player.current_bet > 0 or player.current_bet == -1
+                    if buttons["ready"].update(fingertip_meta, enabled=ready_enabled):
+                        if player.current_bet == 0:
+                            player.skip_round()
+                        player.is_ready = True
+                        buttons["ready"].reset()
             
-            all_decided = all(self.players[i].current_bet != 0 for i in self.active_players)
-            if all_decided and not self.round_active:
+            all_ready = all(self.players[i].is_ready for i in self.active_players)
+            if all_ready and not self.round_active:
                 self._new_round()
         elif self.phase == "playing":
             if self.current_player_idx < len(self.active_players):
@@ -395,16 +403,18 @@ class BlackjackGame:
                                          info_rect, panel.orientation, line_spacing=12)
                 
                 if self.phase == "betting":
-                    if player.is_sitting_out():
-                        font_status = pygame.font.SysFont("Arial", 16, bold=True)
+                    if player.is_ready:
+                        font_status = pygame.font.SysFont("Arial", 18, bold=True)
+                        status_text = "Ready!" if not player.is_sitting_out() else "Sitting Out"
+                        status_color = (100, 255, 100) if not player.is_sitting_out() else (150, 150, 150)
                         if panel.orientation in [0, 180]:
                             status_rect = pygame.Rect(panel.rect.x + 10, panel.rect.centery - 10, panel.rect.width - 20, 20)
-                            RotatedText.draw(self.screen, "Sitting Out", font_status, (150, 150, 150), status_rect.center, panel.orientation)
+                            RotatedText.draw(self.screen, status_text, font_status, status_color, status_rect.center, panel.orientation)
                         else:
                             status_rect = pygame.Rect(panel.rect.centerx - 10, panel.rect.y + 10, 20, panel.rect.height - 20)
-                            RotatedText.draw(self.screen, "Sitting Out", font_status, (150, 150, 150), status_rect.center, panel.orientation)
+                            RotatedText.draw(self.screen, status_text, font_status, status_color, status_rect.center, panel.orientation)
                     else:
-                        bet_buttons = ["bet5", "bet25", "bet100", "skip"]
+                        bet_buttons = ["bet5", "bet25", "bet100", "ready"]
                         for btn_key in bet_buttons:
                             self.buttons[idx][btn_key].draw(self.screen)
                 elif self.phase == "playing" and is_current:
@@ -428,8 +438,8 @@ class BlackjackGame:
             (self.table_rect.centerx, self.table_rect.bottom - 80),
             (self.table_rect.centerx - 200, self.table_rect.bottom - 80),
             (self.table_rect.centerx + 200, self.table_rect.bottom - 80),
-            (self.table_rect.centerx, self.table_rect.top + 80),
             (self.table_rect.centerx - 200, self.table_rect.top + 80),
+            (self.table_rect.centerx, self.table_rect.top + 80),
             (self.table_rect.centerx + 200, self.table_rect.top + 80),
             (self.table_rect.left + 80, self.table_rect.centery),
             (self.table_rect.right - 80, self.table_rect.centery),
