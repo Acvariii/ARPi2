@@ -9,6 +9,7 @@ import math
 from typing import List, Dict, Tuple, Optional
 import pyglet
 from pyglet_games.renderer import PygletRenderer
+from pyglet_games.player_selection import PlayerSelectionUI
 from config import PLAYER_COLORS, Colors, HOVER_TIME_THRESHOLD
 from dnd.character import Character, RACES, CLASSES, generate_character_name, CLASS_SKILLS
 
@@ -125,6 +126,12 @@ class DnDCharacterCreation:
         self.height = height
         self.renderer = renderer
         
+        # Add player selection
+        self.state = "player_select"  # player_select, creating
+        self.selection_ui = PlayerSelectionUI(width, height)
+        self.selected_players = []
+        self.current_creation_idx = 0
+        
         self.particles: List[PygletParticle] = []
         self.hover_states: Dict[str, Dict] = {}
         
@@ -143,6 +150,8 @@ class DnDCharacterCreation:
         """Start character creation for a player"""
         self.current_player_idx = player_idx
         self.temp_character = Character("", PLAYER_COLORS[player_idx])
+        self.temp_character.race = None
+        self.temp_character.char_class = None
         self.temp_character.abilities = {"STR": 8, "DEX": 8, "CON": 8, "INT": 8, "WIS": 8, "CHA": 8}
         self.creation_step = "race"
         self.ability_points_remaining = 27
@@ -172,6 +181,24 @@ class DnDCharacterCreation:
         Handle input for character creation
         Returns True when creation is complete
         """
+        # Check for ESC key
+        if fingertip_meta and isinstance(fingertip_meta[0], str) and fingertip_meta[0] == 'ESC':
+            return True  # Return to menu
+        
+        if self.state == "player_select":
+            self.selection_ui.update_with_fingertips(fingertip_meta, min_players=1)
+            if self.selection_ui.start_ready:
+                selected_indices = self.selection_ui.get_selected_indices()
+                if selected_indices:
+                    self.selected_players = selected_indices
+                    self.current_creation_idx = 0
+                    self.state = "creating"
+                    self.start_creation(self.selected_players[0])
+            return False
+        
+        if self.temp_character is None:
+            return False
+        
         current_time = time.time()
         
         if self.creation_step == "race":
@@ -181,7 +208,15 @@ class DnDCharacterCreation:
         elif self.creation_step == "abilities":
             return self._handle_ability_scores(fingertip_meta, current_time)
         elif self.creation_step == "complete":
-            return self._handle_complete(fingertip_meta, current_time)
+            done = self._handle_complete(fingertip_meta, current_time)
+            if done:
+                # Move to next player or finish
+                self.current_creation_idx += 1
+                if self.current_creation_idx < len(self.selected_players):
+                    self.start_creation(self.selected_players[self.current_creation_idx])
+                else:
+                    return True  # All players done
+            return False
         
         return False
     
@@ -371,6 +406,13 @@ class DnDCharacterCreation:
     
     def draw(self):
         """Draw the current creation step"""
+        if self.state == "player_select":
+            self._draw_player_select()
+            return
+        
+        if self.temp_character is None:
+            return
+        
         if self.creation_step == "race":
             self._draw_race_selection()
         elif self.creation_step == "class":
@@ -611,4 +653,64 @@ class DnDCharacterCreation:
             progress = min(1.0, hover_duration / HOVER_TIME_THRESHOLD)
             pos = state["pos"]
             self.renderer.draw_circular_progress(pos, 25, progress, Colors.ACCENT, thickness=6)
+    
+    def _draw_player_select(self):
+        """Draw player selection screen"""
+        # Background
+        self.renderer.draw_rect((20, 20, 40), (0, 0, self.width, self.height))
+        
+        # Title at top
+        self.renderer.draw_text(
+            "Select Players - D&D Character Creation",
+            self.width // 2, 40,
+            'Arial', 42, Colors.WHITE,
+            anchor_x='center', anchor_y='center'
+        )
+        
+        # Draw circular player slots
+        for i, (sx, sy, sw, sh) in enumerate(self.selection_ui.slots):
+            cx = sx + sw // 2
+            cy = sy + sh // 2
+            radius = sw // 2
+            color = PLAYER_COLORS[i]
+            
+            if self.selection_ui.selected[i]:
+                self.renderer.draw_circle(color, (cx, cy), radius)
+                self.renderer.draw_circle((255, 255, 255), (cx, cy), radius, width=5)
+            else:
+                self.renderer.draw_circle((80, 80, 80), (cx, cy), radius, width=3)
+            
+            text_color = (255, 255, 255) if self.selection_ui.selected[i] else (150, 150, 150)
+            self.renderer.draw_text(
+                f"P{i+1}",
+                cx, cy,
+                'Arial', 36, text_color,
+                anchor_x='center', anchor_y='center'
+            )
+        
+        # Start button in center
+        btn_size = 160
+        cx = self.width // 2
+        cy = self.height // 2
+        count = self.selection_ui.selected_count()
+        
+        if count >= 1:
+            self.renderer.draw_circle((70, 130, 180), (cx, cy), btn_size // 2)
+            self.renderer.draw_circle((200, 200, 200), (cx, cy), btn_size // 2, width=3)
+        else:
+            self.renderer.draw_circle((100, 100, 100), (cx, cy), btn_size // 2)
+            self.renderer.draw_circle((80, 80, 80), (cx, cy), btn_size // 2, width=2)
+        
+        self.renderer.draw_text(
+            "Start",
+            cx, cy - 10,
+            'Arial', 36, (255, 255, 255),
+            anchor_x='center', anchor_y='center'
+        )
+        self.renderer.draw_text(
+            f"{count} players",
+            cx, cy + 25,
+            'Arial', 18, (200, 200, 200),
+            anchor_x='center', anchor_y='center'
+        )
 

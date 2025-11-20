@@ -1,29 +1,29 @@
 {
-  "name": "Caladrel the Enlightened",
+  "name": "Aldric Stormwind",
   "player_color": [
     220,
     40,
     40
   ],
-  "race": "Elf",
-  "char_class": "Wizard",
+  "race": "Human",
+  "char_class": "Rogue",
   "level": 1,
   "alignment": "",
   "abilities": {
-    "STR": 14,
+    "STR": 12,
     "DEX": 12,
     "CON": 12,
-    "INT": 12,
+    "INT": 14,
     "WIS": 12,
     "CHA": 12
   },
-  "max_hp": 6,
-  "current_hp": 6,
+  "max_hp": 8,
+  "current_hp": 8,
   "armor_class": 10,
   "skills": [
-    "Arcana",
-    "History",
-    "Investigation"
+    "Stealth",
+    "Sleight of Hand",
+    "Acrobatics"
   ],
   "inventory": [],
   "gold": 0,

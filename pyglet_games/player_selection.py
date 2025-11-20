@@ -12,41 +12,43 @@ class PlayerSelectionUI:
         self.screen_height = screen_height
         self.selected = [False] * 8
         self.hover_states = {}
+        self.start_ready = False  # Track if start button was clicked
         
         # Calculate slot positions
         self.slots = self._calculate_slots()
+        
+        # Start button in center
+        self.start_button_pos = (screen_width // 2, screen_height // 2)
+        self.start_button_radius = 80
     
     def _calculate_slots(self) -> List[Tuple[int, int, int, int]]:
-        """Calculate position and size of each player slot (x, y, width, height)."""
+        """Calculate circular position for each player slot (x, y, radius, radius)."""
         slots = []
         
-        # Panel dimensions
-        panel_width = self.screen_width - 160
-        panel_height = self.screen_height - 120
-        panel_x = 80
-        panel_y = 60
+        # Circular layout matching Pygame
+        spacing_x = self.screen_width // 4
+        spacing_y = self.screen_height // 3
+        slot_radius = 55
         
-        # Slot dimensions
-        slot_width = 180
-        slot_height = 200
-        spacing = 20
+        # Positions: 3 bottom, 3 top, 1 left, 1 right
+        positions = [
+            (spacing_x * 1, self.screen_height - spacing_y // 2),  # Bottom left
+            (spacing_x * 2, self.screen_height - spacing_y // 2),  # Bottom center
+            (spacing_x * 3, self.screen_height - spacing_y // 2),  # Bottom right
+            (spacing_x * 1, spacing_y // 2),  # Top left
+            (spacing_x * 2, spacing_y // 2),  # Top center
+            (spacing_x * 3, spacing_y // 2),  # Top right
+            (spacing_x // 2, self.screen_height // 2),  # Left
+            (self.screen_width - spacing_x // 2, self.screen_height // 2)  # Right
+        ]
         
-        # Calculate grid layout (4x2)
-        total_width = (slot_width * 4) + (spacing * 3)
-        total_height = (slot_height * 2) + spacing
-        
-        start_x = panel_x + (panel_width - total_width) // 2
-        start_y = panel_y + 140
-        
-        for row in range(2):
-            for col in range(4):
-                x = start_x + col * (slot_width + spacing)
-                y = start_y + row * (slot_height + spacing)
-                slots.append((x, y, slot_width, slot_height))
+        for x, y in positions:
+            # Return as (x, y, radius, radius) for compatibility
+            slots.append((x - slot_radius, y - slot_radius, slot_radius * 2, slot_radius * 2))
         
         return slots
     
-    def update_with_fingertips(self, fingertip_meta: List[Dict]):
+    def update_with_fingertips(self, fingertip_meta: List[Dict], min_players: int = 2):
         """Update selection based on fingertip positions."""
         current_time = time.time()
         active_hovers = set()
@@ -54,8 +56,33 @@ class PlayerSelectionUI:
         for meta in fingertip_meta:
             pos = meta["pos"]
             
+            # Check start button first (if enough players selected)
+            if self.selected_count() >= min_players:
+                cx, cy = self.start_button_pos
+                dist = ((pos[0] - cx) ** 2 + (pos[1] - cy) ** 2) ** 0.5
+                
+                if dist <= self.start_button_radius:
+                    key = "start_button"
+                    active_hovers.add(key)
+                    
+                    if key not in self.hover_states:
+                        self.hover_states[key] = {"start_time": current_time, "pos": pos}
+                    
+                    hover_duration = current_time - self.hover_states[key]["start_time"]
+                    if hover_duration >= HOVER_TIME_THRESHOLD:
+                        self.start_ready = True
+                        del self.hover_states[key]
+                    continue
+            
+            # Check player slots
             for i, (x, y, w, h) in enumerate(self.slots):
-                if x <= pos[0] <= x + w and y <= pos[1] <= y + h:
+                # Calculate center and check circular distance
+                cx = x + w // 2
+                cy = y + h // 2
+                radius = w // 2
+                dist = ((pos[0] - cx) ** 2 + (pos[1] - cy) ** 2) ** 0.5
+                
+                if dist <= radius:
                     key = f"slot_{i}"
                     active_hovers.add(key)
                     
@@ -66,6 +93,7 @@ class PlayerSelectionUI:
                     if hover_duration >= HOVER_TIME_THRESHOLD:
                         self.selected[i] = not self.selected[i]
                         del self.hover_states[key]
+                    break
         
         # Remove stale hover states
         for key in list(self.hover_states.keys()):
@@ -102,6 +130,7 @@ class PlayerSelectionUI:
         """Reset all selections."""
         self.selected = [False] * 8
         self.hover_states = {}
+        self.start_ready = False
     
     def closest_player_color(self, pos: Tuple[int, int]) -> Tuple[int, int, int]:
         """Get the closest player color for a cursor position."""

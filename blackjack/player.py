@@ -10,6 +10,7 @@ class BlackjackPlayer:
         self.is_busted = False
         self.is_standing = False
         self.current_hand_idx = 0
+        self.is_ready = False
         
     def place_bet(self, amount: int) -> bool:
         if amount <= self.chips and amount > 0:

@@ -17,7 +17,8 @@ import mediapipe as mp
 
 from config import WINDOW_SIZE, FPS, HOVER_TIME_THRESHOLD, Colors
 from pyglet_games.renderer import PygletRenderer
-from pyglet_games import MonopolyGame, BlackjackGame
+from pyglet_games.monopoly_rebuilt import MonopolyGame
+from pyglet_games.blackjack_rebuilt import BlackjackGame
 from pyglet_games.dnd_complete import DnDCharacterCreation
 
 
@@ -99,6 +100,7 @@ class PygletGameServer:
         self.last_keyboard_event = None
         self.mouse_x = 0
         self.mouse_y = 0
+        self.esc_pressed = False  # Track ESC key presses
         
         # Game state
         self.state = "menu"  # menu, monopoly, blackjack, dnd_creation
@@ -116,6 +118,7 @@ class PygletGameServer:
         self.window.on_draw = self.on_draw
         self.window.on_mouse_motion = self.on_mouse_motion
         self.window.on_key_press = self.on_key_press
+        self.window.on_close = self.on_close
         
         print(f"Pyglet/OpenGL game server initialized")
         print(f"OpenGL Version: {gl.gl_info.get_version()}")
@@ -138,6 +141,9 @@ class PygletGameServer:
         """Pyglet draw callback"""
         self.window.clear()
         
+        # Clear renderer cache for new frame
+        self.renderer.clear_cache()
+        
         if self.state == "menu":
             self._draw_menu()
         elif self.state == "monopoly":
@@ -149,6 +155,9 @@ class PygletGameServer:
         
         # Draw cursors
         self._draw_cursors()
+        
+        # Draw all batched shapes
+        self.renderer.draw_all()
         
         # Update FPS counter
         self._update_fps()
@@ -162,12 +171,21 @@ class PygletGameServer:
     def on_key_press(self, symbol, modifiers):
         """Handle keyboard input"""
         if symbol == pyglet.window.key.ESCAPE:
-            print("ESC pressed - Returning to menu")
-            self.state = "menu"
-            self.monopoly_game.state = "player_select"
-            self.monopoly_game.selection_ui.reset()
-            self.blackjack_game.state = "player_select"
-            self.blackjack_game.selection_ui.reset()
+            if self.state == "menu":
+                print("ESC pressed in menu - Exiting server...")
+                self.running = False
+                pyglet.app.exit()
+                self.window.close()
+            else:
+                print("ESC pressed in game - Returning to menu...")
+                self.esc_pressed = True
+    
+    def on_close(self):
+        """Handle window close event"""
+        print("Window closed - Exiting server...")
+        self.running = False
+        pyglet.app.exit()
+        return True
     
     def update(self, dt: float):
         """Update game state"""
@@ -177,6 +195,11 @@ class PygletGameServer:
         else:
             # Use mouse position for testing
             fingertip_meta = [{"pos": (self.mouse_x, self.mouse_y), "hand": -1, "name": "mouse"}]
+        
+        # Inject ESC key if pressed
+        if self.esc_pressed:
+            fingertip_meta = ['ESC'] + fingertip_meta
+            self.esc_pressed = False
         
         # Handle input based on state
         if self.state == "menu":
@@ -364,22 +387,45 @@ class PygletGameServer:
             # Start server
             server_task = asyncio.create_task(self.start_server())
             
-            # Run Pyglet in async context
-            while self.running:
-                pyglet.clock.tick()
-                
-                for window in pyglet.app.windows:
-                    window.switch_to()
-                    window.dispatch_events()
-                    window.dispatch_event('on_draw')
-                    window.flip()
-                
-                await asyncio.sleep(0)
+            try:
+                # Run Pyglet in async context
+                while self.running and len(pyglet.app.windows) > 0:
+                    pyglet.clock.tick()
+                    
+                    for window in list(pyglet.app.windows):
+                        if window and not window.has_exit:
+                            window.switch_to()
+                            window.dispatch_events()
+                            window.dispatch_event('on_draw')
+                            window.flip()
+                    
+                    await asyncio.sleep(0.001)  # Small sleep to prevent CPU spinning
+            finally:
+                # Cancel server task
+                server_task.cancel()
+                try:
+                    await server_task
+                except asyncio.CancelledError:
+                    pass
+                print("Server shut down successfully")
         
         try:
             asyncio.run(main())
         except KeyboardInterrupt:
             print("\nServer stopped by user")
+        except Exception as e:
+            # Ignore the flip error during shutdown
+            if "'NoneType' object has no attribute 'flip'" not in str(e):
+                print(f"\nServer error: {e}")
+        finally:
+            self.running = False
+            # Close window if still open
+            try:
+                if self.window and not self.window.has_exit:
+                    self.window.close()
+            except:
+                pass
+            print("Cleanup complete")
 
 
 if __name__ == "__main__":
