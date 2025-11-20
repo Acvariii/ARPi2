@@ -9,13 +9,15 @@ import time
 from typing import Optional
 from io import BytesIO
 
-from config import WINDOW_SIZE, FPS, SERVER_WS
+from config import WINDOW_SIZE, FPS, SERVER_IP, SERVER_PORT
 
 
 class PiThinClient:
     
-    def __init__(self, server_url=SERVER_WS):
-        self.server_url = server_url.replace("5000", "8765")
+    def __init__(self, server_url=None):
+        if server_url is None:
+            server_url = f"ws://{SERVER_IP}:{SERVER_PORT}"
+        self.server_url = server_url
         self.websocket: Optional[websockets.WebSocketClientProtocol] = None
         
         pygame.init()
@@ -36,21 +38,50 @@ class PiThinClient:
         self.current_fps = 0
     
     async def connect(self):
-        max_retries = 5
-        retry_delay = 2
+        max_retries = 10
+        retry_delay = 3
+        
+        print(f"\n{'='*60}")
+        print(f"Attempting to connect to: {self.server_url}")
+        print(f"Make sure the server is running: python game_server_full.py")
+        print(f"{'='*60}\n")
         
         for attempt in range(max_retries):
             try:
-                print(f"Connecting to server at {self.server_url}... (attempt {attempt + 1}/{max_retries})")
-                self.websocket = await websockets.connect(self.server_url)
-                print("Connected to game server!")
+                print(f"[{attempt + 1}/{max_retries}] Connecting to {self.server_url}...")
+                self.websocket = await websockets.connect(
+                    self.server_url,
+                    ping_interval=20,
+                    ping_timeout=10,
+                    close_timeout=5
+                )
+                print("✓ Connected to game server!")
                 return True
+            except ConnectionRefusedError:
+                print(f"✗ Connection refused - Is the server running?")
+            except OSError as e:
+                if "113" in str(e) or "No route to host" in str(e):
+                    print(f"✗ No route to host - Check firewall and network settings")
+                elif "111" in str(e):
+                    print(f"✗ Connection refused - Server not running on port 8765")
+                else:
+                    print(f"✗ Network error: {e}")
             except Exception as e:
-                print(f"Connection failed: {e}")
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(retry_delay)
+                print(f"✗ Connection error: {e}")
+            
+            if attempt < max_retries - 1:
+                print(f"   Retrying in {retry_delay} seconds...\n")
+                await asyncio.sleep(retry_delay)
         
-        print("Failed to connect to server after multiple attempts")
+        print("\n" + "="*60)
+        print("❌ Failed to connect to server")
+        print("\nTroubleshooting:")
+        print("1. Ensure server is running: python game_server_full.py")
+        print(f"2. Check server IP in config.py (currently: {self.server_url})")
+        print("3. Check firewall allows port 8765")
+        print("4. Ping server: ping <server_ip>")
+        print("5. Both devices on same network?")
+        print("="*60 + "\n")
         return False
     
     async def send_camera_frame(self):

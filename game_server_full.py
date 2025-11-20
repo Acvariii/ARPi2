@@ -58,9 +58,9 @@ class GameServerWithTracking:
         self.clients: Dict[str, websockets.WebSocketServerProtocol] = {}
         
         pygame.init()
-        pygame.mouse.set_visible(True)
         self.screen = pygame.display.set_mode(WINDOW_SIZE)
         pygame.display.set_caption("ARPi2 Game Server")
+        pygame.mouse.set_visible(True)
         self.clock = pygame.time.Clock()
         
         self.launcher = None
@@ -175,6 +175,11 @@ class GameServerWithTracking:
                     self.last_keyboard_event = None
                 
                 self.launcher.handle_game_state(combined_fingertips, current_event)
+            
+            # Draw visible mouse cursor
+            mouse_pos = pygame.mouse.get_pos()
+            pygame.draw.circle(self.screen, (255, 255, 255), mouse_pos, 10, 2)
+            pygame.draw.circle(self.screen, (0, 200, 255), mouse_pos, 3)
             
             pygame.display.update()
             

@@ -1,0 +1,32 @@
+{
+  "name": "Thranduil the Spellweaver",
+  "player_color": [
+    40,
+    120,
+    200
+  ],
+  "race": "Elf",
+  "char_class": "Wizard",
+  "level": 1,
+  "alignment": "",
+  "abilities": {
+    "STR": 10,
+    "DEX": 12,
+    "CON": 10,
+    "INT": 14,
+    "WIS": 14,
+    "CHA": 13
+  },
+  "max_hp": 6,
+  "current_hp": 6,
+  "armor_class": 10,
+  "skills": [
+    "Arcana",
+    "History",
+    "Investigation"
+  ],
+  "inventory": [],
+  "gold": 0,
+  "experience": 0,
+  "background": ""
+}

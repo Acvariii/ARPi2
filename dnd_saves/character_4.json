@@ -1,0 +1,32 @@
+{
+  "name": "Erik the Mighty",
+  "player_color": [
+    200,
+    40,
+    200
+  ],
+  "race": "Human",
+  "char_class": "Fighter",
+  "level": 1,
+  "alignment": "",
+  "abilities": {
+    "STR": 15,
+    "DEX": 10,
+    "CON": 15,
+    "INT": 10,
+    "WIS": 10,
+    "CHA": 11
+  },
+  "max_hp": 10,
+  "current_hp": 10,
+  "armor_class": 10,
+  "skills": [
+    "Athletics",
+    "Intimidation",
+    "Survival"
+  ],
+  "inventory": [],
+  "gold": 0,
+  "experience": 0,
+  "background": ""
+}
