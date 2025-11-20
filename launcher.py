@@ -3,6 +3,7 @@ from typing import List, Dict
 from ui_components import HoverButton, draw_cursor, draw_circular_progress, PlayerSelectionUI
 from monopoly import MonopolyGame
 from blackjack import BlackjackGame
+from dnd import DnDGame
 from hand_tracking import HandTracker
 from config import SERVER_WS, WINDOW_SIZE, FPS, HOVER_TIME_THRESHOLD, Colors
 
@@ -32,12 +33,12 @@ class GameLauncher:
 
     def _create_game_buttons(self) -> List[HoverButton]:
         """Create game selection buttons."""
-        games = ["Monopoly", "Blackjack"]
+        games = ["Monopoly", "Blackjack", "D&D"]
         buttons = []
         for i, game in enumerate(games):
             btn_rect = pygame.Rect(
                 WINDOW_SIZE[0] // 2 - 150,
-                WINDOW_SIZE[1] // 2 - 120 + i * 120,
+                WINDOW_SIZE[1] // 2 - 180 + i * 120,
                 300, 90
             )
             buttons.append(HoverButton(btn_rect, game, self.font))
@@ -73,7 +74,7 @@ class GameLauncher:
 
         for i, btn in enumerate(self.game_buttons):
             if btn.update(fingertip_meta):
-                self.selected_game = ["monopoly", "blackjack"][i]
+                self.selected_game = ["monopoly", "blackjack", "dnd"][i]
                 self.state = "player_select"
                 btn.reset()
             
@@ -150,13 +151,6 @@ class GameLauncher:
             )
             self.current_game.start_game(selected_indices)
             self.state = "monopoly_playing"
-        elif self.selected_game == "monopoly2":
-            self.current_game = Monopoly2Game(
-                self.screen,
-                lambda w, h: self.get_fingertip_meta()
-            )
-            self.current_game.start_game(selected_indices)
-            self.state = "monopoly2_playing"
         elif self.selected_game == "blackjack":
             self.current_game = BlackjackGame(
                 self.screen,
@@ -164,14 +158,23 @@ class GameLauncher:
             )
             self.current_game.start_game(selected_indices)
             self.state = "blackjack_playing"
+        elif self.selected_game == "dnd":
+            self.current_game = DnDGame(
+                self.screen,
+                lambda w, h: self.get_fingertip_meta()
+            )
+            self.current_game.start_game(selected_indices)
+            self.state = "dnd_playing"
 
-    def handle_game_state(self, fingertip_meta: List[Dict]):
+    def handle_game_state(self, fingertip_meta: List[Dict], event=None):
         """Handle active game screen."""
         if self.current_game is not None:
             if hasattr(self.current_game, 'should_return_to_menu') and self.current_game.should_return_to_menu():
                 self.state = "menu"
                 self.current_game = None
                 return
+            if event and event.type == pygame.KEYDOWN and hasattr(self.current_game, 'handle_text_input'):
+                self.current_game.handle_text_input(event)
             self.current_game.update(fingertip_meta)
             self.current_game.draw()
         else:
@@ -194,12 +197,15 @@ class GameLauncher:
         while running:
             fingertip_meta = self.get_fingertip_meta()
 
+            current_event = None
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         running = False
+                    else:
+                        current_event = event
 
             self.screen.fill(Colors.DARK_BG)
 
@@ -207,8 +213,8 @@ class GameLauncher:
                 self.handle_menu_state(fingertip_meta)
             elif self.state == "player_select":
                 self.handle_player_select_state(fingertip_meta)
-            elif self.state in ["monopoly_playing", "blackjack_playing"]:
-                self.handle_game_state(fingertip_meta)
+            elif self.state in ["monopoly_playing", "blackjack_playing", "dnd_playing"]:
+                self.handle_game_state(fingertip_meta, current_event)
 
             # Draw cursors
             self.draw_cursors(fingertip_meta)
