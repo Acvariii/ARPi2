@@ -7,7 +7,9 @@ Successfully added **player selection screens** and **8-player panel layouts** t
 ## What Was Added
 
 ### 1. Player Selection System
+
 Every game now starts with a proper player selection screen:
+
 - **8 player slots** in 4x2 grid layout
 - **Color-coded selection boxes** matching player colors
 - **Interactive selection** - hold to select/deselect (1.5 seconds)
@@ -16,7 +18,9 @@ Every game now starts with a proper player selection screen:
 - **Back button** - return to main menu
 
 ### 2. Player Panel System
+
 All games display panels for each active player:
+
 - **8-panel layout** around the game area:
   - Bottom: Players 0, 1, 2
   - Top: Players 3, 4, 5
@@ -29,7 +33,9 @@ All games display panels for each active player:
   - Blackjack: Chips, bets, hand status
 
 ### 3. Code Organization
+
 Created clean folder structure:
+
 ```
 pyglet_games/
 ├── __init__.py                 # Package exports
@@ -45,16 +51,19 @@ pyglet_games/
 ## Files Created
 
 1. **pyglet_games/player_panels.py** (81 lines)
+
    - `PlayerPanel` class with 8-player positioning
    - Handles orientations (0°, 90°, 180°, 270°)
    - Provides panel dimensions and center points
 
 2. **pyglet_games/player_selection.py** (109 lines)
+
    - `PlayerSelectionUI` class for selection screen
    - Manages hover states and selection logic
    - Provides selected player indices
 
 3. **pyglet_games/monopoly_complete.py** (642 lines)
+
    - Full Monopoly with player selection
    - 8-player panel layout
    - Board rendering with 40 spaces
@@ -62,17 +71,20 @@ pyglet_games/
    - Phase management (roll/move/end_turn)
 
 4. **pyglet_games/blackjack_complete.py** (697 lines)
+
    - Full Blackjack with player selection
    - 8-player panel layout
    - Card dealing and betting
    - Hit/Stand mechanics
    - Results calculation with payouts
 
-5. **pyglet_games/__init__.py** (11 lines)
+5. **pyglet_games/**init**.py** (11 lines)
+
    - Package initialization
    - Exports all game classes
 
 6. **game_server_pyglet_complete.py** (380 lines)
+
    - New main server using organized structure
    - Integrates all complete game implementations
    - Clean menu system with all features
@@ -91,6 +103,7 @@ pyglet_games/
 ## Files Now Deprecated
 
 These files are replaced by the new complete versions:
+
 - `monopoly_pyglet.py` → Use `pyglet_games/monopoly_complete.py`
 - `blackjack_pyglet.py` → Use `pyglet_games/blackjack_complete.py`
 - `monopoly_pyglet_enhanced.py` → Use `pyglet_games/monopoly_complete.py`
@@ -101,20 +114,21 @@ These files are replaced by the new complete versions:
 
 All games maintain excellent performance:
 
-| Game State | FPS | Improvement |
-|------------|-----|-------------|
-| Menu | 60+ | Smooth |
-| Monopoly Selection | 60+ | Smooth |
-| Monopoly Playing | 40-50 | Good |
-| Blackjack Selection | 60+ | Smooth |
-| Blackjack Playing | 50-60 | Excellent |
-| D&D Creation | 30-35 | Good |
+| Game State          | FPS   | Improvement |
+| ------------------- | ----- | ----------- |
+| Menu                | 60+   | Smooth      |
+| Monopoly Selection  | 60+   | Smooth      |
+| Monopoly Playing    | 40-50 | Good        |
+| Blackjack Selection | 60+   | Smooth      |
+| Blackjack Playing   | 50-60 | Excellent   |
+| D&D Creation        | 30-35 | Good        |
 
 ## Feature Parity with Pygame ✅
 
 The Pyglet version now matches ALL Pygame features:
 
 ### Player Selection ✅
+
 - [x] 8-player selection screen
 - [x] Color-coded slots
 - [x] Interactive selection with hover
@@ -123,6 +137,7 @@ The Pyglet version now matches ALL Pygame features:
 - [x] Back to menu
 
 ### Player Panels ✅
+
 - [x] 8-panel layout around game area
 - [x] Color-coded backgrounds
 - [x] Current player highlighting
@@ -130,12 +145,14 @@ The Pyglet version now matches ALL Pygame features:
 - [x] Proper orientation handling
 
 ### Game Flow ✅
+
 - [x] Menu → Select game
 - [x] Player selection → Choose players
 - [x] Game with panels → Full gameplay
 - [x] Back to menu → ESC or button
 
 ### UI Elements ✅
+
 - [x] Hover progress indicators
 - [x] Button interactions
 - [x] Color themes
@@ -145,17 +162,20 @@ The Pyglet version now matches ALL Pygame features:
 ## How to Use
 
 ### Running the Complete Server
+
 ```bash
 python game_server_pyglet_complete.py
 ```
 
 ### Game Flow
+
 1. **Main Menu**: Select Monopoly, Blackjack, or D&D
 2. **Player Selection**: Choose 2-8 players by clicking/touching slots
 3. **Gameplay**: Play with full UI including player panels
 4. **Return**: Press ESC or click Back button to return to menu
 
 ### Controls
+
 - **Mouse/Touch**: Click and hold buttons for 1.5 seconds
 - **ESC Key**: Instant return to menu
 - **Back Button**: Hover-based return to menu
@@ -163,6 +183,7 @@ python game_server_pyglet_complete.py
 ## Technical Highlights
 
 ### Clean Architecture
+
 ```python
 # Import complete games from organized package
 from pyglet_games import MonopolyGame, BlackjackGame
@@ -171,7 +192,9 @@ from pyglet_games.player_selection import PlayerSelectionUI
 ```
 
 ### Reusable Components
+
 The player panel and selection systems are now reusable:
+
 ```python
 # Any game can use these systems
 panels = calculate_all_panels(width, height)
@@ -179,14 +202,16 @@ selection_ui = PlayerSelectionUI(width, height)
 ```
 
 ### State Management
+
 Each game follows a consistent pattern:
+
 ```python
 class Game:
     def __init__(self, width, height, renderer):
         self.state = "player_select"  # Start with selection
         self.selection_ui = PlayerSelectionUI(width, height)
         self.panels = calculate_all_panels(width, height)
-        
+
     def draw(self):
         if self.state == "player_select":
             self._draw_player_select()
@@ -197,6 +222,7 @@ class Game:
 ## Testing Results ✅
 
 ### Monopoly
+
 - ✅ Player selection works with all 8 slots
 - ✅ Start button requires 2+ players
 - ✅ Game shows 8 player panels correctly
@@ -206,6 +232,7 @@ class Game:
 - ✅ Back button and ESC work
 
 ### Blackjack
+
 - ✅ Player selection works with all 8 slots
 - ✅ Start button requires 2+ players
 - ✅ Game shows 8 player panels correctly
@@ -215,6 +242,7 @@ class Game:
 - ✅ Back button and ESC work
 
 ### D&D
+
 - ✅ Character creation works
 - ✅ All races and classes available
 - ✅ Particles and animations work
@@ -223,16 +251,19 @@ class Game:
 ## Benefits of New Structure
 
 ### Organization
+
 - **Clear separation**: Games in `pyglet_games/` folder
 - **Reusable components**: Player panels and selection UI
 - **Easy to maintain**: One place for all Pyglet code
 
 ### Performance
+
 - **60 FPS menu**: Smooth navigation
 - **40-60 FPS games**: Excellent gameplay experience
 - **OpenGL acceleration**: Better than Pygame performance
 
 ### Consistency
+
 - **Uniform UI**: All games use same player selection and panels
 - **Consistent controls**: Same hover-based interactions
 - **Standardized layout**: 8-player panel system across all games
