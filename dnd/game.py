@@ -464,8 +464,8 @@ class DnDGame:
             
             if self.ability_points_remaining == 0:
                 proceed_rect = pygame.Rect(width // 2 - 150, height - 120, 300, 80)
-                pygame.draw.rect(self.screen, (100, 200, 100), proceed_rect, border_radius=12)
-                pygame.draw.rect(self.screen, (150, 255, 150), proceed_rect, 4, border_radius=12)
+                pygame.draw.rect(self.screen, (100, 200, 100), proceed_rect)
+                pygame.draw.rect(self.screen, (150, 255, 150), proceed_rect, 4)
                 
                 font = pygame.font.SysFont("Arial", 32, bold=True)
                 text = font.render("Continue", True, Colors.WHITE)
@@ -488,8 +488,8 @@ class DnDGame:
             
             width, height = self.screen_size
             proceed_rect = pygame.Rect(width // 2 - 150, height - 120, 300, 80)
-            pygame.draw.rect(self.screen, (100, 200, 100), proceed_rect, border_radius=12)
-            pygame.draw.rect(self.screen, (150, 255, 150), proceed_rect, 4, border_radius=12)
+            pygame.draw.rect(self.screen, (100, 200, 100), proceed_rect)
+            pygame.draw.rect(self.screen, (150, 255, 150), proceed_rect, 4)
             
             font = pygame.font.SysFont("Arial", 32, bold=True)
             text = font.render("Finish", True, Colors.WHITE)

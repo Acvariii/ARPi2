@@ -58,7 +58,8 @@ class GameServerWithTracking:
         self.clients: Dict[str, websockets.WebSocketServerProtocol] = {}
         
         pygame.init()
-        self.screen = pygame.display.set_mode(WINDOW_SIZE)
+        # Enable hardware acceleration for better performance
+        self.screen = pygame.display.set_mode(WINDOW_SIZE, pygame.HWSURFACE | pygame.DOUBLEBUF)
         pygame.display.set_caption("ARPi2 Game Server")
         pygame.mouse.set_visible(True)
         self.clock = pygame.time.Clock()
@@ -174,10 +175,9 @@ class GameServerWithTracking:
                 
                 self.launcher.handle_game_state(combined_fingertips, current_event)
             
-            # Draw visible mouse cursor
+            # Draw visible mouse cursor (single circle for performance)
             mouse_pos = pygame.mouse.get_pos()
-            pygame.draw.circle(self.screen, (255, 255, 255), mouse_pos, 10, 2)
-            pygame.draw.circle(self.screen, (0, 200, 255), mouse_pos, 3)
+            pygame.draw.circle(self.screen, (0, 220, 255), mouse_pos, 8)
             
             pygame.display.update()
             

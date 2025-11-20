@@ -1,21 +1,21 @@
 {
-  "name": "Poppy Hilltopple",
+  "name": "Elaria the Cunning",
   "player_color": [
     200,
     40,
     200
   ],
-  "race": "Halfling",
+  "race": "Elf",
   "char_class": "Rogue",
   "level": 1,
   "alignment": "",
   "abilities": {
-    "STR": 14,
-    "DEX": 12,
-    "CON": 12,
-    "INT": 12,
-    "WIS": 12,
-    "CHA": 12
+    "STR": 10,
+    "DEX": 10,
+    "CON": 10,
+    "INT": 15,
+    "WIS": 15,
+    "CHA": 11
   },
   "max_hp": 8,
   "current_hp": 8,

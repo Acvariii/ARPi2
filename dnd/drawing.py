@@ -19,7 +19,7 @@ class CharacterSheetDrawer:
         overlay.fill((20, 20, 30, 240))
         self.screen.blit(overlay, rect)
         
-        pygame.draw.rect(self.screen, character.player_color, rect, 3, border_radius=8)
+        pygame.draw.rect(self.screen, character.player_color, rect, 3)
         
         margin = 10
         content_rect = pygame.Rect(rect.x + margin, rect.y + margin, rect.width - 2*margin, rect.height - 2*margin)
@@ -71,11 +71,9 @@ class DiceVisualizer:
     
     def draw_dice_result(self, center: Tuple[int, int], value: int, size: int = 60):
         pygame.draw.rect(self.screen, Colors.WHITE, 
-                        (center[0] - size//2, center[1] - size//2, size, size), 
-                        border_radius=8)
+                        (center[0] - size//2, center[1] - size//2, size, size))
         pygame.draw.rect(self.screen, Colors.BLACK, 
-                        (center[0] - size//2, center[1] - size//2, size, size), 
-                        2, border_radius=8)
+                        (center[0] - size//2, center[1] - size//2, size, size), 2)
         
         font = pygame.font.SysFont("Arial", size//2, bold=True)
         text = font.render(str(value), True, Colors.BLACK)
@@ -115,8 +113,8 @@ class CombatDisplay:
         self.screen = screen
     
     def draw_initiative_tracker(self, combat_manager, rect: pygame.Rect):
-        pygame.draw.rect(self.screen, (30, 30, 40, 230), rect, border_radius=8)
-        pygame.draw.rect(self.screen, (255, 215, 0), rect, 2, border_radius=8)
+        pygame.draw.rect(self.screen, (30, 30, 40, 230), rect)
+        pygame.draw.rect(self.screen, (255, 215, 0), rect, 2)
         
         font_title = pygame.font.SysFont("Arial", 16, bold=True)
         font_text = pygame.font.SysFont("Arial", 14)
@@ -132,7 +130,7 @@ class CombatDisplay:
             
             if is_current:
                 pygame.draw.rect(self.screen, (80, 80, 100), 
-                               (rect.x + 5, y_offset - 2, rect.width - 10, 20), border_radius=4)
+                               (rect.x + 5, y_offset - 2, rect.width - 10, 20))
             
             name = entity.name if hasattr(entity, 'name') else "Enemy"
             color = entity.player_color if hasattr(entity, 'player_color') else Colors.WHITE

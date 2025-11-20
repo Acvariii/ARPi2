@@ -189,11 +189,11 @@ class CharacterCreationVisuals:
             # Simple glow effect without alpha
             if is_selected:
                 glow_rect = pygame.Rect(x - 6, card_y - 6, card_width + 12, card_height + 12)
-                pygame.draw.rect(self.screen, race_theme["accent"], glow_rect, 3, border_radius=18)
+                pygame.draw.rect(self.screen, race_theme["accent"], glow_rect, 3)
             
             bg_color = race_theme["bg_colors"][0] if not is_selected else tuple(min(255, c + 30) for c in race_theme["bg_colors"][0])
-            pygame.draw.rect(self.screen, bg_color, card_rect, border_radius=15)
-            pygame.draw.rect(self.screen, race_theme["accent"], card_rect, 4 if is_selected else 2, border_radius=15)
+            pygame.draw.rect(self.screen, bg_color, card_rect)
+            pygame.draw.rect(self.screen, race_theme["accent"], card_rect, 4 if is_selected else 2)
             
             icon_font = pygame.font.SysFont("Segoe UI Emoji", 80)
             icon_text = race_theme.get("icon", "★")
@@ -211,7 +211,7 @@ class CharacterCreationVisuals:
                 badge_surf = badge_font.render("SELECTED", True, (255, 255, 255))
                 badge_bg = pygame.Rect(0, 0, badge_surf.get_width() + 20, badge_surf.get_height() + 10)
                 badge_bg.center = (card_rect.centerx, card_rect.bottom - 40)
-                pygame.draw.rect(self.screen, race_theme["accent"], badge_bg, border_radius=8)
+                pygame.draw.rect(self.screen, race_theme["accent"], badge_bg)
                 badge_rect = badge_surf.get_rect(center=badge_bg.center)
                 self.screen.blit(badge_surf, badge_rect)
         
@@ -251,11 +251,11 @@ class CharacterCreationVisuals:
             # Simple glow effect without alpha
             if is_selected:
                 glow_rect = pygame.Rect(x - 6, card_y - 6, card_width + 12, card_height + 12)
-                pygame.draw.rect(self.screen, class_theme["accent"], glow_rect, 3, border_radius=18)
+                pygame.draw.rect(self.screen, class_theme["accent"], glow_rect, 3)
             
             bg_color = class_theme["bg_colors"][0] if not is_selected else tuple(min(255, c + 30) for c in class_theme["bg_colors"][0])
-            pygame.draw.rect(self.screen, bg_color, card_rect, border_radius=15)
-            pygame.draw.rect(self.screen, class_theme["accent"], card_rect, 4 if is_selected else 2, border_radius=15)
+            pygame.draw.rect(self.screen, bg_color, card_rect)
+            pygame.draw.rect(self.screen, class_theme["accent"], card_rect, 4 if is_selected else 2)
             
             icon_font = pygame.font.SysFont("Segoe UI Emoji", 80)
             icon_text = class_theme.get("symbol", "⚔")
@@ -273,7 +273,7 @@ class CharacterCreationVisuals:
                 badge_surf = badge_font.render("SELECTED", True, (255, 255, 255))
                 badge_bg = pygame.Rect(0, 0, badge_surf.get_width() + 20, badge_surf.get_height() + 10)
                 badge_bg.center = (card_rect.centerx, card_rect.bottom - 40)
-                pygame.draw.rect(self.screen, class_theme["accent"], badge_bg, border_radius=8)
+                pygame.draw.rect(self.screen, class_theme["accent"], badge_bg)
                 badge_rect = badge_surf.get_rect(center=badge_bg.center)
                 self.screen.blit(badge_surf, badge_rect)
         
@@ -335,11 +335,11 @@ class CharacterCreationVisuals:
             is_selected = ability == selected_ability
             if is_selected:
                 glow_rect = pygame.Rect(x - 5, y - 5, card_width + 10, card_height + 10)
-                pygame.draw.rect(self.screen, (255, 200, 100), glow_rect, 3, border_radius=15)
+                pygame.draw.rect(self.screen, (255, 200, 100), glow_rect, 3)
             
             bg_color = (60, 70, 80) if not is_selected else (80, 90, 100)
-            pygame.draw.rect(self.screen, bg_color, card_rect, border_radius=12)
-            pygame.draw.rect(self.screen, (200, 180, 120), card_rect, 3 if is_selected else 2, border_radius=12)
+            pygame.draw.rect(self.screen, bg_color, card_rect)
+            pygame.draw.rect(self.screen, (200, 180, 120), card_rect, 3 if is_selected else 2)
             
             ability_font = pygame.font.SysFont("Arial", 28, bold=True)
             ability_text = ability_font.render(ability, True, (255, 220, 150))

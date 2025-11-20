@@ -1,0 +1,32 @@
+{
+  "name": "Caladrel the Enlightened",
+  "player_color": [
+    220,
+    40,
+    40
+  ],
+  "race": "Elf",
+  "char_class": "Wizard",
+  "level": 1,
+  "alignment": "",
+  "abilities": {
+    "STR": 14,
+    "DEX": 12,
+    "CON": 12,
+    "INT": 12,
+    "WIS": 12,
+    "CHA": 12
+  },
+  "max_hp": 6,
+  "current_hp": 6,
+  "armor_class": 10,
+  "skills": [
+    "Arcana",
+    "History",
+    "Investigation"
+  ],
+  "inventory": [],
+  "gold": 0,
+  "experience": 0,
+  "background": ""
+}
