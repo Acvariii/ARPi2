@@ -19,7 +19,7 @@ class PiThinClient:
         self.websocket: Optional[websockets.WebSocketClientProtocol] = None
         
         pygame.init()
-        pygame.mouse.set_visible(False)
+        pygame.mouse.set_visible(True)
         self.screen = pygame.display.set_mode(WINDOW_SIZE, pygame.FULLSCREEN | pygame.NOFRAME)
         self.clock = pygame.time.Clock()
         
@@ -120,8 +120,10 @@ class PiThinClient:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False
+                    print("Quit event received - shutting down client...")
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
+                        print("ESC pressed - shutting down client...")
                         self.running = False
                     else:
                         try:
@@ -132,6 +134,16 @@ class PiThinClient:
                             }))
                         except:
                             pass
+                elif event.type == pygame.MOUSEBUTTONDOWN or event.type == pygame.MOUSEMOTION:
+                    try:
+                        mouse_pos = pygame.mouse.get_pos()
+                        await self.websocket.send(json.dumps({
+                            "type": "mouse",
+                            "pos": mouse_pos,
+                            "buttons": pygame.mouse.get_pressed()
+                        }))
+                    except:
+                        pass
             
             await asyncio.sleep(0.01)
     

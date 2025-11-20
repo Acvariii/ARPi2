@@ -58,7 +58,9 @@ class GameServerWithTracking:
         self.clients: Dict[str, websockets.WebSocketServerProtocol] = {}
         
         pygame.init()
-        self.screen = pygame.Surface(WINDOW_SIZE)
+        pygame.mouse.set_visible(True)
+        self.screen = pygame.display.set_mode(WINDOW_SIZE)
+        pygame.display.set_caption("ARPi2 Game Server")
         self.clock = pygame.time.Clock()
         
         self.launcher = None
@@ -87,6 +89,11 @@ class GameServerWithTracking:
                         await self.process_camera_frame(data, client_id)
                     elif msg_type == "keyboard":
                         self.last_keyboard_event = data
+                    elif msg_type == "mouse":
+                        mouse_pos = tuple(data.get("pos", [0, 0]))
+                        mouse_meta = {"pos": mouse_pos, "hand": -2, "name": "remote_mouse"}
+                        if mouse_meta not in self.fingertip_data:
+                            self.fingertip_data.append(mouse_meta)
                     elif msg_type == "ping":
                         await websocket.send(json.dumps({"type": "pong"}))
                 
@@ -122,12 +129,23 @@ class GameServerWithTracking:
         self.launcher.hand_tracker.stop()
         
         original_get_fingertips = self.launcher.get_fingertip_meta
-        self.launcher.get_fingertip_meta = lambda: self.fingertip_data
+        
+        def get_combined_fingertips():
+            combined = list(self.fingertip_data)
+            mouse_pos = pygame.mouse.get_pos()
+            combined.append({"pos": mouse_pos, "hand": -1, "name": "mouse"})
+            return combined
+        
+        self.launcher.get_fingertip_meta = get_combined_fingertips
         
         while self.running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        print("ESC pressed - shutting down server...")
+                        self.running = False
             
             if self.last_keyboard_event:
                 key = self.last_keyboard_event.get("key")
@@ -142,10 +160,12 @@ class GameServerWithTracking:
             
             self.screen.fill((0, 0, 0))
             
+            combined_fingertips = get_combined_fingertips()
+            
             if self.launcher.state == "menu":
-                self.launcher.handle_menu_state(self.fingertip_data)
+                self.launcher.handle_menu_state(combined_fingertips)
             elif self.launcher.state == "player_select":
-                self.launcher.handle_player_select_state(self.fingertip_data)
+                self.launcher.handle_player_select_state(combined_fingertips)
             elif self.launcher.state in ["monopoly_playing", "blackjack_playing", "dnd_playing"]:
                 current_event = None
                 if self.last_keyboard_event:
@@ -154,7 +174,7 @@ class GameServerWithTracking:
                     current_event = pygame.event.Event(pygame.KEYDOWN, key=key, unicode=unicode_char)
                     self.last_keyboard_event = None
                 
-                self.launcher.handle_game_state(self.fingertip_data, current_event)
+                self.launcher.handle_game_state(combined_fingertips, current_event)
             
             pygame.display.update()
             
