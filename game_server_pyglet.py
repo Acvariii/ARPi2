@@ -17,8 +17,8 @@ import mediapipe as mp
 from config import WINDOW_SIZE, FPS, HOVER_TIME_THRESHOLD, Colors
 from pyglet_renderer import PygletRenderer, TextCache
 from dnd_pyglet import DnDCharacterCreation
-from monopoly_pyglet import MonopolyPyglet
-from blackjack_pyglet import BlackjackPyglet
+from monopoly_pyglet_enhanced import MonopolyPygletEnhanced
+from blackjack_pyglet_enhanced import BlackjackPygletEnhanced
 
 
 class HandTrackingServer:
@@ -111,8 +111,8 @@ class PygletGameServer:
         
         # Game instances
         self.dnd_creation = DnDCharacterCreation(WINDOW_SIZE[0], WINDOW_SIZE[1], self.renderer)
-        self.monopoly_game = MonopolyPyglet(WINDOW_SIZE[0], WINDOW_SIZE[1], self.renderer)
-        self.blackjack_game = BlackjackPyglet(WINDOW_SIZE[0], WINDOW_SIZE[1], self.renderer)
+        self.monopoly_game = MonopolyPygletEnhanced(WINDOW_SIZE[0], WINDOW_SIZE[1], self.renderer)
+        self.blackjack_game = BlackjackPygletEnhanced(WINDOW_SIZE[0], WINDOW_SIZE[1], self.renderer)
         self.selected_players = []  # Track which players are selected
         self.current_player_creating = 0  # Track which player is creating character
         
