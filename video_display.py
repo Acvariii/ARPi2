@@ -6,11 +6,12 @@ import cv2
 import numpy as np
 import websockets
 from typing import Optional, Dict, List
+from config import SERVER_WS
 
 class VideoDisplay:
     """Displays camera feed with hand tracking overlays in a separate thread."""
-    
-    def __init__(self, server_ws: str = "ws://192.168.1.79:8765", window_name: str = "Hand Tracking"):
+
+    def __init__(self, server_ws: str = SERVER_WS, window_name: str = "Hand Tracking"):
         self.server_ws = server_ws
         self.window_name = window_name
         self.latest_frame: Optional[np.ndarray] = None

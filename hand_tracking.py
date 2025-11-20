@@ -4,11 +4,12 @@ import threading
 import time
 from typing import List, Dict, Optional
 import websockets
+from config import SERVER_WS
 
 class HandTracker:
     """Manages WebSocket connection to hand tracking server and provides hand data."""
-    
-    def __init__(self, server_ws: str = "ws://192.168.1.79:8765"):
+
+    def __init__(self, server_ws: str = SERVER_WS):
         self.server_ws = server_ws
         self._shared = {"hands": [], "w": 1280, "h": 720, "ts": 0.0}
         self._lock = threading.Lock()

@@ -1,8 +1,3 @@
-import asyncio
-import json
-import math
-import threading
-import time
 import pygame
 from typing import List, Dict
 from ui_components import HoverButton, draw_cursor, draw_circular_progress, PlayerSelectionUI

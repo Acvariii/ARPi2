@@ -9,6 +9,8 @@ import numpy as np
 import websockets
 import mediapipe as mp
 
+from config import SERVER_IP, SERVER_PORT
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("hand-server")
 
@@ -202,8 +204,8 @@ async def handler(connection):
         logger.info("Client disconnected: %s", ws.remote_address)
 
 async def main():
-    logger.info("Starting WebSocket server on :8765")
-    async with websockets.serve(handler, "192.168.1.79", 8765, max_size=None, max_queue=None):
+    logger.info(f"Starting WebSocket server on {SERVER_IP}:{SERVER_PORT}")
+    async with websockets.serve(handler, SERVER_IP, SERVER_PORT, max_size=None, max_queue=None):
         await asyncio.Future()
 
 if __name__ == "__main__":
