@@ -62,27 +62,35 @@ class PopupDrawer:
         # Get button area
         btn_area = buttons[0].rect.union(buttons[-1].rect) if buttons else pygame.Rect(panel.rect.x, panel.rect.y, 0, 0)
         
-        # Content area - positioned consistently
-        margin = 8
+        # Content area - mirrored for opposite sides
+        margin = 10
         if panel.orientation in (0, 180):  # Horizontal panels
-            content_rect = pygame.Rect(
-                panel.rect.x + btn_area.width + margin * 2,
-                panel.rect.y + margin,
-                panel.rect.width - btn_area.width - margin * 3,
-                panel.rect.height - margin * 2
-            )
+            if panel.orientation == 0:  # Bottom - content to right of buttons
+                content_rect = pygame.Rect(
+                    btn_area.right + margin,
+                    panel.rect.y + margin,
+                    panel.rect.width - btn_area.width - margin * 3,
+                    panel.rect.height - margin * 2
+                )
+            else:  # Top (180) - content to left of buttons (mirrored)
+                content_rect = pygame.Rect(
+                    panel.rect.x + margin,
+                    panel.rect.y + margin,
+                    panel.rect.width - btn_area.width - margin * 3,
+                    panel.rect.height - margin * 2
+                )
         else:  # Vertical panels
-            if panel.orientation == 90:  # Left
+            if panel.orientation == 90:  # Left - content above buttons
                 content_rect = pygame.Rect(
                     panel.rect.x + margin,
                     panel.rect.y + margin,
                     panel.rect.width - margin * 2,
                     panel.rect.height - btn_area.height - margin * 3
                 )
-            else:  # Right (270)
+            else:  # Right (270) - content below buttons (mirrored)
                 content_rect = pygame.Rect(
                     panel.rect.x + margin,
-                    panel.rect.y + btn_area.height + margin * 2,
+                    btn_area.bottom + margin,
                     panel.rect.width - margin * 2,
                     panel.rect.height - btn_area.height - margin * 3
                 )
@@ -93,47 +101,38 @@ class PopupDrawer:
         pygame.draw.rect(self.screen, color, bar_rect, border_radius=3)
         
         # Property name below color bar
-        name_rect = pygame.Rect(
-            content_rect.x,
-            content_rect.y + bar_h + 6,
-            content_rect.width,
-            40
-        )
-        font_name = pygame.font.SysFont("Arial", 18, bold=True)
+        name_y = content_rect.y + bar_h + 6
+        name_h = 32
+        font_name = pygame.font.SysFont("Arial", 16, bold=True)
         RotatedText.draw_block(
             self.screen,
             [(name, font_name, Colors.WHITE)],
-            name_rect,
+            pygame.Rect(content_rect.x, name_y, content_rect.width, name_h),
             panel.orientation,
             line_spacing=4,
             wrap=True
         )
         
         # Details below name
-        details_rect = pygame.Rect(
-            content_rect.x,
-            name_rect.bottom + 10,
-            content_rect.width,
-            content_rect.height - (name_rect.bottom - content_rect.y) - 10
-        )
+        details_y = name_y + name_h + 12
+        font_big = pygame.font.SysFont("Arial", 18, bold=True)
+        font_med = pygame.font.SysFont("Arial", 14, bold=True)
+        font_small = pygame.font.SysFont("Arial", 13)
         
-        font_label = pygame.font.SysFont("Arial", 14, bold=True)
-        font_value = pygame.font.SysFont("Arial", 16)
-        
-        # Use larger spacing for horizontal panels
-        spacing = 14 if panel.is_vertical() else 10
+        # Use larger spacing for vertical panels
+        spacing = 18 if panel.is_vertical() else 14
         
         RotatedText.draw_block(
             self.screen,
             [
-                (f"Price: ${price}", font_value, Colors.ACCENT),
-                (status_text, font_label, status_color),
-                (f"Balance: ${player.money}", font_value, (200, 200, 200))
+                (f"${price}", font_big, Colors.ACCENT),
+                (status_text, font_med, status_color),
+                (f"Balance: ${player.money}", font_small, (200, 200, 200))
             ],
-            details_rect,
+            pygame.Rect(content_rect.x, details_y, content_rect.width, content_rect.bottom - details_y),
             panel.orientation,
             line_spacing=spacing,
-            padding=4
+            padding=6
         )
         
         # Draw buttons with progress indicators
@@ -151,73 +150,71 @@ class PopupDrawer:
         self.screen.blit(overlay, panel.rect)
 
         btn_area = buttons[0].rect if buttons else pygame.Rect(panel.rect.x, panel.rect.y, 0, 0)
-        font_title = pygame.font.SysFont("Arial", 18, bold=True)
-        font_text = pygame.font.SysFont("Arial", 14)
+        font_title = pygame.font.SysFont("Arial", 17, bold=True)
+        font_text = pygame.font.SysFont("Arial", 13)
         title = "CHANCE" if deck_type == "chance" else "COMMUNITY CHEST"
         title_color = (255,200,60) if deck_type == "chance" else (100,180,255)
 
-        # Content area
-        margin = 8
+        # Content area - mirrored for opposite sides
+        margin = 10
         if panel.orientation in (0, 180):
-            content_rect = pygame.Rect(
-                panel.rect.x + btn_area.width + margin * 2,
-                panel.rect.y + margin,
-                panel.rect.width - btn_area.width - margin * 3,
-                panel.rect.height - margin * 2
-            )
+            if panel.orientation == 0:  # Bottom
+                content_rect = pygame.Rect(
+                    btn_area.right + margin,
+                    panel.rect.y + margin,
+                    panel.rect.width - btn_area.width - margin * 3,
+                    panel.rect.height - margin * 2
+                )
+            else:  # Top (180) - mirrored
+                content_rect = pygame.Rect(
+                    panel.rect.x + margin,
+                    panel.rect.y + margin,
+                    panel.rect.width - btn_area.width - margin * 3,
+                    panel.rect.height - margin * 2
+                )
         else:
-            if panel.orientation == 90:
+            if panel.orientation == 90:  # Left
                 content_rect = pygame.Rect(
                     panel.rect.x + margin,
                     panel.rect.y + margin,
                     panel.rect.width - margin * 2,
                     panel.rect.height - btn_area.height - margin * 3
                 )
-            else:
+            else:  # Right (270) - mirrored
                 content_rect = pygame.Rect(
                     panel.rect.x + margin,
-                    panel.rect.y + btn_area.height + margin * 2,
+                    btn_area.bottom + margin,
                     panel.rect.width - margin * 2,
                     panel.rect.height - btn_area.height - margin * 3
                 )
 
         # Title bar
-        bar_h = 5
+        bar_h = 6
         bar_rect = pygame.Rect(content_rect.x, content_rect.y, content_rect.width, bar_h)
-        pygame.draw.rect(self.screen, title_color, bar_rect, border_radius=2)
+        pygame.draw.rect(self.screen, title_color, bar_rect, border_radius=3)
 
         # Title
-        title_rect = pygame.Rect(
-            content_rect.x,
-            content_rect.y + bar_h + 4,
-            content_rect.width,
-            30
-        )
+        title_y = content_rect.y + bar_h + 6
+        title_h = 28
         RotatedText.draw_block(
             self.screen,
             [(title, font_title, title_color)],
-            title_rect,
+            pygame.Rect(content_rect.x, title_y, content_rect.width, title_h),
             panel.orientation,
             line_spacing=4
         )
 
         # Card text
-        text_rect = pygame.Rect(
-            content_rect.x,
-            title_rect.bottom + 10,
-            content_rect.width,
-            content_rect.height - (title_rect.bottom - content_rect.y) - 10
-        )
-        
-        spacing = 10 if panel.is_vertical() else 8
+        text_y = title_y + title_h + 10
+        spacing = 14 if panel.is_vertical() else 10
         
         RotatedText.draw_block(
             self.screen,
             [(card.get("text", ""), font_text, Colors.WHITE)],
-            text_rect,
+            pygame.Rect(content_rect.x, text_y, content_rect.width, content_rect.bottom - text_y),
             panel.orientation,
             line_spacing=spacing,
-            padding=4,
+            padding=6,
             wrap=True
         )
 
@@ -235,34 +232,42 @@ class PopupDrawer:
         
         btn_area = buttons[0].rect.union(buttons[-1].rect) if buttons else pygame.Rect(panel.rect.x, panel.rect.y, 0, 0)
         
-        # Content area
-        margin = 8
+        # Content area - mirrored for opposite sides
+        margin = 10
         if panel.orientation in (0, 180):
-            content_rect = pygame.Rect(
-                panel.rect.x + btn_area.width + margin * 2,
-                panel.rect.y + margin,
-                panel.rect.width - btn_area.width - margin * 3,
-                panel.rect.height - margin * 2
-            )
+            if panel.orientation == 0:  # Bottom
+                content_rect = pygame.Rect(
+                    btn_area.right + margin,
+                    panel.rect.y + margin,
+                    panel.rect.width - btn_area.width - margin * 3,
+                    panel.rect.height - margin * 2
+                )
+            else:  # Top (180) - mirrored
+                content_rect = pygame.Rect(
+                    panel.rect.x + margin,
+                    panel.rect.y + margin,
+                    panel.rect.width - btn_area.width - margin * 3,
+                    panel.rect.height - margin * 2
+                )
         else:
-            if panel.orientation == 90:
+            if panel.orientation == 90:  # Left
                 content_rect = pygame.Rect(
                     panel.rect.x + margin,
                     panel.rect.y + margin,
                     panel.rect.width - margin * 2,
                     panel.rect.height - btn_area.height - margin * 3
                 )
-            else:
+            else:  # Right (270) - mirrored
                 content_rect = pygame.Rect(
                     panel.rect.x + margin,
-                    panel.rect.y + btn_area.height + margin * 2,
+                    btn_area.bottom + margin,
                     panel.rect.width - margin * 2,
                     panel.rect.height - btn_area.height - margin * 3
                 )
         
-        font_title = pygame.font.SysFont("Arial", 16, bold=True)
-        font_line = pygame.font.SysFont("Arial", 13)
-        font_small = pygame.font.SysFont("Arial", 11)
+        font_title = pygame.font.SysFont("Arial", 15, bold=True)
+        font_line = pygame.font.SysFont("Arial", 12)
+        font_small = pygame.font.SysFont("Arial", 10)
         
         if not player.properties:
             RotatedText.draw_block(
@@ -278,33 +283,24 @@ class PopupDrawer:
             color = prop.data.get("color",(180,180,180))
             
             # Color bar at top
-            bar_h = 6
+            bar_h = 7
             bar_rect = pygame.Rect(content_rect.x, content_rect.y, content_rect.width, bar_h)
             pygame.draw.rect(self.screen, color, bar_rect, border_radius=3)
             
             # Property name
-            name_rect = pygame.Rect(
-                content_rect.x,
-                content_rect.y + bar_h + 4,
-                content_rect.width,
-                35
-            )
+            name_y = content_rect.y + bar_h + 5
+            name_h = 30
             RotatedText.draw_block(
                 self.screen,
                 [(prop.data.get("name",""), font_title, Colors.WHITE)],
-                name_rect,
+                pygame.Rect(content_rect.x, name_y, content_rect.width, name_h),
                 panel.orientation,
                 line_spacing=4,
                 wrap=True
             )
             
             # Details
-            details_rect = pygame.Rect(
-                content_rect.x,
-                name_rect.bottom + 8,
-                content_rect.width,
-                content_rect.height - (name_rect.bottom - content_rect.y) - 35
-            )
+            details_y = name_y + name_h + 10
             
             details = [
                 f"Type: {prop.data.get('type','property').title()}",
@@ -318,28 +314,23 @@ class PopupDrawer:
                     details.append(f"Rent: ${rent_val}")
             details.append(f"Status: {'Mortgaged' if prop.is_mortgaged else 'Active'}")
             
-            spacing = 12 if panel.is_vertical() else 8
+            spacing = 15 if panel.is_vertical() else 11
             
             RotatedText.draw_block(
                 self.screen,
                 [(d, font_line, Colors.WHITE) for d in details],
-                details_rect,
+                pygame.Rect(content_rect.x, details_y, content_rect.width, content_rect.bottom - details_y - 25),
                 panel.orientation,
                 line_spacing=spacing,
-                padding=4
+                padding=6
             )
             
             # Page indicator at bottom
-            page_rect = pygame.Rect(
-                content_rect.x,
-                content_rect.bottom - 20,
-                content_rect.width,
-                18
-            )
+            page_y = content_rect.bottom - 20
             RotatedText.draw_block(
                 self.screen,
                 [(f"{property_scroll + 1}/{len(player.properties)}", font_small, (140,140,140))],
-                page_rect,
+                pygame.Rect(content_rect.x, page_y, content_rect.width, 18),
                 panel.orientation,
                 line_spacing=4
             )
@@ -357,23 +348,38 @@ class PopupDrawer:
         font_title = pygame.font.SysFont("Arial", 20, bold=True)
         btn_area = buttons[0].rect if buttons else pygame.Rect(panel.rect.x, panel.rect.y, 0, 0)
         
-        # Content area - consistent positioning
-        if panel.orientation in (0, 180):  # Horizontal panels
-            content_rect = pygame.Rect(panel.rect.x + btn_area.width + 12,
-                                       panel.rect.y + 8,
-                                       panel.rect.width - btn_area.width - 20,
-                                       panel.rect.height - 16)
-        else:  # Vertical panels
-            if panel.orientation == 90:  # Left panel
-                content_rect = pygame.Rect(panel.rect.x + 8,
-                                          panel.rect.y + 8,
-                                          panel.rect.width - 16,
-                                          panel.rect.height - btn_area.height - 20)
-            else:  # Right panel (270)
-                content_rect = pygame.Rect(panel.rect.x + 8,
-                                          panel.rect.y + btn_area.height + 12,
-                                          panel.rect.width - 16,
-                                          panel.rect.height - btn_area.height - 20)
+        # Content area - mirrored for opposite sides
+        margin = 10
+        if panel.orientation in (0, 180):
+            if panel.orientation == 0:
+                content_rect = pygame.Rect(
+                    btn_area.right + margin,
+                    panel.rect.y + margin,
+                    panel.rect.width - btn_area.width - margin * 3,
+                    panel.rect.height - margin * 2
+                )
+            else:  # 180 - mirrored
+                content_rect = pygame.Rect(
+                    panel.rect.x + margin,
+                    panel.rect.y + margin,
+                    panel.rect.width - btn_area.width - margin * 3,
+                    panel.rect.height - margin * 2
+                )
+        else:
+            if panel.orientation == 90:
+                content_rect = pygame.Rect(
+                    panel.rect.x + margin,
+                    panel.rect.y + margin,
+                    panel.rect.width - margin * 2,
+                    panel.rect.height - btn_area.height - margin * 3
+                )
+            else:  # 270 - mirrored
+                content_rect = pygame.Rect(
+                    panel.rect.x + margin,
+                    btn_area.bottom + margin,
+                    panel.rect.width - margin * 2,
+                    panel.rect.height - btn_area.height - margin * 3
+                )
         
         RotatedText.draw_block(self.screen,
                                [("Building (Coming Soon)", font_title, Colors.ACCENT)],
