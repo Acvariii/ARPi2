@@ -6,6 +6,7 @@ from config import Colors
 
 
 class Particle:
+    """Optimized particle with simple circle drawing"""
     def __init__(self, x: float, y: float, vx: float, vy: float, color: Tuple[int, int, int], lifetime: float):
         self.x = x
         self.y = y
@@ -14,7 +15,7 @@ class Particle:
         self.color = color
         self.lifetime = lifetime
         self.max_lifetime = lifetime
-        self.size = random.randint(2, 5)
+        self.size = random.randint(2, 4)
     
     def update(self, dt: float) -> bool:
         self.x += self.vx * dt
@@ -24,12 +25,10 @@ class Particle:
         return self.lifetime > 0
     
     def draw(self, screen: pygame.Surface):
-        alpha = int(255 * (self.lifetime / self.max_lifetime))
-        color_with_alpha = (*self.color, alpha)
+        # Fast non-alpha circle drawing
         size = max(1, int(self.size * (self.lifetime / self.max_lifetime)))
-        surf = pygame.Surface((size*2, size*2), pygame.SRCALPHA)
-        pygame.draw.circle(surf, color_with_alpha, (size, size), size)
-        screen.blit(surf, (int(self.x - size), int(self.y - size)))
+        if size > 0:
+            pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), size)
 
 
 class CharacterCreationVisuals:
@@ -116,47 +115,60 @@ class CharacterCreationVisuals:
         self.screen = screen
         self.particles: List[Particle] = []
         self.time = 0.0
-        self.bg_offset = 0.0
+        
+        # Pre-render cache
+        self._card_cache = {}
+        self._bg_cache = {}
     
     def update(self, dt: float):
         self.time += dt
-        self.bg_offset += dt * 20
-        self.particles = [p for p in self.particles if p.update(dt)]
+        # Update only alive particles
+        alive_particles = []
+        for p in self.particles:
+            if p.update(dt):
+                alive_particles.append(p)
+        self.particles = alive_particles
     
-    def spawn_particles(self, center: Tuple[int, int], color: Tuple[int, int, int], count: int = 3):
+    def spawn_particles(self, center: Tuple[int, int], color: Tuple[int, int, int], count: int = 2):
+        # Reduced particle count for performance
         for _ in range(count):
             angle = random.uniform(0, 2 * math.pi)
-            speed = random.uniform(50, 150)
+            speed = random.uniform(50, 120)
             vx = math.cos(angle) * speed
             vy = math.sin(angle) * speed - 100
-            self.particles.append(Particle(center[0], center[1], vx, vy, color, random.uniform(1.0, 2.0)))
+            self.particles.append(Particle(center[0], center[1], vx, vy, color, random.uniform(0.8, 1.5)))
     
-    def draw_animated_background(self, theme_colors: List[Tuple[int, int, int]]):
+    def _draw_static_background(self, theme_colors: List[Tuple[int, int, int]]):
+        """Fast static gradient background (no animation)"""
         width, height = self.screen.get_size()
         
-        for i in range(3):
-            offset = (self.bg_offset + i * 100) % (height + 200) - 100
-            color_idx = i % len(theme_colors)
-            stripe_height = 200
-            
-            for y in range(-100, height + 100, stripe_height):
-                adjusted_y = y + offset
-                if -stripe_height <= adjusted_y <= height:
-                    alpha = int(80 + 40 * math.sin(self.time + i))
-                    surf = pygame.Surface((width, stripe_height), pygame.SRCALPHA)
-                    surf.fill((*theme_colors[color_idx], alpha))
-                    self.screen.blit(surf, (0, adjusted_y))
+        # Create cache key
+        cache_key = tuple(theme_colors[0])
+        
+        if cache_key not in self._bg_cache:
+            # Pre-render gradient
+            bg_surf = pygame.Surface((width, height))
+            for i in range(height):
+                ratio = i / height
+                color = tuple(int(theme_colors[0][j] * (1 - ratio) + theme_colors[1][j] * ratio) for j in range(3))
+                pygame.draw.line(bg_surf, color, (0, i), (width, i))
+            self._bg_cache[cache_key] = bg_surf
+        
+        self.screen.blit(self._bg_cache[cache_key], (0, 0))
     
     def draw_race_selection(self, selected_race: str, available_races: List[str], player_color: Tuple[int, int, int]):
         width, height = self.screen.get_size()
         
         theme = self.RACE_THEMES.get(selected_race or "Human", self.RACE_THEMES["Human"])
-        self.draw_animated_background(theme["bg_colors"])
+        self._draw_static_background(theme["bg_colors"])
         
-        title_font = pygame.font.SysFont("Arial", 72, bold=True)
-        title = title_font.render("Choose Your Race", True, (255, 255, 220))
-        title_shadow = title_font.render("Choose Your Race", True, (0, 0, 0))
-        self.screen.blit(title_shadow, (width//2 - title.get_width()//2 + 4, 54))
+        # Cache font rendering
+        if "race_title" not in self._card_cache:
+            title_font = pygame.font.SysFont("Arial", 72, bold=True)
+            title = title_font.render("Choose Your Race", True, (255, 255, 220))
+            self._card_cache["race_title"] = title
+        
+        title = self._card_cache["race_title"]
         self.screen.blit(title, (width//2 - title.get_width()//2, 50))
         
         card_width = 280
@@ -174,11 +186,10 @@ class CharacterCreationVisuals:
             
             card_rect = pygame.Rect(x, card_y, card_width, card_height)
             
+            # Simple glow effect without alpha
             if is_selected:
-                glow_surf = pygame.Surface((card_width + 20, card_height + 20), pygame.SRCALPHA)
-                glow_color = (*race_theme["accent"], int(150 + 100 * math.sin(self.time * 3)))
-                pygame.draw.rect(glow_surf, glow_color, glow_surf.get_rect(), border_radius=20)
-                self.screen.blit(glow_surf, (x - 10, card_y - 10))
+                glow_rect = pygame.Rect(x - 6, card_y - 6, card_width + 12, card_height + 12)
+                pygame.draw.rect(self.screen, race_theme["accent"], glow_rect, 3, border_radius=18)
             
             bg_color = race_theme["bg_colors"][0] if not is_selected else tuple(min(255, c + 30) for c in race_theme["bg_colors"][0])
             pygame.draw.rect(self.screen, bg_color, card_rect, border_radius=15)
@@ -211,12 +222,15 @@ class CharacterCreationVisuals:
         width, height = self.screen.get_size()
         
         theme = self.CLASS_THEMES.get(selected_class or "Fighter", self.CLASS_THEMES["Fighter"])
-        self.draw_animated_background(theme["bg_colors"])
+        self._draw_static_background(theme["bg_colors"])
         
-        title_font = pygame.font.SysFont("Arial", 72, bold=True)
-        title = title_font.render("Choose Your Class", True, (255, 255, 220))
-        title_shadow = title_font.render("Choose Your Class", True, (0, 0, 0))
-        self.screen.blit(title_shadow, (width//2 - title.get_width()//2 + 4, 54))
+        # Cache font rendering
+        if "class_title" not in self._card_cache:
+            title_font = pygame.font.SysFont("Arial", 72, bold=True)
+            title = title_font.render("Choose Your Class", True, (255, 255, 220))
+            self._card_cache["class_title"] = title
+        
+        title = self._card_cache["class_title"]
         self.screen.blit(title, (width//2 - title.get_width()//2, 50))
         
         card_width = 280
@@ -234,11 +248,10 @@ class CharacterCreationVisuals:
             
             card_rect = pygame.Rect(x, card_y, card_width, card_height)
             
+            # Simple glow effect without alpha
             if is_selected:
-                glow_surf = pygame.Surface((card_width + 20, card_height + 20), pygame.SRCALPHA)
-                glow_color = (*class_theme["accent"], int(150 + 100 * math.sin(self.time * 3)))
-                pygame.draw.rect(glow_surf, glow_color, glow_surf.get_rect(), border_radius=20)
-                self.screen.blit(glow_surf, (x - 10, card_y - 10))
+                glow_rect = pygame.Rect(x - 6, card_y - 6, card_width + 12, card_height + 12)
+                pygame.draw.rect(self.screen, class_theme["accent"], glow_rect, 3, border_radius=18)
             
             bg_color = class_theme["bg_colors"][0] if not is_selected else tuple(min(255, c + 30) for c in class_theme["bg_colors"][0])
             pygame.draw.rect(self.screen, bg_color, card_rect, border_radius=15)
@@ -271,12 +284,15 @@ class CharacterCreationVisuals:
         width, height = self.screen.get_size()
         
         bg_colors = [(40, 50, 60), (50, 60, 70), (45, 55, 65)]
-        self.draw_animated_background(bg_colors)
+        self._draw_static_background(bg_colors)
         
-        title_font = pygame.font.SysFont("Arial", 72, bold=True)
-        title = title_font.render("Set Ability Scores", True, (255, 255, 220))
-        title_shadow = title_font.render("Set Ability Scores", True, (0, 0, 0))
-        self.screen.blit(title_shadow, (width//2 - title.get_width()//2 + 4, 54))
+        # Cache font rendering
+        if "ability_title" not in self._card_cache:
+            title_font = pygame.font.SysFont("Arial", 72, bold=True)
+            title = title_font.render("Set Ability Scores", True, (255, 255, 220))
+            self._card_cache["ability_title"] = title
+        
+        title = self._card_cache["ability_title"]
         self.screen.blit(title, (width//2 - title.get_width()//2, 50))
         
         points_font = pygame.font.SysFont("Arial", 48, bold=True)
@@ -318,10 +334,8 @@ class CharacterCreationVisuals:
             
             is_selected = ability == selected_ability
             if is_selected:
-                glow_surf = pygame.Surface((card_width + 16, card_height + 16), pygame.SRCALPHA)
-                glow_color = (255, 200, 100, int(150 + 100 * math.sin(self.time * 4)))
-                pygame.draw.rect(glow_surf, glow_color, glow_surf.get_rect(), border_radius=15)
-                self.screen.blit(glow_surf, (x - 8, y - 8))
+                glow_rect = pygame.Rect(x - 5, y - 5, card_width + 10, card_height + 10)
+                pygame.draw.rect(self.screen, (255, 200, 100), glow_rect, 3, border_radius=15)
             
             bg_color = (60, 70, 80) if not is_selected else (80, 90, 100)
             pygame.draw.rect(self.screen, bg_color, card_rect, border_radius=12)
@@ -356,15 +370,17 @@ class CharacterCreationVisuals:
         
         combined_colors = [
             tuple((race_theme["bg_colors"][0][i] + class_theme["bg_colors"][0][i]) // 2 for i in range(3)),
-            tuple((race_theme["bg_colors"][1][i] + class_theme["bg_colors"][1][i]) // 2 for i in range(3)),
-            tuple((race_theme["bg_colors"][2][i] + class_theme["bg_colors"][2][i]) // 2 for i in range(3))
+            tuple((race_theme["bg_colors"][1][i] + class_theme["bg_colors"][1][i]) // 2 for i in range(3))
         ]
-        self.draw_animated_background(combined_colors)
+        self._draw_static_background(combined_colors)
         
-        title_font = pygame.font.SysFont("Arial", 84, bold=True)
-        title = title_font.render("Hero Created!", True, (255, 255, 100))
-        title_shadow = title_font.render("Hero Created!", True, (0, 0, 0))
-        self.screen.blit(title_shadow, (width//2 - title.get_width()//2 + 4, 104))
+        # Cache font rendering
+        if "complete_title" not in self._card_cache:
+            title_font = pygame.font.SysFont("Arial", 84, bold=True)
+            title = title_font.render("Hero Created!", True, (255, 255, 100))
+            self._card_cache["complete_title"] = title
+        
+        title = self._card_cache["complete_title"]
         self.screen.blit(title, (width//2 - title.get_width()//2, 100))
         
         name_font = pygame.font.SysFont("Arial", 64, bold=True)
@@ -378,12 +394,6 @@ class CharacterCreationVisuals:
         desc_surf = desc_font.render(desc_text, True, (220, 220, 220))
         self.screen.blit(desc_surf, (width//2 - desc_surf.get_width()//2, height//2 + 30))
         
-        for i in range(5):
-            if random.random() > 0.7:
-                x = random.randint(0, width)
-                y = random.randint(0, height)
-                self.spawn_particles((x, y), race_theme["particle_color"], 2)
-                self.spawn_particles((x, y), class_theme["particle_color"], 2)
-        
+        # Draw existing particles only
         for p in self.particles:
             p.draw(self.screen)

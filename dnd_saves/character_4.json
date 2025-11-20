@@ -1,29 +1,29 @@
 {
-  "name": "Erik the Mighty",
+  "name": "Poppy Hilltopple",
   "player_color": [
     200,
     40,
     200
   ],
-  "race": "Human",
-  "char_class": "Fighter",
+  "race": "Halfling",
+  "char_class": "Rogue",
   "level": 1,
   "alignment": "",
   "abilities": {
-    "STR": 15,
-    "DEX": 10,
-    "CON": 15,
-    "INT": 10,
-    "WIS": 10,
-    "CHA": 11
+    "STR": 14,
+    "DEX": 12,
+    "CON": 12,
+    "INT": 12,
+    "WIS": 12,
+    "CHA": 12
   },
-  "max_hp": 10,
-  "current_hp": 10,
+  "max_hp": 8,
+  "current_hp": 8,
   "armor_class": 10,
   "skills": [
-    "Athletics",
-    "Intimidation",
-    "Survival"
+    "Stealth",
+    "Sleight of Hand",
+    "Acrobatics"
   ],
   "inventory": [],
   "gold": 0,

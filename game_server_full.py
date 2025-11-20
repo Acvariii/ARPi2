@@ -126,9 +126,7 @@ class GameServerWithTracking:
     
     async def game_loop(self):
         self.launcher = GameLauncher()
-        self.launcher.hand_tracker.stop()
-        
-        original_get_fingertips = self.launcher.get_fingertip_meta
+        self.launcher.screen = self.screen
         
         def get_combined_fingertips():
             combined = list(self.fingertip_data)
@@ -183,8 +181,10 @@ class GameServerWithTracking:
             
             pygame.display.update()
             
-            frame_data = await self.encode_frame()
-            await self.broadcast_frame(frame_data)
+            # Only encode/broadcast if there are connected clients
+            if self.clients:
+                frame_data = await self.encode_frame()
+                await self.broadcast_frame(frame_data)
             
             self.frame_count += 1
             current_time = time.time()
@@ -197,17 +197,16 @@ class GameServerWithTracking:
             await asyncio.sleep(1.0 / FPS)
     
     async def encode_frame(self) -> str:
-        frame_array = pygame.surfarray.array3d(self.screen)
-        frame_array = np.transpose(frame_array, (1, 0, 2))
-        frame_bgr = cv2.cvtColor(frame_array, cv2.COLOR_RGB2BGR)
+        # Fast frame capture using surfarray
+        frame_array = pygame.surfarray.pixels3d(self.screen)
+        frame_bgr = cv2.cvtColor(np.transpose(frame_array, (1, 0, 2)), cv2.COLOR_RGB2BGR)
         
-        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 85]
+        # Lower quality for faster encoding (clients only need video feed)
+        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 70]
         result, encoded_img = cv2.imencode('.jpg', frame_bgr, encode_param)
         
         if result:
-            frame_bytes = encoded_img.tobytes()
-            frame_base64 = base64.b64encode(frame_bytes).decode('utf-8')
-            return frame_base64
+            return base64.b64encode(encoded_img.tobytes()).decode('utf-8')
         return ""
     
     async def broadcast_frame(self, frame_data: str):
@@ -243,7 +242,8 @@ class GameServerWithTracking:
     
     def stop(self):
         self.running = False
-        self.hand_tracker.hands.close()
+        if self.hand_tracker and hasattr(self.hand_tracker, 'hands'):
+            self.hand_tracker.hands.close()
         pygame.quit()
 
 

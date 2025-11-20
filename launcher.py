@@ -4,26 +4,19 @@ from ui_components import HoverButton, draw_cursor, draw_circular_progress, Play
 from monopoly import MonopolyGame
 from blackjack import BlackjackGame
 from dnd import DnDGame
-from hand_tracking import HandTracker
-from config import SERVER_WS, WINDOW_SIZE, FPS, HOVER_TIME_THRESHOLD, Colors
+from config import WINDOW_SIZE, FPS, HOVER_TIME_THRESHOLD, Colors
 
 class GameLauncher:
-    """Main game launcher application."""
+    """Main game launcher application (used by game_server_full.py)."""
     
     def __init__(self):
-        pygame.init()
-        pygame.mouse.set_visible(False)
-        self.screen = pygame.display.set_mode(WINDOW_SIZE, pygame.FULLSCREEN | pygame.NOFRAME)
-        self.clock = pygame.time.Clock()
+        # Note: Pygame init and screen are handled by game_server_full.py
+        self.screen = None  # Will be set by server
         self.font = pygame.font.SysFont(None, max(32, int(WINDOW_SIZE[1] * 0.05)))
-        
-        # Hand tracking
-        self.hand_tracker = HandTracker(SERVER_WS)
-        self.hand_tracker.start()
         
         # UI state
         self.state = "menu"
-        self.selection_ui = PlayerSelectionUI(self.screen)
+        self.selection_ui = PlayerSelectionUI(pygame.display.get_surface()) if pygame.display.get_surface() else None
         self.current_game = None
         self.selected_game = None
         
@@ -54,15 +47,10 @@ class GameLauncher:
         return HoverButton(btn_rect, "Start", self.font)
 
     def get_fingertip_meta(self) -> List[Dict]:
-        """Get fingertip positions including mouse (for testing)."""
-        screen_w, screen_h = self.screen.get_size()
-        meta = self.hand_tracker.get_fingertips_for_screen(screen_w, screen_h)
-        
-        # Add mouse for testing
+        """Get fingertip positions. Override this method when using with server."""
+        # Default implementation for standalone use - just return mouse
         mouse_pos = pygame.mouse.get_pos()
-        meta.append({"pos": mouse_pos, "hand": -1, "name": "mouse"})
-        
-        return meta
+        return [{"pos": mouse_pos, "hand": -1, "name": "mouse"}]
 
     def handle_menu_state(self, fingertip_meta: List[Dict]):
         """Handle game menu screen."""
@@ -226,13 +214,23 @@ class GameLauncher:
 
     def cleanup(self):
         """Clean up resources."""
-        self.hand_tracker.stop()
         pygame.quit()
 
 
 def run_pygame():
-    """Entry point for launcher."""
+    """Standalone entry point for launcher (deprecated - use game_server_full.py instead)."""
+    print("WARNING: Standalone launcher is deprecated.")
+    print("Please use: python game_server_full.py")
+    print("\nStarting anyway with basic setup...")
+    
+    pygame.init()
+    pygame.mouse.set_visible(True)
+    screen = pygame.display.set_mode(WINDOW_SIZE)
+    pygame.display.set_caption("ARPi2 Game Launcher")
+    
     launcher = GameLauncher()
+    launcher.screen = screen
+    launcher.selection_ui = PlayerSelectionUI(screen)
     launcher.run()
 
 
