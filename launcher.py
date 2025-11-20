@@ -161,6 +161,10 @@ class GameLauncher:
     def handle_game_state(self, fingertip_meta: List[Dict]):
         """Handle active game screen."""
         if self.current_game is not None:
+            if hasattr(self.current_game, 'should_return_to_menu') and self.current_game.should_return_to_menu():
+                self.state = "menu"
+                self.current_game = None
+                return
             self.current_game.update(fingertip_meta)
             self.current_game.draw()
         else:

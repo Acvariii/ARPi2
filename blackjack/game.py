@@ -140,6 +140,11 @@ class BlackjackGame:
         self.phase = "betting"
         self.round_active = False
     
+    def should_return_to_menu(self) -> bool:
+        if not self.active_players:
+            return False
+        return all(self.players[i].is_sitting_out() for i in self.active_players)
+    
     def _new_round(self):
         self.deck = BlackjackLogic.create_deck()
         self.dealer_hand = []
@@ -273,6 +278,8 @@ class BlackjackGame:
             
             all_ready = all(self.players[i].is_ready for i in self.active_players)
             if all_ready and not self.round_active:
+                if self.should_return_to_menu():
+                    return
                 self._new_round()
         elif self.phase == "playing":
             for idx in self.active_players:
