@@ -48,9 +48,9 @@ class BlackjackGame:
         self.table_rect = pygame.Rect(table_x, table_y, table_size, table_size)
         
         self.dealer_area = pygame.Rect(
-            self.table_rect.centerx - 200,
-            self.table_rect.top + 40,
-            400, 120
+            self.table_rect.centerx - 150,
+            self.table_rect.centery - 60,
+            300, 120
         )
     
     def _init_buttons(self):
@@ -125,7 +125,7 @@ class BlackjackGame:
                 "bet5": HoverButton(r_hit, "$5", font, orientation=panel.orientation),
                 "bet25": HoverButton(r_stand, "$25", font, orientation=panel.orientation),
                 "bet100": HoverButton(r_double, "$100", font, orientation=panel.orientation),
-                "bet500": HoverButton(r_split, "$500", font, orientation=panel.orientation)
+                "skip": HoverButton(r_split, "Skip", font, orientation=panel.orientation)
             }
     
     def start_game(self, player_indices: List[int]):
@@ -145,17 +145,25 @@ class BlackjackGame:
         self.dealer_hand = []
         self.dealer_reveal = False
         
-        for idx in self.active_players:
+        playing_players = [i for i in self.active_players if not self.players[i].is_sitting_out()]
+        
+        if not playing_players:
+            self.phase = "betting"
+            for idx in self.active_players:
+                self.players[idx].current_bet = 0
+            return
+        
+        for idx in playing_players:
             player = self.players[idx]
             player.reset_hand()
         
-        for idx in self.active_players:
+        for idx in playing_players:
             player = self.players[idx]
             player.add_card(self.deck.pop())
         
         self.dealer_hand.append(self.deck.pop())
         
-        for idx in self.active_players:
+        for idx in playing_players:
             player = self.players[idx]
             player.add_card(self.deck.pop())
         
@@ -164,6 +172,9 @@ class BlackjackGame:
         self.phase = "playing"
         self.round_active = True
         self.current_player_idx = 0
+        
+        while self.current_player_idx < len(self.active_players) and self.players[self.active_players[self.current_player_idx]].is_sitting_out():
+            self.current_player_idx += 1
     
     def _hit(self, player: BlackjackPlayer):
         if len(self.deck) > 0:
@@ -200,6 +211,9 @@ class BlackjackGame:
     def _next_player(self):
         self.current_player_idx += 1
         
+        while self.current_player_idx < len(self.active_players) and self.players[self.active_players[self.current_player_idx]].is_sitting_out():
+            self.current_player_idx += 1
+        
         if self.current_player_idx >= len(self.active_players):
             self._dealer_turn()
     
@@ -218,6 +232,11 @@ class BlackjackGame:
         
         for idx in self.active_players:
             player = self.players[idx]
+            
+            if player.is_sitting_out():
+                player.current_bet = 0
+                continue
+            
             hand = player.get_current_hand()
             player_value = BlackjackLogic.hand_value(hand)
             
@@ -237,8 +256,6 @@ class BlackjackGame:
                 player.push_bet()
             else:
                 player.lose_bet()
-            
-            player.current_bet = 0
         
         self.phase = "betting"
         self.round_active = False
@@ -249,24 +266,24 @@ class BlackjackGame:
                 player = self.players[idx]
                 buttons = self.buttons[idx]
                 
-                if buttons["bet5"].update(fingertip_meta) and player.chips >= 5:
+                if buttons["bet5"].update(fingertip_meta, enabled=player.chips >= 5):
                     player.place_bet(5)
                     buttons["bet5"].reset()
                 
-                if buttons["bet25"].update(fingertip_meta) and player.chips >= 25:
+                if buttons["bet25"].update(fingertip_meta, enabled=player.chips >= 25):
                     player.place_bet(25)
                     buttons["bet25"].reset()
                 
-                if buttons["bet100"].update(fingertip_meta) and player.chips >= 100:
+                if buttons["bet100"].update(fingertip_meta, enabled=player.chips >= 100):
                     player.place_bet(100)
                     buttons["bet100"].reset()
                 
-                if buttons["bet500"].update(fingertip_meta) and player.chips >= 500:
-                    player.place_bet(500)
-                    buttons["bet500"].reset()
+                if buttons["skip"].update(fingertip_meta):
+                    player.skip_round()
+                    buttons["skip"].reset()
             
-            all_bet = all(self.players[i].current_bet > 0 for i in self.active_players)
-            if all_bet and not self.round_active:
+            all_decided = all(self.players[i].current_bet != 0 for i in self.active_players)
+            if all_decided and not self.round_active:
                 self._new_round()
         elif self.phase == "playing":
             if self.current_player_idx < len(self.active_players):
@@ -347,16 +364,18 @@ class BlackjackGame:
             if is_active:
                 font = pygame.font.SysFont("Arial", 18, bold=True)
                 
+                bet_display = "Sitting Out" if player.is_sitting_out() else f"Bet: ${player.current_bet}"
+                
                 if panel.orientation == 0:
                     info_rect = pygame.Rect(panel.rect.x + 10, panel.rect.y + 10,
                                            panel.rect.width - 20, int(panel.rect.height * 0.35))
-                    RotatedText.draw(self.screen, f"${player.chips} | Bet: ${player.current_bet}",
+                    RotatedText.draw(self.screen, f"${player.chips} | {bet_display}",
                                    font, Colors.BLACK, info_rect.center, panel.orientation)
                 elif panel.orientation == 180:
                     info_height = int(panel.rect.height * 0.45)
                     info_rect = pygame.Rect(panel.rect.x + 10, panel.rect.y + 10,
                                            panel.rect.width - 20, info_height - 20)
-                    RotatedText.draw(self.screen, f"${player.chips} | Bet: ${player.current_bet}",
+                    RotatedText.draw(self.screen, f"${player.chips} | {bet_display}",
                                    font, Colors.BLACK, info_rect.center, panel.orientation)
                 elif panel.orientation == 90:
                     info_width = int(panel.rect.width * 0.35)
@@ -364,7 +383,7 @@ class BlackjackGame:
                                            info_width - 10, panel.rect.height - 20)
                     RotatedText.draw_block(self.screen,
                                          [(f"${player.chips}", font, Colors.BLACK),
-                                          (f"Bet: ${player.current_bet}", font, Colors.BLACK)],
+                                          (bet_display, font, Colors.BLACK)],
                                          info_rect, panel.orientation, line_spacing=12)
                 else:
                     info_width = int(panel.rect.width * 0.35)
@@ -372,13 +391,22 @@ class BlackjackGame:
                                            info_width - 10, panel.rect.height - 20)
                     RotatedText.draw_block(self.screen,
                                          [(f"${player.chips}", font, Colors.BLACK),
-                                          (f"Bet: ${player.current_bet}", font, Colors.BLACK)],
+                                          (bet_display, font, Colors.BLACK)],
                                          info_rect, panel.orientation, line_spacing=12)
                 
                 if self.phase == "betting":
-                    bet_buttons = ["bet5", "bet25", "bet100", "bet500"]
-                    for btn_key in bet_buttons:
-                        self.buttons[idx][btn_key].draw(self.screen)
+                    if player.is_sitting_out():
+                        font_status = pygame.font.SysFont("Arial", 16, bold=True)
+                        if panel.orientation in [0, 180]:
+                            status_rect = pygame.Rect(panel.rect.x + 10, panel.rect.centery - 10, panel.rect.width - 20, 20)
+                            RotatedText.draw(self.screen, "Sitting Out", font_status, (150, 150, 150), status_rect.center, panel.orientation)
+                        else:
+                            status_rect = pygame.Rect(panel.rect.centerx - 10, panel.rect.y + 10, 20, panel.rect.height - 20)
+                            RotatedText.draw(self.screen, "Sitting Out", font_status, (150, 150, 150), status_rect.center, panel.orientation)
+                    else:
+                        bet_buttons = ["bet5", "bet25", "bet100", "skip"]
+                        for btn_key in bet_buttons:
+                            self.buttons[idx][btn_key].draw(self.screen)
                 elif self.phase == "playing" and is_current:
                     game_buttons = ["hit", "stand", "double", "split"]
                     for btn_key in game_buttons:
@@ -397,18 +425,22 @@ class BlackjackGame:
             return
         
         positions = [
-            (self.table_rect.centerx, self.table_rect.bottom - 60),
-            (self.table_rect.centerx - 180, self.table_rect.bottom - 60),
-            (self.table_rect.centerx + 180, self.table_rect.bottom - 60),
-            (self.table_rect.centerx, self.table_rect.top + 160),
-            (self.table_rect.centerx - 180, self.table_rect.top + 160),
-            (self.table_rect.centerx + 180, self.table_rect.top + 160),
-            (self.table_rect.left + 100, self.table_rect.centery),
-            (self.table_rect.right - 100, self.table_rect.centery),
+            (self.table_rect.centerx, self.table_rect.bottom - 80),
+            (self.table_rect.centerx - 200, self.table_rect.bottom - 80),
+            (self.table_rect.centerx + 200, self.table_rect.bottom - 80),
+            (self.table_rect.centerx, self.table_rect.top + 80),
+            (self.table_rect.centerx - 200, self.table_rect.top + 80),
+            (self.table_rect.centerx + 200, self.table_rect.top + 80),
+            (self.table_rect.left + 80, self.table_rect.centery),
+            (self.table_rect.right - 80, self.table_rect.centery),
         ]
         
         for idx in self.active_players:
             player = self.players[idx]
+            
+            if player.is_sitting_out():
+                continue
+            
             hand = player.get_current_hand()
             
             if len(hand) > 0:

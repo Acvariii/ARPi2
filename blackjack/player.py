@@ -14,9 +14,15 @@ class BlackjackPlayer:
     def place_bet(self, amount: int) -> bool:
         if amount <= self.chips and amount > 0:
             self.chips -= amount
-            self.current_bet = amount
+            self.current_bet += amount
             return True
         return False
+    
+    def skip_round(self):
+        self.current_bet = -1
+    
+    def is_sitting_out(self) -> bool:
+        return self.current_bet == -1
     
     def win_bet(self, multiplier: float = 2.0):
         winnings = int(self.current_bet * multiplier)
