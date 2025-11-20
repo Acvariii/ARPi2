@@ -448,7 +448,11 @@ class BlackjackGame:
                 hand_width = CardDrawer.get_hand_width(len(hand), 15)
                 start_x = px - hand_width // 2
                 
-                CardDrawer.draw_hand(self.screen, hand, start_x, py, spacing=15)
+                bg_rect = pygame.Rect(start_x - 10, py - 35, hand_width + 20, CardDrawer.CARD_HEIGHT + 50)
+                pygame.draw.rect(self.screen, (*player.color, 100), bg_rect, border_radius=8)
+                pygame.draw.rect(self.screen, player.color, bg_rect, width=3, border_radius=8)
+                
+                CardDrawer.draw_hand(self.screen, hand, start_x, py, spacing=15, outline_color=player.color)
                 
                 hand_value = BlackjackLogic.hand_value(hand)
                 font_value = pygame.font.SysFont(None, 24, bold=True)
