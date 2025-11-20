@@ -6,10 +6,9 @@ from config import PLAYER_COLORS, Colors
 from player_panel import calculate_all_panels
 from ui_components import HoverButton, RotatedText
 
-from dnd.character import Character, RACES, CLASSES, ALIGNMENTS, generate_character_name
+from dnd.character import Character, RACES, CLASSES, ALIGNMENTS, ABILITY_SCORES, CLASS_SKILLS
 from dnd.game_logic import DiceRoller, CombatManager, SkillChecker
 from dnd.drawing import CharacterSheetDrawer, DiceVisualizer, CombatDisplay
-from dnd.creation_visuals import CharacterCreationVisuals
 
 
 class DnDGame:
@@ -29,25 +28,22 @@ class DnDGame:
         self.phase = "load_create"
         self.current_player_idx = 0
         
-        self.creation_step = ""
+        self.creation_step = "name"
         self.temp_character = None
+        self.input_text = ""
         self.ability_points_remaining = 27
-        self.selected_ability = None
         
         self.dice_roller = DiceRoller()
         self.combat_manager = CombatManager()
         self.char_drawer = CharacterSheetDrawer(self.screen)
         self.dice_viz = DiceVisualizer(self.screen)
         self.combat_display = CombatDisplay(self.screen)
-        self.creation_viz = CharacterCreationVisuals(self.screen)
         
         self.last_roll_result = None
         self.last_roll_time = 0
         
         self.dm_text = "Welcome to the adventure!"
         self.dm_text_scroll = 0
-        
-        self.last_frame_time = time.time()
         
         self._init_buttons()
     
@@ -137,12 +133,6 @@ class DnDGame:
         self.current_player_idx = 0
     
     def update(self, fingertip_meta: List[Dict]):
-        current_time = time.time()
-        dt = min(current_time - self.last_frame_time, 0.1)
-        self.last_frame_time = current_time
-        
-        self.creation_viz.update(dt)
-        
         if self.phase == "load_create":
             self._update_load_create_phase(fingertip_meta)
         elif self.phase == "character_creation":
@@ -173,178 +163,94 @@ class DnDGame:
     def _start_character_creation(self, player_idx: int):
         self.current_player_idx = player_idx
         self.temp_character = Character("", PLAYER_COLORS[player_idx])
-        self.temp_character.abilities = {"STR": 8, "DEX": 8, "CON": 8, "INT": 8, "WIS": 8, "CHA": 8}
-        self.creation_step = "race"
+        self.creation_step = "name"
+        self.input_text = ""
         self.ability_points_remaining = 27
-        self.selected_ability = None
         self.phase = "character_creation"
     
     def _update_character_creation(self, fingertip_meta: List[Dict]):
-        width, height = self.screen_size
+        idx = self.current_player_idx
+        buttons = self.buttons[idx]
         
-        if self.creation_step == "race":
-            card_width = 280
-            card_height = 380
-            spacing = 30
-            total_width = len(RACES) * card_width + (len(RACES) - 1) * spacing
-            start_x = (width - total_width) // 2
-            card_y = height // 2 - card_height // 2 + 50
-            
-            for i, race in enumerate(RACES):
-                x = start_x + i * (card_width + spacing)
-                card_rect = pygame.Rect(x, card_y, card_width, card_height)
-                
-                for meta in fingertip_meta:
-                    if card_rect.collidepoint(meta["pos"]):
-                        self.temp_character.race = race
-                        self.creation_viz.spawn_particles(meta["pos"], self.creation_viz.RACE_THEMES[race]["particle_color"], 5)
-                        self.creation_step = "class"
-                        break
+        if self.creation_step == "name":
+            buttons["btn1"].text = "Next"
+            if buttons["btn1"].update(fingertip_meta, enabled=len(self.input_text) > 0):
+                self.temp_character.name = self.input_text
+                self.creation_step = "race"
+                buttons["btn1"].reset()
+        
+        elif self.creation_step == "race":
+            buttons["btn1"].text = "Prev"
+            buttons["btn2"].text = "Next"
+            if buttons["btn1"].update(fingertip_meta):
+                self.creation_step = "name"
+                buttons["btn1"].reset()
+            if buttons["btn2"].update(fingertip_meta, enabled=self.temp_character.race != ""):
+                self.creation_step = "class"
+                buttons["btn2"].reset()
         
         elif self.creation_step == "class":
-            card_width = 280
-            card_height = 380
-            spacing = 30
-            total_width = len(CLASSES) * card_width + (len(CLASSES) - 1) * spacing
-            start_x = (width - total_width) // 2
-            card_y = height // 2 - card_height // 2 + 50
-            
-            for i, cls in enumerate(CLASSES):
-                x = start_x + i * (card_width + spacing)
-                card_rect = pygame.Rect(x, card_y, card_width, card_height)
-                
-                for meta in fingertip_meta:
-                    if card_rect.collidepoint(meta["pos"]):
-                        self.temp_character.char_class = cls
-                        self.temp_character.name = generate_character_name(self.temp_character.race, cls)
-                        from dnd.character import CLASS_SKILLS
-                        self.temp_character.skills = CLASS_SKILLS.get(cls, [])
-                        self.creation_viz.spawn_particles(meta["pos"], self.creation_viz.CLASS_THEMES[cls]["particle_color"], 5)
-                        self.creation_step = "abilities"
-                        break
+            buttons["btn1"].text = "Prev"
+            buttons["btn2"].text = "Next"
+            if buttons["btn1"].update(fingertip_meta):
+                self.creation_step = "race"
+                buttons["btn1"].reset()
+            if buttons["btn2"].update(fingertip_meta, enabled=self.temp_character.char_class != ""):
+                self.creation_step = "abilities"
+                buttons["btn2"].reset()
         
         elif self.creation_step == "abilities":
-            ability_names = ["STR", "DEX", "CON", "INT", "WIS", "CHA"]
-            card_width = 220
-            card_height = 180
-            spacing = 40
-            cols = 3
-            rows = 2
-            
-            total_width = cols * card_width + (cols - 1) * spacing
-            total_height = rows * card_height + (rows - 1) * spacing
-            start_x = (width - total_width) // 2
-            start_y = (height - total_height) // 2 + 80
-            
-            for i, ability in enumerate(ability_names):
-                row = i // cols
-                col = i % cols
-                x = start_x + col * (card_width + spacing)
-                y = start_y + row * (card_height + spacing)
-                card_rect = pygame.Rect(x, y, card_width, card_height)
-                
-                for meta in fingertip_meta:
-                    if card_rect.collidepoint(meta["pos"]):
-                        if self.temp_character.abilities[ability] < 15 and self.ability_points_remaining > 0:
-                            cost = 1 if self.temp_character.abilities[ability] < 13 else 2
-                            if cost <= self.ability_points_remaining:
-                                self.temp_character.abilities[ability] += 1
-                                self.ability_points_remaining -= cost
-                                self.selected_ability = ability
-                                self.creation_viz.spawn_particles(meta["pos"], (100, 255, 100), 3)
-                        break
-            
-            if self.ability_points_remaining == 0:
-                proceed_rect = pygame.Rect(width // 2 - 150, height - 120, 300, 80)
-                for meta in fingertip_meta:
-                    if proceed_rect.collidepoint(meta["pos"]):
-                        self.temp_character.calculate_hp()
-                        self.temp_character.calculate_ac()
-                        self.creation_step = "complete"
-                        self.creation_viz.spawn_particles((width // 2, height // 2), PLAYER_COLORS[self.current_player_idx], 10)
-                        break
+            buttons["btn1"].text = "Prev"
+            buttons["btn2"].text = "Next"
+            if buttons["btn1"].update(fingertip_meta):
+                self.creation_step = "class"
+                buttons["btn1"].reset()
+            if buttons["btn2"].update(fingertip_meta, enabled=self.ability_points_remaining == 0):
+                self.temp_character.skills = CLASS_SKILLS.get(self.temp_character.char_class, [])
+                self.temp_character.calculate_hp()
+                self.temp_character.calculate_ac()
+                self.creation_step = "alignment"
+                buttons["btn2"].reset()
         
-        elif self.creation_step == "complete":
-            proceed_rect = pygame.Rect(width // 2 - 150, height - 120, 300, 80)
-            for meta in fingertip_meta:
-                if proceed_rect.collidepoint(meta["pos"]):
-                    self.characters[self.current_player_idx] = self.temp_character
-                    self.characters[self.current_player_idx].save_to_file(self.current_player_idx)
-                    self.temp_character = None
-                    self.phase = "load_create"
-                    break
+        elif self.creation_step == "alignment":
+            buttons["btn1"].text = "Prev"
+            buttons["btn2"].text = "Finish"
+            if buttons["btn1"].update(fingertip_meta):
+                self.creation_step = "abilities"
+                buttons["btn1"].reset()
+            if buttons["btn2"].update(fingertip_meta, enabled=self.temp_character.alignment != ""):
+                self.characters[idx] = self.temp_character
+                self.characters[idx].save_to_file(idx)
+                self.temp_character = None
+                self.phase = "load_create"
+                buttons["btn2"].reset()
     
     def _update_playing_phase(self, fingertip_meta: List[Dict]):
         for idx in self.active_players:
             buttons = self.buttons[idx]
             
             buttons["btn1"].text = "Sheet"
-            buttons["btn2"].text = "Action"
-            buttons["btn3"].text = "Roll"
+            buttons["btn2"].text = "Roll"
+            buttons["btn3"].text = "Action"
             
-            if buttons["btn3"].update(fingertip_meta, enabled=idx != 7):
+            if buttons["btn2"].update(fingertip_meta, enabled=idx != 7):
                 roll = self.dice_roller.roll_d20()
                 self.last_roll_result = {"player": idx, "value": roll, "modifier": 0}
                 self.last_roll_time = time.time()
-                buttons["btn3"].reset()
+                buttons["btn2"].reset()
     
     def draw(self):
         self.screen.fill((25, 35, 25))
         
-        if self.phase == "character_creation":
-            self._draw_character_creation()
-        else:
-            self._draw_center_area()
-            self._draw_panels()
+        self._draw_center_area()
+        self._draw_panels()
         
-        if self.last_roll_result and time.time() - self.last_roll_time < 3 and self.phase == "playing":
+        if self.last_roll_result and time.time() - self.last_roll_time < 3:
             center = (self.screen_size[0] // 2, self.screen_size[1] // 2)
             self.dice_viz.draw_d20_roll(center, self.last_roll_result["value"], 
                                         self.last_roll_result["modifier"])
         
-        if self.phase != "character_creation":
-            self._draw_cursors()
-    
-    def _draw_character_creation(self):
-        idx = self.current_player_idx
-        player_color = PLAYER_COLORS[idx]
-        
-        if self.creation_step == "race":
-            self.creation_viz.draw_race_selection(self.temp_character.race, RACES, player_color)
-        elif self.creation_step == "class":
-            self.creation_viz.draw_class_selection(self.temp_character.char_class, CLASSES, player_color)
-        elif self.creation_step == "abilities":
-            self.creation_viz.draw_ability_scores(self.temp_character.abilities, self.ability_points_remaining, self.selected_ability)
-            
-            if self.ability_points_remaining == 0:
-                width, height = self.screen_size
-                proceed_rect = pygame.Rect(width // 2 - 150, height - 120, 300, 80)
-                pygame.draw.rect(self.screen, (100, 200, 100), proceed_rect, border_radius=12)
-                pygame.draw.rect(self.screen, (150, 255, 150), proceed_rect, 4, border_radius=12)
-                
-                font = pygame.font.SysFont("Arial", 32, bold=True)
-                text = font.render("Continue", True, Colors.WHITE)
-                self.screen.blit(text, (proceed_rect.centerx - text.get_width()//2, proceed_rect.centery - text.get_height()//2))
-        
-        elif self.creation_step == "complete":
-            self.creation_viz.draw_character_complete(
-                self.temp_character.name,
-                self.temp_character.race,
-                self.temp_character.char_class,
-                player_color
-            )
-            
-            width, height = self.screen_size
-            proceed_rect = pygame.Rect(width // 2 - 150, height - 120, 300, 80)
-            pygame.draw.rect(self.screen, (100, 200, 100), proceed_rect, border_radius=12)
-            pygame.draw.rect(self.screen, (150, 255, 150), proceed_rect, 4, border_radius=12)
-            
-            font = pygame.font.SysFont("Arial", 32, bold=True)
-            text = font.render("Finish", True, Colors.WHITE)
-            self.screen.blit(text, (proceed_rect.centerx - text.get_width()//2, proceed_rect.centery - text.get_height()//2))
-        
-        for p in self.creation_viz.particles:
-            p.draw(self.screen)
+        self._draw_cursors()
     
     def _draw_center_area(self):
         w, h = self.screen_size
@@ -423,8 +329,9 @@ class DnDGame:
                         
                         if self.phase == "load_create":
                             for btn in self.buttons[idx].values():
-                                if btn.text in ["Load", "Create"]:
-                                    btn.draw(self.screen)
+                                btn.draw(self.screen)
+                        elif self.phase == "character_creation" and idx == self.current_player_idx:
+                            self._draw_creation_ui(panel)
                         elif self.phase == "playing":
                             for btn in self.buttons[idx].values():
                                 btn.draw(self.screen)
@@ -480,6 +387,53 @@ class DnDGame:
             for btn in self.buttons[idx].values():
                 btn.draw(self.screen)
     
+    def _draw_creation_ui(self, panel):
+        overlay = pygame.Surface(panel.rect.size, pygame.SRCALPHA)
+        overlay.fill((10, 10, 20, 240))
+        self.screen.blit(overlay, panel.rect)
+        
+        font_title = pygame.font.SysFont("Arial", 18, bold=True)
+        font_text = pygame.font.SysFont("Arial", 14)
+        
+        content_rect = pygame.Rect(panel.rect.x + 10, panel.rect.y + 10,
+                                   panel.rect.width - 20, panel.rect.height - 80)
+        
+        if self.creation_step == "name":
+            lines = [
+                ("Enter Name:", font_title, (255, 215, 0)),
+                (self.input_text + "_", font_text, Colors.WHITE)
+            ]
+        elif self.creation_step == "race":
+            lines = [("Select Race:", font_title, (255, 215, 0))]
+            for race in RACES:
+                color = (100, 255, 100) if self.temp_character.race == race else Colors.WHITE
+                lines.append((race, font_text, color))
+        elif self.creation_step == "class":
+            lines = [("Select Class:", font_title, (255, 215, 0))]
+            for cls in CLASSES:
+                color = (100, 255, 100) if self.temp_character.char_class == cls else Colors.WHITE
+                lines.append((cls, font_text, color))
+        elif self.creation_step == "abilities":
+            lines = [
+                ("Set Abilities:", font_title, (255, 215, 0)),
+                (f"Points: {self.ability_points_remaining}", font_text, (255, 215, 0))
+            ]
+            for ability, score in self.temp_character.abilities.items():
+                lines.append((f"{ability}: {score}", font_text, Colors.WHITE))
+        elif self.creation_step == "alignment":
+            lines = [("Select Alignment:", font_title, (255, 215, 0))]
+            for alignment in ALIGNMENTS[:6]:
+                color = (100, 255, 100) if self.temp_character.alignment == alignment else Colors.WHITE
+                lines.append((alignment, font_text, color))
+        else:
+            lines = []
+        
+        RotatedText.draw_block(self.screen, lines, content_rect, panel.orientation, 
+                             line_spacing=14, wrap=False)
+        
+        for btn in self.buttons[self.current_player_idx].values():
+            btn.draw(self.screen)
+    
     def _draw_cursors(self):
         from ui_components import draw_cursor
         
@@ -501,4 +455,10 @@ class DnDGame:
             draw_cursor(self.screen, pos, closest_color)
     
     def handle_text_input(self, event):
-        pass
+        if self.phase == "character_creation" and self.creation_step == "name":
+            if event.key == pygame.K_BACKSPACE:
+                self.input_text = self.input_text[:-1]
+            elif event.key == pygame.K_RETURN:
+                pass
+            elif len(self.input_text) < 20:
+                self.input_text += event.unicode

@@ -1,9 +1,60 @@
 import json
 import os
+import random
 from typing import Dict, List, Optional
 
 RACES = ["Human", "Elf", "Dwarf", "Halfling", "Orc", "Tiefling"]
 CLASSES = ["Fighter", "Wizard", "Rogue", "Cleric", "Ranger", "Paladin"]
+
+RACE_NAMES = {
+    "Human": {
+        "first": ["Aldric", "Brenna", "Cedric", "Diana", "Erik", "Fiona", "Gareth", "Helena", "Ivan", "Jade"],
+        "last": ["Ironheart", "Stormwind", "Blackwood", "Silverstone", "Goldleaf", "Brightblade", "Darkwater", "Swiftarrow"]
+    },
+    "Elf": {
+        "first": ["Aelrindel", "Sylvari", "Thranduil", "Elaria", "Caladrel", "Liriel", "Galadon", "Aria", "Eldrin", "Mirial"],
+        "last": ["Moonwhisper", "Starweaver", "Leafdancer", "Sunfire", "Nightbreeze", "Dawnstrider", "Shadowleaf", "Skysong"]
+    },
+    "Dwarf": {
+        "first": ["Thorin", "Gimli", "Balin", "Dwalin", "Bombur", "Bofur", "Grilda", "Helga", "Kathra", "Vistra"],
+        "last": ["Ironforge", "Stonefist", "Hammerstrike", "Axebreaker", "Goldbeard", "Rockhelm", "Steelshield", "Fireborn"]
+    },
+    "Halfling": {
+        "first": ["Pippin", "Merry", "Bilbo", "Rosie", "Daisy", "Willow", "Bramble", "Clover", "Finnegan", "Poppy"],
+        "last": ["Goodbarrel", "Lightfoot", "Underbough", "Tealeaf", "Thornburrow", "Greenbottle", "Hilltopple", "Meadowbrook"]
+    },
+    "Orc": {
+        "first": ["Grommash", "Thrall", "Durotan", "Garrosh", "Grok", "Urzul", "Shakara", "Zugra", "Gorza", "Krazh"],
+        "last": ["Bloodfang", "Skullcrusher", "Warmaker", "Bonegrinder", "Ironclaw", "Thunderfist", "Blacktooth", "Ashbringer"]
+    },
+    "Tiefling": {
+        "first": ["Zariel", "Mephistopheles", "Ashlyn", "Brimstone", "Crimson", "Ember", "Inferno", "Raven", "Sable", "Vesper"],
+        "last": ["Hellfire", "Soulforge", "Darkflame", "Shadowhorn", "Crimsonwing", "Nightfall", "Doomcaller", "Voidwalker"]
+    }
+}
+
+CLASS_TITLES = {
+    "Fighter": ["the Bold", "the Brave", "the Mighty", "the Valiant", "the Fearless", "the Champion"],
+    "Wizard": ["the Wise", "the Arcane", "the Mystic", "the Enlightened", "the Scholarly", "the Spellweaver"],
+    "Rogue": ["the Swift", "the Shadow", "the Cunning", "the Silent", "the Sly", "the Phantom"],
+    "Cleric": ["the Blessed", "the Faithful", "the Divine", "the Holy", "the Righteous", "the Devoted"],
+    "Ranger": ["the Tracker", "the Hunter", "the Wild", "the Wanderer", "the Scout", "the Pathfinder"],
+    "Paladin": ["the Just", "the Defender", "the Noble", "the Crusader", "the Guardian", "the Lightbringer"]
+}
+
+def generate_character_name(race: str, char_class: str) -> str:
+    if race not in RACE_NAMES:
+        return "Unknown Hero"
+    
+    first_name = random.choice(RACE_NAMES[race]["first"])
+    
+    use_title = random.random() > 0.5
+    if use_title and char_class in CLASS_TITLES:
+        title = random.choice(CLASS_TITLES[char_class])
+        return f"{first_name} {title}"
+    else:
+        last_name = random.choice(RACE_NAMES[race]["last"])
+        return f"{first_name} {last_name}"
 ALIGNMENTS = ["Lawful Good", "Neutral Good", "Chaotic Good", "Lawful Neutral", "True Neutral", "Chaotic Neutral", "Lawful Evil", "Neutral Evil", "Chaotic Evil"]
 
 ABILITY_SCORES = ["Strength", "Dexterity", "Constitution", "Intelligence", "Wisdom", "Charisma"]

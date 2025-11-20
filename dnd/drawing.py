@@ -1,4 +1,6 @@
 import pygame
+import random
+import math
 from typing import List, Tuple, Dict
 from config import Colors
 from ui_components import RotatedText
