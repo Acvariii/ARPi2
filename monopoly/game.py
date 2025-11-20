@@ -148,7 +148,8 @@ class MonopolyGame:
             elif panel.orientation == 180:
                 info_height_frac = 0.45
                 button_area_height = int(panel.rect.height * (1 - info_height_frac))
-                y = panel.rect.y
+                info_area_height = int(panel.rect.height * info_height_frac)
+                y = panel.rect.y + info_area_height
                 x = panel.rect.x + margin
                 avail_w = panel.rect.width - 2 * margin
                 btn_w = (avail_w - 2 * gap) // 3
@@ -172,7 +173,8 @@ class MonopolyGame:
             else:
                 info_width_frac = 0.35
                 button_area_width = int(panel.rect.width * (1 - info_width_frac))
-                x = panel.rect.x
+                info_area_width = int(panel.rect.width * info_width_frac)
+                x = panel.rect.x + info_area_width
                 y = panel.rect.y + margin
                 avail_h = panel.rect.height - 2 * margin
                 btn_h = (avail_h - 2 * gap) // 3
@@ -203,10 +205,10 @@ class MonopolyGame:
             col_w = int(panel.rect.width * 0.28)
             col_h = panel.rect.height - 2 * margin
             x = panel.rect.x + margin
-            y = panel.rect.y + margin
+            y_bottom = panel.rect.bottom - margin
             btn_h = (col_h - (count - 1) * gap) // count
             btn_w = col_w
-            rects = [pygame.Rect(x, y + i * (btn_h + gap), btn_w, btn_h) for i in range(count)]
+            rects = [pygame.Rect(x, y_bottom - (i + 1) * btn_h - i * gap, btn_w, btn_h) for i in range(count)]
         elif panel.orientation == 90:
             col_h = int(panel.rect.height * 0.28)
             col_w = panel.rect.width - 2 * margin
@@ -219,10 +221,10 @@ class MonopolyGame:
             col_h = int(panel.rect.height * 0.28)
             col_w = panel.rect.width - 2 * margin
             y = panel.rect.y + margin
-            x = panel.rect.x + margin
+            x_right = panel.rect.right - margin
             btn_w = (col_w - (count - 1) * gap) // count
             btn_h = col_h
-            rects = [pygame.Rect(x + i * (btn_w + gap), y, btn_w, btn_h) for i in range(count)]
+            rects = [pygame.Rect(x_right - (i + 1) * btn_w - i * gap, y, btn_w, btn_h) for i in range(count)]
         
         if small:
             for r in rects:
@@ -606,7 +608,7 @@ class MonopolyGame:
                     btn_area_height = panel.rect.height - info_height
                     info_rect = pygame.Rect(
                         panel.rect.x + 10,
-                        panel.rect.y + btn_area_height + 10,
+                        panel.rect.y + 10,
                         panel.rect.width - 20,
                         info_height - 20
                     )
@@ -633,11 +635,10 @@ class MonopolyGame:
                     )
                 else:
                     info_width = int(panel.rect.width * 0.35)
-                    btn_area_width = panel.rect.width - info_width
                     info_rect = pygame.Rect(
-                        panel.rect.x + btn_area_width + 10,
+                        panel.rect.x + 10,
                         panel.rect.y + 10,
-                        info_width - 20,
+                        info_width - 10,
                         panel.rect.height - 20
                     )
                     RotatedText.draw_block(
