@@ -10,6 +10,8 @@ from dnd.character import Character, RACES, CLASSES, ALIGNMENTS, generate_charac
 from dnd.game_logic import DiceRoller, CombatManager, SkillChecker
 from dnd.drawing import CharacterSheetDrawer, DiceVisualizer, CombatDisplay
 from dnd.creation_visuals import CharacterCreationVisuals
+from ui_components import draw_circular_progress
+from config import HOVER_TIME_THRESHOLD
 
 
 class DnDGame:
@@ -33,6 +35,8 @@ class DnDGame:
         self.temp_character = None
         self.ability_points_remaining = 27
         self.selected_ability = None
+        
+        self.hover_states: Dict[str, Dict] = {}
         
         self.dice_roller = DiceRoller()
         self.combat_manager = CombatManager()
@@ -177,10 +181,12 @@ class DnDGame:
         self.creation_step = "race"
         self.ability_points_remaining = 27
         self.selected_ability = None
+        self.hover_states = {}
         self.phase = "character_creation"
     
     def _update_character_creation(self, fingertip_meta: List[Dict]):
         width, height = self.screen_size
+        current_time = time.time()
         
         if self.creation_step == "race":
             card_width = 280
@@ -190,16 +196,34 @@ class DnDGame:
             start_x = (width - total_width) // 2
             card_y = height // 2 - card_height // 2 + 50
             
+            active_hovers = set()
+            
             for i, race in enumerate(RACES):
                 x = start_x + i * (card_width + spacing)
                 card_rect = pygame.Rect(x, card_y, card_width, card_height)
+                key = f"race_{race}"
                 
+                is_hovering = False
                 for meta in fingertip_meta:
                     if card_rect.collidepoint(meta["pos"]):
-                        self.temp_character.race = race
-                        self.creation_viz.spawn_particles(meta["pos"], self.creation_viz.RACE_THEMES[race]["particle_color"], 5)
-                        self.creation_step = "class"
+                        is_hovering = True
+                        active_hovers.add(key)
+                        
+                        if key not in self.hover_states:
+                            self.hover_states[key] = {"start_time": current_time, "pos": meta["pos"]}
+                        
+                        hover_duration = current_time - self.hover_states[key]["start_time"]
+                        if hover_duration >= HOVER_TIME_THRESHOLD:
+                            self.temp_character.race = race
+                            self.creation_viz.spawn_particles(meta["pos"], self.creation_viz.RACE_THEMES[race]["particle_color"], 5)
+                            self.creation_step = "class"
+                            self.hover_states = {}
+                            break
                         break
+            
+            for key in list(self.hover_states.keys()):
+                if key not in active_hovers:
+                    del self.hover_states[key]
         
         elif self.creation_step == "class":
             card_width = 280
@@ -209,19 +233,37 @@ class DnDGame:
             start_x = (width - total_width) // 2
             card_y = height // 2 - card_height // 2 + 50
             
+            active_hovers = set()
+            
             for i, cls in enumerate(CLASSES):
                 x = start_x + i * (card_width + spacing)
                 card_rect = pygame.Rect(x, card_y, card_width, card_height)
+                key = f"class_{cls}"
                 
+                is_hovering = False
                 for meta in fingertip_meta:
                     if card_rect.collidepoint(meta["pos"]):
-                        self.temp_character.char_class = cls
-                        self.temp_character.name = generate_character_name(self.temp_character.race, cls)
-                        from dnd.character import CLASS_SKILLS
-                        self.temp_character.skills = CLASS_SKILLS.get(cls, [])
-                        self.creation_viz.spawn_particles(meta["pos"], self.creation_viz.CLASS_THEMES[cls]["particle_color"], 5)
-                        self.creation_step = "abilities"
+                        is_hovering = True
+                        active_hovers.add(key)
+                        
+                        if key not in self.hover_states:
+                            self.hover_states[key] = {"start_time": current_time, "pos": meta["pos"]}
+                        
+                        hover_duration = current_time - self.hover_states[key]["start_time"]
+                        if hover_duration >= HOVER_TIME_THRESHOLD:
+                            self.temp_character.char_class = cls
+                            self.temp_character.name = generate_character_name(self.temp_character.race, cls)
+                            from dnd.character import CLASS_SKILLS
+                            self.temp_character.skills = CLASS_SKILLS.get(cls, [])
+                            self.creation_viz.spawn_particles(meta["pos"], self.creation_viz.CLASS_THEMES[cls]["particle_color"], 5)
+                            self.creation_step = "abilities"
+                            self.hover_states = {}
+                            break
                         break
+            
+            for key in list(self.hover_states.keys()):
+                if key not in active_hovers:
+                    del self.hover_states[key]
         
         elif self.creation_step == "abilities":
             ability_names = ["STR", "DEX", "CON", "INT", "WIS", "CHA"]
@@ -236,43 +278,84 @@ class DnDGame:
             start_x = (width - total_width) // 2
             start_y = (height - total_height) // 2 + 80
             
+            active_hovers = set()
+            
             for i, ability in enumerate(ability_names):
                 row = i // cols
                 col = i % cols
                 x = start_x + col * (card_width + spacing)
                 y = start_y + row * (card_height + spacing)
                 card_rect = pygame.Rect(x, y, card_width, card_height)
+                key = f"ability_{ability}"
                 
                 for meta in fingertip_meta:
                     if card_rect.collidepoint(meta["pos"]):
                         if self.temp_character.abilities[ability] < 15 and self.ability_points_remaining > 0:
                             cost = 1 if self.temp_character.abilities[ability] < 13 else 2
                             if cost <= self.ability_points_remaining:
-                                self.temp_character.abilities[ability] += 1
-                                self.ability_points_remaining -= cost
-                                self.selected_ability = ability
-                                self.creation_viz.spawn_particles(meta["pos"], (100, 255, 100), 3)
+                                active_hovers.add(key)
+                                
+                                if key not in self.hover_states:
+                                    self.hover_states[key] = {"start_time": current_time, "pos": meta["pos"]}
+                                
+                                hover_duration = current_time - self.hover_states[key]["start_time"]
+                                if hover_duration >= HOVER_TIME_THRESHOLD:
+                                    self.temp_character.abilities[ability] += 1
+                                    self.ability_points_remaining -= cost
+                                    self.selected_ability = ability
+                                    self.creation_viz.spawn_particles(meta["pos"], (100, 255, 100), 3)
+                                    del self.hover_states[key]
                         break
             
             if self.ability_points_remaining == 0:
                 proceed_rect = pygame.Rect(width // 2 - 150, height - 120, 300, 80)
+                key = "proceed_abilities"
+                
                 for meta in fingertip_meta:
                     if proceed_rect.collidepoint(meta["pos"]):
-                        self.temp_character.calculate_hp()
-                        self.temp_character.calculate_ac()
-                        self.creation_step = "complete"
-                        self.creation_viz.spawn_particles((width // 2, height // 2), PLAYER_COLORS[self.current_player_idx], 10)
+                        active_hovers.add(key)
+                        
+                        if key not in self.hover_states:
+                            self.hover_states[key] = {"start_time": current_time, "pos": meta["pos"]}
+                        
+                        hover_duration = current_time - self.hover_states[key]["start_time"]
+                        if hover_duration >= HOVER_TIME_THRESHOLD:
+                            self.temp_character.calculate_hp()
+                            self.temp_character.calculate_ac()
+                            self.creation_step = "complete"
+                            self.creation_viz.spawn_particles((width // 2, height // 2), PLAYER_COLORS[self.current_player_idx], 10)
+                            self.hover_states = {}
                         break
+            
+            for key in list(self.hover_states.keys()):
+                if key not in active_hovers:
+                    del self.hover_states[key]
         
         elif self.creation_step == "complete":
             proceed_rect = pygame.Rect(width // 2 - 150, height - 120, 300, 80)
+            key = "proceed_complete"
+            
+            active_hovers = set()
+            
             for meta in fingertip_meta:
                 if proceed_rect.collidepoint(meta["pos"]):
-                    self.characters[self.current_player_idx] = self.temp_character
-                    self.characters[self.current_player_idx].save_to_file(self.current_player_idx)
-                    self.temp_character = None
-                    self.phase = "load_create"
+                    active_hovers.add(key)
+                    
+                    if key not in self.hover_states:
+                        self.hover_states[key] = {"start_time": current_time, "pos": meta["pos"]}
+                    
+                    hover_duration = current_time - self.hover_states[key]["start_time"]
+                    if hover_duration >= HOVER_TIME_THRESHOLD:
+                        self.characters[self.current_player_idx] = self.temp_character
+                        self.characters[self.current_player_idx].save_to_file(self.current_player_idx)
+                        self.temp_character = None
+                        self.phase = "load_create"
+                        self.hover_states = {}
                     break
+            
+            for key in list(self.hover_states.keys()):
+                if key not in active_hovers:
+                    del self.hover_states[key]
     
     def _update_playing_phase(self, fingertip_meta: List[Dict]):
         for idx in self.active_players:
@@ -308,16 +391,78 @@ class DnDGame:
     def _draw_character_creation(self):
         idx = self.current_player_idx
         player_color = PLAYER_COLORS[idx]
+        current_time = time.time()
         
         if self.creation_step == "race":
             self.creation_viz.draw_race_selection(self.temp_character.race, RACES, player_color)
+            
+            width, height = self.screen_size
+            card_width = 280
+            card_height = 380
+            spacing = 30
+            total_width = len(RACES) * card_width + (len(RACES) - 1) * spacing
+            start_x = (width - total_width) // 2
+            card_y = height // 2 - card_height // 2 + 50
+            
+            for i, race in enumerate(RACES):
+                x = start_x + i * (card_width + spacing)
+                key = f"race_{race}"
+                
+                if key in self.hover_states:
+                    hover_duration = current_time - self.hover_states[key]["start_time"]
+                    progress = min(1.0, hover_duration / HOVER_TIME_THRESHOLD)
+                    pos = self.hover_states[key]["pos"]
+                    draw_circular_progress(self.screen, (pos[0], pos[1]), 25, progress, Colors.ACCENT, thickness=6)
         elif self.creation_step == "class":
             self.creation_viz.draw_class_selection(self.temp_character.char_class, CLASSES, player_color)
+            
+            width, height = self.screen_size
+            card_width = 280
+            card_height = 380
+            spacing = 30
+            total_width = len(CLASSES) * card_width + (len(CLASSES) - 1) * spacing
+            start_x = (width - total_width) // 2
+            card_y = height // 2 - card_height // 2 + 50
+            
+            for i, cls in enumerate(CLASSES):
+                x = start_x + i * (card_width + spacing)
+                key = f"class_{cls}"
+                
+                if key in self.hover_states:
+                    hover_duration = current_time - self.hover_states[key]["start_time"]
+                    progress = min(1.0, hover_duration / HOVER_TIME_THRESHOLD)
+                    pos = self.hover_states[key]["pos"]
+                    draw_circular_progress(self.screen, (pos[0], pos[1]), 25, progress, Colors.ACCENT, thickness=6)
         elif self.creation_step == "abilities":
             self.creation_viz.draw_ability_scores(self.temp_character.abilities, self.ability_points_remaining, self.selected_ability)
             
+            ability_names = ["STR", "DEX", "CON", "INT", "WIS", "CHA"]
+            card_width = 220
+            card_height = 180
+            spacing = 40
+            cols = 3
+            rows = 2
+            
+            width, height = self.screen_size
+            total_width = cols * card_width + (cols - 1) * spacing
+            total_height = rows * card_height + (rows - 1) * spacing
+            start_x = (width - total_width) // 2
+            start_y = (height - total_height) // 2 + 80
+            
+            for i, ability in enumerate(ability_names):
+                row = i // cols
+                col = i % cols
+                x = start_x + col * (card_width + spacing)
+                y = start_y + row * (card_height + spacing)
+                key = f"ability_{ability}"
+                
+                if key in self.hover_states:
+                    hover_duration = current_time - self.hover_states[key]["start_time"]
+                    progress = min(1.0, hover_duration / HOVER_TIME_THRESHOLD)
+                    pos = self.hover_states[key]["pos"]
+                    draw_circular_progress(self.screen, (pos[0], pos[1]), 25, progress, Colors.ACCENT, thickness=6)
+            
             if self.ability_points_remaining == 0:
-                width, height = self.screen_size
                 proceed_rect = pygame.Rect(width // 2 - 150, height - 120, 300, 80)
                 pygame.draw.rect(self.screen, (100, 200, 100), proceed_rect, border_radius=12)
                 pygame.draw.rect(self.screen, (150, 255, 150), proceed_rect, 4, border_radius=12)
@@ -325,6 +470,13 @@ class DnDGame:
                 font = pygame.font.SysFont("Arial", 32, bold=True)
                 text = font.render("Continue", True, Colors.WHITE)
                 self.screen.blit(text, (proceed_rect.centerx - text.get_width()//2, proceed_rect.centery - text.get_height()//2))
+                
+                key = "proceed_abilities"
+                if key in self.hover_states:
+                    hover_duration = current_time - self.hover_states[key]["start_time"]
+                    progress = min(1.0, hover_duration / HOVER_TIME_THRESHOLD)
+                    pos = self.hover_states[key]["pos"]
+                    draw_circular_progress(self.screen, (pos[0], pos[1]), 25, progress, Colors.ACCENT, thickness=6)
         
         elif self.creation_step == "complete":
             self.creation_viz.draw_character_complete(
@@ -342,6 +494,13 @@ class DnDGame:
             font = pygame.font.SysFont("Arial", 32, bold=True)
             text = font.render("Finish", True, Colors.WHITE)
             self.screen.blit(text, (proceed_rect.centerx - text.get_width()//2, proceed_rect.centery - text.get_height()//2))
+            
+            key = "proceed_complete"
+            if key in self.hover_states:
+                hover_duration = current_time - self.hover_states[key]["start_time"]
+                progress = min(1.0, hover_duration / HOVER_TIME_THRESHOLD)
+                pos = self.hover_states[key]["pos"]
+                draw_circular_progress(self.screen, (pos[0], pos[1]), 25, progress, Colors.ACCENT, thickness=6)
         
         for p in self.creation_viz.particles:
             p.draw(self.screen)
