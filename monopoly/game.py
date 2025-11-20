@@ -131,34 +131,38 @@ class MonopolyGame:
         for idx in range(8):
             panel = self.panels[idx]
             margin = 10
-            gap = 12
+            gap = 8
             
             if panel.is_vertical():
-                # Vertical panels (left/right): buttons stacked vertically at bottom
-                # From their POV (rotated 90/270), this appears as a horizontal row
-                btn_h = int(panel.rect.width * 0.26)
-                y_start = panel.rect.y + int(panel.rect.height * 0.70)
-                x = panel.rect.x + margin
-                avail_h = panel.rect.height - y_start + panel.rect.y - margin
+                # Vertical panels: info at top, buttons below
+                # Buttons span full width, stacked vertically
+                info_height_frac = 0.35  # Top 35% for info
+                button_area_start = int(panel.rect.height * info_height_frac)
+                
                 btn_w = panel.rect.width - 2 * margin
-                # Calculate button height so 3 buttons fit vertically
-                total_gap_height = 2 * gap
-                btn_h = (avail_h - total_gap_height) // 3
+                avail_h = panel.rect.height - button_area_start - margin
+                btn_h = (avail_h - 2 * gap) // 3
+                
+                x = panel.rect.x + margin
+                y_start = panel.rect.y + button_area_start
                 
                 r_roll = pygame.Rect(x, y_start, btn_w, btn_h)
-                r_props = pygame.Rect(x, y_start + (btn_h + gap), btn_w, btn_h)
+                r_props = pygame.Rect(x, y_start + btn_h + gap, btn_w, btn_h)
                 r_build = pygame.Rect(x, y_start + 2 * (btn_h + gap), btn_w, btn_h)
             else:
-                # Horizontal panels (top/bottom): buttons arranged horizontally at bottom
-                row_h = int(panel.rect.height * 0.55)
-                y = panel.rect.y + panel.rect.height - row_h - margin
+                # Horizontal panels: info at top, buttons at bottom
+                info_height_frac = 0.45  # Top 45% for info
+                button_area_height = int(panel.rect.height * (1 - info_height_frac))
+                
+                y = panel.rect.y + panel.rect.height - button_area_height
                 x = panel.rect.x + margin
                 avail_w = panel.rect.width - 2 * margin
                 btn_w = (avail_w - 2 * gap) // 3
-                btn_h = row_h
-                r_roll = pygame.Rect(x, y, btn_w, btn_h)
-                r_props = pygame.Rect(x + (btn_w + gap), y, btn_w, btn_h)
-                r_build = pygame.Rect(x + 2 * (btn_w + gap), y, btn_w, btn_h)
+                btn_h = button_area_height - 2 * margin
+                
+                r_roll = pygame.Rect(x, y + margin, btn_w, btn_h)
+                r_props = pygame.Rect(x + btn_w + gap, y + margin, btn_w, btn_h)
+                r_build = pygame.Rect(x + 2 * (btn_w + gap), y + margin, btn_w, btn_h)
             
             self.buttons[idx] = {
                 "action": HoverButton(r_roll, "Roll", font, orientation=panel.orientation),
@@ -218,6 +222,7 @@ class MonopolyGame:
         panel = self.panels[player.idx]
         font = pygame.font.SysFont(None, 24)
         rects = self._popup_button_column(panel, 2)
+        # Buy button first (top from player's perspective)
         self.popup_buttons = [
             HoverButton(rects[0], "Buy", font, orientation=panel.orientation),
             HoverButton(rects[1], "Pass", font, orientation=panel.orientation)
@@ -566,24 +571,37 @@ class MonopolyGame:
                 pygame.draw.rect(self.screen, (40, 40, 40), panel.rect, width=1, border_radius=8)
             
             if is_active and not player.is_bankrupt:
+                # Info always in top portion of panel
+                font = pygame.font.SysFont("Arial", 18, bold=True)
+                
                 if panel.is_vertical():
-                    info_rect = panel.get_grid_rect(0.2, 0.4, 3.6, 2.2, 4, 12)
-                    font = pygame.font.SysFont("Arial", 18, bold=True)
+                    # Vertical: info in top 35%
+                    info_rect = pygame.Rect(
+                        panel.rect.x + 10,
+                        panel.rect.y + 10,
+                        panel.rect.width - 20,
+                        int(panel.rect.height * 0.30)
+                    )
                     RotatedText.draw_block(
                         self.screen,
                         [(f"${player.money}", font, Colors.BLACK),
                          (f"{len(player.properties)}p", font, Colors.BLACK)],
                         info_rect,
                         panel.orientation,
-                        line_spacing=14
+                        line_spacing=12
                     )
                 else:
-                    info_rect = panel.get_grid_rect(0.3, 0.2, 2.5, 0.8, 12, 4)
-                    font = pygame.font.SysFont("Arial", 18, bold=True)
+                    # Horizontal: info in top 45%
+                    info_rect = pygame.Rect(
+                        panel.rect.x + 10,
+                        panel.rect.y + 10,
+                        panel.rect.width - 20,
+                        int(panel.rect.height * 0.35)
+                    )
                     RotatedText.draw(self.screen,
                                      f"${player.money} | {len(player.properties)}p",
                                      font, Colors.BLACK,
-                                     (info_rect.centerx, info_rect.centery),
+                                     info_rect.center,
                                      panel.orientation)
                 
                 for btn in self.buttons[idx].values():
