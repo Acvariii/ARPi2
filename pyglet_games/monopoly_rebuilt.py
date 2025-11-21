@@ -793,9 +793,10 @@ class MonopolyGame:
             if self.houses_remaining >= 4:
                 self.houses_remaining -= 4
             else:
-                # Not enough houses available, sell to 0
+                # Not enough houses available, sell to 0 houses instead of 4
                 prop.houses = 0
-                player.add_money(sell_price * 5)  # Sell all 5 as houses
+                # Still only pay for the hotel itself, not 5 houses
+                player.add_money(sell_price)
                 return
         elif prop.houses > 0:
             # Selling house
@@ -1393,11 +1394,15 @@ class MonopolyGame:
             self._end_auction()
             return
         
-        # Get current bidder
-        bidder_idx = self.active_players[self.auction_bidder_index]
-        
+        # Get current bidder, skip if bankrupt
         bidder_idx = self.active_players[self.auction_bidder_index]
         bidder = self.players[bidder_idx]
+        
+        # Skip bankrupt players
+        if bidder.is_bankrupt:
+            self.auction_bidder_index = (self.auction_bidder_index + 1) % len(self.active_players)
+            self._show_auction_popup()
+            return
         prop = self.properties[self.auction_property]
         
         panel = self.panels[bidder_idx]
@@ -1522,6 +1527,13 @@ class MonopolyGame:
             # Owed to bank - auction all properties
             for prop_idx in bankrupt_properties:
                 prop = self.properties[prop_idx]
+                # Return houses/hotels to bank supply
+                if prop.houses == 5:
+                    self.hotels_remaining += 1
+                    self.houses_remaining += 4  # Hotel returns as 4 houses
+                elif prop.houses > 0:
+                    self.houses_remaining += prop.houses
+                
                 # Remove houses, keep mortgaged status
                 prop.houses = 0
                 prop.owner = None
