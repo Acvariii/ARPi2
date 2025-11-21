@@ -53,10 +53,12 @@ class PygletButton:
             bg = (100, 100, 100)
             text_color = (160, 160, 160)
         else:
-            base = (70, 130, 180)
-            hover = (100, 180, 220)
-            bg = tuple(int(base[i] + (hover[i] - base[i]) * hover_progress) for i in range(3))
-            text_color = (255, 255, 255)
+            # Pure white when hovering, light grey otherwise
+            if hover_progress > 0:
+                bg = (255, 255, 255)  # Pure white immediately when hovering
+            else:
+                bg = (200, 200, 200)  # Light grey when not hovering
+            text_color = (0, 0, 0)
         
         # Draw button background
         renderer.draw_rect(bg, (self.x, self.y, self.width, self.height))
@@ -153,15 +155,53 @@ class PlayerPanel:
             return (x, y, panel_w_side, panel_height)
     
     def draw_background(self, renderer: PygletRenderer, is_current: bool = False):
-        """Draw panel background"""
+        """Draw panel background with vibrant metallic car paint look"""
         x, y, w, h = self.rect
         
-        # Washed color
-        washed = tuple(min(255, int(c * 0.75 + 180 * 0.25)) for c in self.color)
-        renderer.draw_rect(washed, (x, y, w, h))
+        # Vibrant base - keep colors bright and saturated
+        # Slightly boost saturation for more vibrant look
+        saturated = tuple(min(255, int(c * 1.1)) for c in self.color)
         
-        # Border
-        border_color = (255, 215, 0) if is_current else (150, 150, 150)
+        # Ultra-smooth gradient using Gaussian-like distribution for natural light falloff
+        # Covers 100% of panel with gradient starting from center
+        import math
+        
+        if self.orientation in [0, 180]:  # Horizontal panels
+            num_layers = 40  # Many thin layers for ultra-smooth gradient
+            
+            for i in range(num_layers):
+                # Calculate exact layer height to ensure full coverage
+                layer_h = h / num_layers
+                layer_y = y + i * layer_h
+                
+                # Distance from center (0 at center, 1 at edges)
+                dist_from_center = abs((i - num_layers/2) / (num_layers/2))
+                position = dist_from_center * 3  # 0 to 3
+                gaussian = math.exp(-(position ** 2) / 2)
+                
+                shine_intensity = 60 * gaussian
+                shine_color = tuple(min(255, int(saturated[c] * 0.8 + shine_intensity)) for c in range(3))
+                renderer.draw_rect(shine_color, (x, int(layer_y), w, int(layer_h) + 1))
+                
+        else:  # Vertical panels
+            num_layers = 40
+            
+            for i in range(num_layers):
+                # Calculate exact layer width to ensure full coverage
+                layer_w = w / num_layers
+                layer_x = x + i * layer_w
+                
+                # Distance from center (0 at center, 1 at edges)
+                dist_from_center = abs((i - num_layers/2) / (num_layers/2))
+                position = dist_from_center * 3
+                gaussian = math.exp(-(position ** 2) / 2)
+                
+                shine_intensity = 60 * gaussian
+                shine_color = tuple(min(255, int(saturated[c] * 0.8 + shine_intensity)) for c in range(3))
+                renderer.draw_rect(shine_color, (int(layer_x), y, int(layer_w) + 1, h))
+        
+        # Border with metallic highlight
+        border_color = (255, 215, 0) if is_current else (180, 190, 200)  # Brighter silver
         border_w = 4 if is_current else 2
         renderer.draw_rect(border_color, (x, y, w, h), width=border_w)
     

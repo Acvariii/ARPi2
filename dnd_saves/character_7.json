@@ -1,0 +1,32 @@
+{
+  "name": "Ember the Holy",
+  "player_color": [
+    140,
+    40,
+    220
+  ],
+  "race": "Tiefling",
+  "char_class": "Cleric",
+  "level": 1,
+  "alignment": "",
+  "abilities": {
+    "STR": 8,
+    "DEX": 15,
+    "CON": 8,
+    "INT": 15,
+    "WIS": 15,
+    "CHA": 8
+  },
+  "max_hp": 8,
+  "current_hp": 8,
+  "armor_class": 10,
+  "skills": [
+    "Medicine",
+    "Insight",
+    "Religion"
+  ],
+  "inventory": [],
+  "gold": 0,
+  "experience": 0,
+  "background": ""
+}
