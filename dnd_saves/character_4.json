@@ -1,29 +1,29 @@
 {
-  "name": "Elaria the Cunning",
+  "name": "Grommash Blacktooth",
   "player_color": [
     200,
     40,
     200
   ],
-  "race": "Elf",
-  "char_class": "Rogue",
+  "race": "Orc",
+  "char_class": "Paladin",
   "level": 1,
   "alignment": "",
   "abilities": {
-    "STR": 10,
-    "DEX": 10,
-    "CON": 10,
+    "STR": 8,
+    "DEX": 8,
+    "CON": 15,
     "INT": 15,
     "WIS": 15,
-    "CHA": 11
+    "CHA": 8
   },
-  "max_hp": 8,
-  "current_hp": 8,
+  "max_hp": 10,
+  "current_hp": 10,
   "armor_class": 10,
   "skills": [
-    "Stealth",
-    "Sleight of Hand",
-    "Acrobatics"
+    "Religion",
+    "Persuasion",
+    "Athletics"
   ],
   "inventory": [],
   "gold": 0,

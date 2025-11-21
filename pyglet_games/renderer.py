@@ -85,6 +85,29 @@ class PygletRenderer:
             )
             self.shapes_cache.append(arc_shape)
     
+    def draw_circle_immediate(self, color: Tuple[int, int, int], center: Tuple[int, int], 
+                             radius: int, width: int = 0, alpha: int = 255):
+        """Draw circle immediately without batching (for drawing on top of everything)"""
+        x, y = center
+        y_flipped = self.flip_y(y)
+        
+        if width == 0:
+            # Filled circle - draw immediately
+            circle_shape = shapes.Circle(
+                x, y_flipped, radius,
+                color=(*color, alpha)
+            )
+            circle_shape.draw()
+        else:
+            # Outlined circle - draw immediately with proper thickness
+            # Create multiple circles for thickness effect
+            for i in range(width):
+                arc_shape = shapes.Arc(
+                    x, y_flipped, radius - i // 2,
+                    color=(*color, alpha)
+                )
+                arc_shape.draw()
+    
     def draw_line(self, color: Tuple[int, int, int], start: Tuple[int, int], 
                   end: Tuple[int, int], width: int = 1, alpha: int = 255):
         """Draw line"""
@@ -104,8 +127,8 @@ class PygletRenderer:
     def draw_text(self, text_str: str, x: int, y: int, font_name: str = 'Arial',
                   font_size: int = 16, color: Tuple[int, int, int] = (255, 255, 255),
                   bold: bool = False, anchor_x: str = 'left', anchor_y: str = 'top',
-                  alpha: int = 255):
-        """Draw text"""
+                  alpha: int = 255, rotation: int = 0):
+        """Draw text with optional rotation (0, 90, 180, 270 degrees)"""
         y_flipped = self.flip_y(y)
         
         label = text.Label(
@@ -118,6 +141,15 @@ class PygletRenderer:
             anchor_y=anchor_y,
             batch=self.batch
         )
+        
+        # Apply bold styling if specified
+        if bold:
+            label.bold = True
+        
+        # Apply rotation if specified
+        if rotation != 0:
+            label.rotation = rotation
+        
         self.text_cache.append(label)
     
     def draw_circular_progress(self, center: Tuple[int, int], radius: int,

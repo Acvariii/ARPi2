@@ -68,23 +68,26 @@ class PygletGameServer:
         self.port = port
         self.clients: Dict[str, websockets.WebSocketServerProtocol] = {}
         
-        # Create Pyglet window with OpenGL
+        # Create Pyglet window with OpenGL - Fullscreen
         config = pyglet.gl.Config(double_buffer=True, sample_buffers=1, samples=4)
         self.window = pyglet.window.Window(
-            width=WINDOW_SIZE[0],
-            height=WINDOW_SIZE[1],
+            fullscreen=True,
             caption="ARPi2 Game Server - Pyglet/OpenGL (Complete UI)",
             config=config,
             vsync=True
         )
+        
+        # Update window size to actual screen size
+        global WINDOW_SIZE
+        WINDOW_SIZE = (self.window.width, self.window.height)
         
         # Setup OpenGL state
         gl.glEnable(gl.GL_BLEND)
         gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
         gl.glClearColor(0.0, 0.0, 0.0, 1.0)
         
-        # Renderer
-        self.renderer = PygletRenderer(WINDOW_SIZE[0], WINDOW_SIZE[1])
+        # Renderer - use actual window size for fullscreen
+        self.renderer = PygletRenderer(self.window.width, self.window.height)
         
         # Hand tracking
         self.hand_tracker = HandTrackingServer()
@@ -109,10 +112,10 @@ class PygletGameServer:
         self.game_buttons = self._create_game_buttons()
         self.hover_states = {}
         
-        # Game instances
-        self.dnd_creation = DnDCharacterCreation(WINDOW_SIZE[0], WINDOW_SIZE[1], self.renderer)
-        self.monopoly_game = MonopolyGame(WINDOW_SIZE[0], WINDOW_SIZE[1], self.renderer)
-        self.blackjack_game = BlackjackGame(WINDOW_SIZE[0], WINDOW_SIZE[1], self.renderer)
+        # Game instances - use actual window size for fullscreen
+        self.dnd_creation = DnDCharacterCreation(self.window.width, self.window.height, self.renderer)
+        self.monopoly_game = MonopolyGame(self.window.width, self.window.height, self.renderer)
+        self.blackjack_game = BlackjackGame(self.window.width, self.window.height, self.renderer)
         
         # Setup event handlers
         self.window.on_draw = self.on_draw
@@ -153,11 +156,26 @@ class PygletGameServer:
         elif self.state == "dnd_creation":
             self.dnd_creation.draw()
         
-        # Draw cursors
-        self._draw_cursors()
-        
-        # Draw all batched shapes
+        # Draw all batched shapes (board, panels, popups)
         self.renderer.draw_all()
+        
+        # Draw game-specific immediate elements (tokens on top of board, under popups)
+        if self.state == "monopoly" and hasattr(self.monopoly_game, 'draw_immediate'):
+            self.monopoly_game.draw_immediate()
+        elif self.state == "blackjack" and hasattr(self.blackjack_game, 'draw_immediate'):
+            self.blackjack_game.draw_immediate()
+        
+        # Draw popup batch again so popups appear on top of immediate elements
+        if self.state == "monopoly" and self.monopoly_game.popup.active:
+            # Create new batch for popup only
+            popup_renderer = self.monopoly_game.renderer
+            popup_renderer.clear_cache()
+            popup_renderer.draw_rect((0, 0, 0, 50), (0, 0, self.monopoly_game.width, self.monopoly_game.height))
+            self.monopoly_game.popup.draw(popup_renderer)
+            popup_renderer.draw_all()
+        
+        # Draw cursors AFTER everything else so they're on top
+        self._draw_cursors()
         
         # Update FPS counter
         self._update_fps()
@@ -316,16 +334,16 @@ class PygletGameServer:
             self.renderer.draw_circular_progress((pos[0] + 28, pos[1] - 28), 20, progress, Colors.ACCENT, thickness=6)
     
     def _draw_cursors(self):
-        """Draw cursor for each fingertip"""
+        """Draw cursor for each fingertip - uses immediate drawing to be on top"""
         if self.fingertip_data:
             for meta in self.fingertip_data:
                 pos = meta["pos"]
-                self.renderer.draw_circle(Colors.ACCENT, pos, 8)
-                self.renderer.draw_circle(Colors.WHITE, pos, 8, width=2)
+                self.renderer.draw_circle_immediate(Colors.ACCENT, pos, 8)
+                self.renderer.draw_circle_immediate(Colors.WHITE, pos, 8, width=2)
         else:
-            # Draw mouse cursor
-            self.renderer.draw_circle((255, 100, 100), (self.mouse_x, self.mouse_y), 8)
-            self.renderer.draw_circle((255, 255, 255), (self.mouse_x, self.mouse_y), 8, width=2)
+            # Draw mouse cursor - blue dot on top of everything
+            self.renderer.draw_circle_immediate((100, 150, 255), (self.mouse_x, self.mouse_y), 8)
+            self.renderer.draw_circle_immediate((255, 255, 255), (self.mouse_x, self.mouse_y), 8, width=2)
     
     def _update_fps(self):
         """Update FPS counter"""

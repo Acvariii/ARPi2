@@ -12,6 +12,9 @@ from blackjack.player import BlackjackPlayer
 from blackjack.game_logic import BlackjackLogic
 from pyglet_games.player_selection import PlayerSelectionUI
 from pyglet_games.player_panels import calculate_all_panels
+from pyglet_games.popup_system import (
+    UniversalPopup, create_blackjack_bet_popup, create_info_popup
+)
 
 HOVER_TIME = 1.5
 
@@ -98,6 +101,11 @@ class BlackjackGame:
         self.panels = {}
         self.buttons: Dict[int, Dict[str, PygletButton]] = {}
         
+        # Popup system
+        self.popup = UniversalPopup()
+        self.popup_timers: Dict[int, float] = {}  # Track result popup display time
+        self.popup_duration = 2.0  # Show result popups for 2 seconds
+        
         self._calculate_table_geometry()
     
     def _calculate_table_geometry(self):
@@ -128,6 +136,95 @@ class BlackjackGame:
         for idx in self.active_players:
             panel = self.panels[idx]
             self.buttons[idx] = self._create_buttons(panel, idx)
+    
+    def _restore_default_buttons(self, player_idx: int):
+        """Restore default playing buttons (Hit, Stand, Double, Split)"""
+        panel = self.panels[player_idx]
+        x, y, w, h = panel['rect']
+        orient = panel['orientation']
+        margin = 10
+        gap = 8
+        
+        if orient == 0:  # Bottom
+            info_h = int(h * 0.45)
+            btn_h = h - info_h - 2 * margin
+            btn_w = (w - 2 * margin - 3 * gap) // 4
+            btn_y = y + info_h + margin
+            
+            self.buttons[player_idx] = {
+                "hit": PygletButton((x + margin, btn_y, btn_w, btn_h), "Hit", orient),
+                "stand": PygletButton((x + margin + btn_w + gap, btn_y, btn_w, btn_h), "Stand", orient),
+                "double": PygletButton((x + margin + 2*(btn_w+gap), btn_y, btn_w, btn_h), "Double", orient),
+                "split": PygletButton((x + margin + 3*(btn_w+gap), btn_y, btn_w, btn_h), "Split", orient)
+            }
+        elif orient == 180:  # Top
+            info_h = int(h * 0.45)
+            btn_h = h - info_h - 2 * margin
+            btn_w = (w - 2 * margin - 3 * gap) // 4
+            btn_y = y + margin
+            
+            self.buttons[player_idx] = {
+                "hit": PygletButton((x + margin, btn_y, btn_w, btn_h), "Hit", orient),
+                "stand": PygletButton((x + margin + btn_w + gap, btn_y, btn_w, btn_h), "Stand", orient),
+                "double": PygletButton((x + margin + 2*(btn_w+gap), btn_y, btn_w, btn_h), "Double", orient),
+                "split": PygletButton((x + margin + 3*(btn_w+gap), btn_y, btn_w, btn_h), "Split", orient)
+            }
+        elif orient in [90, 270]:  # Vertical
+            info_w = int(w * 0.35)
+            btn_w = w - info_w - 2 * margin
+            btn_h = (h - 2 * margin - 3 * gap) // 4
+            btn_x = x + margin if orient == 90 else x + info_w + margin
+            
+            self.buttons[player_idx] = {
+                "hit": PygletButton((btn_x, y + margin, btn_w, btn_h), "Hit", orient),
+                "stand": PygletButton((btn_x, y + margin + btn_h + gap, btn_w, btn_h), "Stand", orient),
+                "double": PygletButton((btn_x, y + margin + 2*(btn_h+gap), btn_w, btn_h), "Double", orient),
+                "split": PygletButton((btn_x, y + margin + 3*(btn_h+gap), btn_w, btn_h), "Split", orient)
+            }
+    
+    def _set_popup_buttons(self, player_idx: int, button_texts: List[str], enabled_states: List[bool]):
+        """Set panel buttons for popup context (completely recreates to prevent old text)"""
+        panel = self.panels[player_idx]
+        x, y, w, h = panel['rect']
+        orient = panel['orientation']
+        margin = 10
+        gap = 8
+        
+        self.buttons[player_idx] = {}
+        
+        if orient == 0:  # Bottom
+            info_h = int(h * 0.45)
+            btn_h = h - info_h - 2 * margin
+            btn_w = (w - 2 * margin - 3 * gap) // 4
+            btn_y = y + info_h + margin
+            
+            for i, (text, enabled) in enumerate(zip(button_texts, enabled_states)):
+                if text:
+                    btn = PygletButton((x + margin + i * (btn_w + gap), btn_y, btn_w, btn_h), text, orient)
+                    btn.enabled = enabled
+                    self.buttons[player_idx][f"popup_{i}"] = btn
+        elif orient == 180:  # Top
+            info_h = int(h * 0.45)
+            btn_h = h - info_h - 2 * margin
+            btn_w = (w - 2 * margin - 3 * gap) // 4
+            btn_y = y + margin
+            
+            for i, (text, enabled) in enumerate(zip(button_texts, enabled_states)):
+                if text:
+                    btn = PygletButton((x + margin + i * (btn_w + gap), btn_y, btn_w, btn_h), text, orient)
+                    btn.enabled = enabled
+                    self.buttons[player_idx][f"popup_{i}"] = btn
+        elif orient in [90, 270]:  # Vertical
+            info_w = int(w * 0.35)
+            btn_w = w - info_w - 2 * margin
+            btn_h = (h - 2 * margin - 3 * gap) // 4
+            btn_x = x + margin if orient == 90 else x + info_w + margin
+            
+            for i, (text, enabled) in enumerate(zip(button_texts, enabled_states)):
+                if text:
+                    btn = PygletButton((btn_x, y + margin + i * (btn_h + gap), btn_w, btn_h), text, orient)
+                    btn.enabled = enabled
+                    self.buttons[player_idx][f"popup_{i}"] = btn
     
     def _create_buttons(self, panel: Dict, idx: int) -> Dict[str, PygletButton]:
         """Create 4 buttons per panel (betting or playing)"""
@@ -251,38 +348,130 @@ class BlackjackGame:
         return False
     
     def _handle_betting_input(self, fingertips: List[Dict], current_time: float):
-        """Handle betting phase input"""
+        """Handle betting phase input with floating popup"""
+        # Check if popup is active for betting
+        if self.popup.active:
+            player_idx = self.popup.data.get("player_idx")
+            if player_idx is not None and player_idx in self.buttons:
+                player = self.players[player_idx]
+                btns = self.buttons[player_idx]
+                
+                # Check popup button clicks in panel
+                for name, btn in btns.items():
+                    clicked, _ = btn.update(fingertips, current_time)
+                    if clicked:
+                        self._handle_betting_popup_button(name, player_idx)
+            return
+        
+        # Find first player who needs to bet
         for idx in self.active_players:
-            if idx not in self.buttons:
-                continue
-            
             player = self.players[idx]
-            btns = self.buttons[idx]
             
             if not player.is_ready:
-                # Betting buttons
-                btns["bet5"].enabled = player.chips >= 5
-                btns["bet25"].enabled = player.chips >= 25
-                btns["bet100"].enabled = player.chips >= 100
-                btns["ready"].enabled = True
+                # Show betting popup for this player
+                panel = self.panels[idx]
+                text_lines = create_blackjack_bet_popup(player.chips, player.current_bet)
                 
-                if btns["bet5"].update(fingertips, current_time)[0]:
-                    player.place_bet(5)
-                if btns["bet25"].update(fingertips, current_time)[0]:
-                    player.place_bet(25)
-                if btns["bet100"].update(fingertips, current_time)[0]:
-                    player.place_bet(100)
-                if btns["ready"].update(fingertips, current_time)[0]:
-                    if player.current_bet == 0:
-                        player.skip_round()
-                    player.is_ready = True
+                self.popup.show(
+                    idx, panel['rect'], panel['orientation'],
+                    "betting", text_lines, {"player_idx": idx}
+                )
+                
+                # Set betting buttons in panel
+                can_bet_5 = player.chips >= 5
+                can_bet_25 = player.chips >= 25
+                can_bet_100 = player.chips >= 100
+                can_ready = player.current_bet > 0
+                
+                self._set_popup_buttons(idx, ["$5", "$25", "$100", "Ready"],
+                                       [can_bet_5, can_bet_25, can_bet_100, can_ready])
+                return  # Only one popup at a time
         
         # Check if all ready
         if all(self.players[i].is_ready for i in self.active_players):
             self._new_round()
     
+    def _handle_betting_popup_button(self, button_name: str, player_idx: int):
+        """Handle betting popup button clicks from panel"""
+        player = self.players[player_idx]
+        panel = self.panels[player_idx]
+        
+        if button_name == "popup_0":  # $5
+            if player.chips >= 5:
+                player.place_bet(5)
+                # Update popup text
+                text_lines = create_blackjack_bet_popup(player.chips, player.current_bet)
+                self.popup.show(
+                    player_idx, panel['rect'], panel['orientation'],
+                    "betting", text_lines, {"player_idx": player_idx}
+                )
+                # Update buttons
+                can_bet_5 = player.chips >= 5
+                can_bet_25 = player.chips >= 25
+                can_bet_100 = player.chips >= 100
+                can_ready = player.current_bet > 0
+                self._set_popup_buttons(player_idx, ["$5", "$25", "$100", "Ready"],
+                                       [can_bet_5, can_bet_25, can_bet_100, can_ready])
+        
+        elif button_name == "popup_1":  # $25
+            if player.chips >= 25:
+                player.place_bet(25)
+                text_lines = create_blackjack_bet_popup(player.chips, player.current_bet)
+                self.popup.show(
+                    player_idx, panel['rect'], panel['orientation'],
+                    "betting", text_lines, {"player_idx": player_idx}
+                )
+                can_bet_5 = player.chips >= 5
+                can_bet_25 = player.chips >= 25
+                can_bet_100 = player.chips >= 100
+                can_ready = player.current_bet > 0
+                self._set_popup_buttons(player_idx, ["$5", "$25", "$100", "Ready"],
+                                       [can_bet_5, can_bet_25, can_bet_100, can_ready])
+        
+        elif button_name == "popup_2":  # $100
+            if player.chips >= 100:
+                player.place_bet(100)
+                text_lines = create_blackjack_bet_popup(player.chips, player.current_bet)
+                self.popup.show(
+                    player_idx, panel['rect'], panel['orientation'],
+                    "betting", text_lines, {"player_idx": player_idx}
+                )
+                can_bet_5 = player.chips >= 5
+                can_bet_25 = player.chips >= 25
+                can_bet_100 = player.chips >= 100
+                can_ready = player.current_bet > 0
+                self._set_popup_buttons(player_idx, ["$5", "$25", "$100", "Ready"],
+                                       [can_bet_5, can_bet_25, can_bet_100, can_ready])
+        
+        elif button_name == "popup_3":  # Ready
+            if player.current_bet == 0:
+                player.skip_round()
+            player.is_ready = True
+            self.popup.hide()
+            self._restore_default_buttons(player_idx)
+    
     def _handle_playing_input(self, fingertips: List[Dict], current_time: float):
         """Handle playing phase input"""
+        # Check result popup interactions
+        if self.popup.active and self.popup.popup_type == "result":
+            player_idx = self.popup.player_idx
+            if player_idx in self.buttons:
+                for name, btn in self.buttons[player_idx].items():
+                    clicked, _ = btn.update(fingertips, current_time)
+                    if clicked and name == "popup_0":  # OK button
+                        self.popup.hide()
+                        if player_idx in self.popup_timers:
+                            del self.popup_timers[player_idx]
+                        self._restore_default_buttons(player_idx)
+            
+            # Auto-hide result popups after duration
+            if player_idx in self.popup_timers:
+                if current_time - self.popup_timers[player_idx] > self.popup_duration:
+                    self.popup.hide()
+                    del self.popup_timers[player_idx]
+                    self._restore_default_buttons(player_idx)
+            return
+        
         for idx in self.active_players:
             if idx not in self.buttons:
                 continue
@@ -337,6 +526,13 @@ class BlackjackGame:
             self.players[idx].add_card(self.deck.pop())
         self.dealer_hand.append(self.deck.pop())
         
+        # Check for blackjacks and show popups
+        for idx in playing:
+            player = self.players[idx]
+            hand = player.get_current_hand()
+            if BlackjackLogic.is_blackjack(hand):
+                self._show_result_popup(idx, "BLACKJACK!", "You got 21!")
+        
         self.phase = "playing"
         self.round_active = True
     
@@ -347,6 +543,11 @@ class BlackjackGame:
             hand = player.get_current_hand()
             if BlackjackLogic.hand_value(hand) > 21:
                 player.is_busted = True
+                # Show bust popup
+                for idx in self.active_players:
+                    if self.players[idx] == player:
+                        self._show_result_popup(idx, "BUST!", f"You busted with {BlackjackLogic.hand_value(hand)}")
+                        break
                 self._check_round_done()
     
     def _double_down(self, player: BlackjackPlayer):
@@ -389,6 +590,16 @@ class BlackjackGame:
         
         self._resolve_round()
     
+    def _show_result_popup(self, player_idx: int, title: str, message: str):
+        """Show result popup for a player"""
+        panel = self.panels[player_idx]
+        grid = create_info_popup(title, message, panel['orientation'], button_text="OK")
+        self.popup.show(
+            player_idx, panel['rect'], panel['orientation'],
+            "result", grid, {"player_idx": player_idx}
+        )
+        self.popup_timers[player_idx] = time.time()
+    
     def _resolve_round(self):
         """Resolve bets"""
         dealer_value = BlackjackLogic.hand_value(self.dealer_hand)
@@ -405,22 +616,30 @@ class BlackjackGame:
             hand = player.get_current_hand()
             player_value = BlackjackLogic.hand_value(hand)
             
+            # Determine result and show popup
             if player.is_busted:
                 player.lose_bet()
+                # Bust popup already shown in _hit
             elif dealer_busted:
                 if BlackjackLogic.is_blackjack(hand):
                     player.win_bet(2.5)
+                    self._show_result_popup(idx, "BLACKJACK!", f"Won ${int(player.current_bet * 1.5)}!")
                 else:
                     player.win_bet(2.0)
+                    self._show_result_popup(idx, "WIN!", f"Dealer busted! Won ${player.current_bet}")
             elif player_value > dealer_value:
                 if BlackjackLogic.is_blackjack(hand):
                     player.win_bet(2.5)
+                    self._show_result_popup(idx, "BLACKJACK!", f"Won ${int(player.current_bet * 1.5)}!")
                 else:
                     player.win_bet(2.0)
+                    self._show_result_popup(idx, "WIN!", f"Beat dealer! Won ${player.current_bet}")
             elif player_value == dealer_value:
                 player.push_bet()
+                self._show_result_popup(idx, "PUSH", "Tie - bet returned")
             else:
                 player.lose_bet()
+                self._show_result_popup(idx, "LOSE", f"Dealer wins with {dealer_value}")
             
             player.is_ready = False
         
@@ -451,6 +670,11 @@ class BlackjackGame:
         
         # Player cards
         self._draw_player_cards()
+        
+        # Floating popup LAST so it's on top of everything - stronger dimming to cover table
+        if self.popup.active:
+            self.renderer.draw_rect((0, 0, 0, 180), (0, 0, self.width, self.height))
+            self.popup.draw(self.renderer)
     
     def _draw_panels(self):
         """Draw player panels"""
@@ -469,17 +693,18 @@ class BlackjackGame:
             # Info
             self._draw_panel_info(player, panel)
             
-            # Buttons
+            # Buttons - only draw for active situations (current turn, betting, or popup for this player)
             if idx in self.buttons:
-                btns = self.buttons[idx]
-                if self.phase == "betting":
-                    for name in ["bet5", "bet25", "bet100", "ready"]:
-                        _, progress = btns[name].update([], current_time)
-                        btns[name].draw(self.renderer, progress)
-                elif self.phase == "playing":
-                    for name in ["hit", "stand", "double", "split"]:
-                        _, progress = btns[name].update([], current_time)
-                        btns[name].draw(self.renderer, progress)
+                # Show buttons if: betting phase, player's turn in playing phase, or popup is for this player
+                show_buttons = (self.phase == "betting" and not player.is_ready) or \
+                              (self.phase == "playing" and not player.is_sitting_out() and not player.is_standing and not player.is_busted) or \
+                              (self.popup.active and self.popup.player_idx == idx)
+                
+                if show_buttons:
+                    btns = self.buttons[idx]
+                    for name, btn in btns.items():
+                        _, progress = btn.update([], current_time)
+                        btn.draw(self.renderer, progress)
     
     def _draw_panel_info(self, player: BlackjackPlayer, panel: Dict):
         """Draw player info"""

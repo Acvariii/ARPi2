@@ -55,9 +55,6 @@ class MonopolyGame:
         self.dice_rolling = False
         self.dice_roll_start = 0.0
         
-        # Token animation tracking
-        self.token_animations: Dict[int, Dict] = {}  # player_idx -> {start_pos, end_pos, start_time, duration}
-        
         # Universal popup system
         self.popup = UniversalPopup()
         self.property_scroll = 0
@@ -117,34 +114,15 @@ class MonopolyGame:
         """Initialize buttons for all players using PlayerPanel objects"""
         self.buttons = {}
         for idx in self.active_players:
-            self._restore_default_buttons(idx)
-    
-    def _restore_default_buttons(self, player_idx: int):
-        """Restore default panel buttons (Roll/End, Props, Build)"""
-        panel = self.panels[player_idx]
-        button_rects = panel.get_button_layout()
-        orient = panel.orientation
-        
-        self.buttons[player_idx] = {
-            "action": PygletButton(button_rects[0], "Roll", orient),
-            "props": PygletButton(button_rects[1], "Deeds", orient),
-            "build": PygletButton(button_rects[2], "Build", orient)
-        }
-        # Enabled state will be set in update loop based on player properties
-    
-    def _set_popup_buttons(self, player_idx: int, button_texts: List[str], enabled_states: List[bool]):
-        """Recreate panel buttons for popup context using same layout as default buttons"""
-        panel = self.panels[player_idx]
-        button_rects = panel.get_button_layout()  # Uses same layout as default buttons
-        orient = panel.orientation
-        
-        # Completely recreate buttons dictionary with same size/position as default
-        self.buttons[player_idx] = {}
-        for i, (text, enabled) in enumerate(zip(button_texts, enabled_states)):
-            if text:  # Only create button if text provided
-                btn = PygletButton(button_rects[i], text, orient)
-                btn.enabled = enabled
-                self.buttons[player_idx][f"popup_{i}"] = btn
+            panel = self.panels[idx]
+            button_rects = panel.get_button_layout()
+            orient = panel.orientation
+            
+            self.buttons[idx] = {
+                "action": PygletButton(button_rects[0], "Roll", orient),
+                "props": PygletButton(button_rects[1], "Props", orient),
+                "build": PygletButton(button_rects[2], "Build", orient)
+            }
     
     def start_game(self, player_indices: List[int]):
         """Start game with selected players"""
@@ -184,40 +162,32 @@ class MonopolyGame:
         current_time = time.time()
         current_player = self.players[self.active_players[self.current_player_idx]]
         
-        # Handle all button inputs for ALL players (not just current)
-        curr_idx = self.active_players[self.current_player_idx]
+        # Handle popup buttons first
+        if self.popup.active:
+            callback = self.popup.check_button_click(fingertips, current_time, HOVER_TIME_THRESHOLD)
+            if callback:
+                self._handle_popup_callback(callback)
+            return False
         
         for idx in self.active_players:
             if idx not in self.buttons:
                 continue
             
             player = self.players[idx]
-            is_current = (idx == curr_idx)
+            is_current = (idx == self.active_players[self.current_player_idx])
             
+            # Update button states - only current player can interact
             btns = self.buttons[idx]
+            btns["action"].enabled = is_current and not self.dice_rolling and not self.popup.active
+            btns["action"].text = "Roll" if self.can_roll else "End"
+            btns["props"].enabled = is_current and len(player.properties) > 0 and not self.popup.active
+            btns["build"].enabled = is_current and len(player.properties) > 0 and not self.popup.active
             
-            # If popup active for this player, handle popup buttons
-            if self.popup.active and self.popup.player_idx == idx:
+            # Only check clicks for current player
+            if is_current:
                 for name, btn in btns.items():
                     clicked, _ = btn.update(fingertips, current_time)
                     if clicked:
-                        self._handle_popup_button_click(name)
-            else:
-                # Update and handle default buttons (only if they exist - not replaced by popup)
-                # Check if this player has default buttons (not popup buttons)
-                has_default_buttons = "action" in btns
-                
-                if has_default_buttons:
-                    # Action and Build only enabled for current player
-                    # Props enabled for ANY player with properties
-                    btns["action"].enabled = is_current and not self.dice_rolling
-                    btns["action"].text = "Roll" if self.can_roll else "End"
-                    btns["props"].enabled = len(player.properties) > 0  # Enabled for ANY player with properties
-                    btns["build"].enabled = is_current and len(player.properties) > 0
-                
-                for name, btn in btns.items():
-                    clicked, _ = btn.update(fingertips, current_time)
-                    if clicked and (is_current or name == "props"):  # Only current player OR props button
                         self._handle_click(idx, name)
         
         return False
@@ -230,46 +200,34 @@ class MonopolyGame:
             else:
                 self.advance_turn()
         elif button == "props":
-            # Prevent non-current players from opening props during game-critical popups
-            if self.popup.active and self.popup.popup_type in ["buy_prompt", "card"]:
-                curr_idx = self.active_players[self.current_player_idx]
-                if player_idx != curr_idx:
-                    return  # Block non-current players during critical popups
             player = self.players[player_idx]
             self._show_properties_popup(player)
         elif button == "build":
             player = self.players[player_idx]
             self._show_build_popup(player)
     
-    def _handle_popup_button_click(self, button_name: str):
-        """Handle popup context button clicks from panel"""
-        popup_type = self.popup.popup_type
-        player_idx = self.popup.player_idx
+    def _handle_popup_callback(self, callback: str):
+        """Handle popup button callbacks"""
+        if callback == "buy":
+            player = self.popup.data["player"]
+            position = self.popup.data["position"]
+            self._buy_property(player, position)
         
-        if button_name == "popup_0":  # First button
-            if popup_type == "buy_prompt":
-                player = self.popup.data["player"]
-                position = self.popup.data["position"]
-                self._buy_property(player, position)
-            elif popup_type in ["card", "properties", "build"]:
-                # OK or Close button
-                self.popup.hide()
-                self._restore_default_buttons(player_idx)
-                if popup_type == "card":
-                    self._finish_turn_or_allow_double()
+        elif callback == "pass":
+            self.popup.hide()
+            self._finish_turn_or_allow_double()
         
-        elif button_name == "popup_1":  # Second button  
-            if popup_type == "buy_prompt":
-                # Pass button
-                self.popup.hide()
-                self._restore_default_buttons(player_idx)
-                self._finish_turn_or_allow_double()
+        elif callback == "ok":
+            self.popup.hide()
+            self._finish_turn_or_allow_double()
+        
+        elif callback == "close":
+            self.popup.hide()
     
     def roll_dice(self):
         """Roll dice"""
         if not self.can_roll or self.dice_rolling:
             return
-        self.dice_values = (0, 0)  # Clear previous dice when starting new roll
         self.dice_rolling = True
         self.dice_roll_start = time.time()
         self.can_roll = False
@@ -284,7 +242,7 @@ class MonopolyGame:
         self.current_player_idx = (self.current_player_idx + 1) % len(self.active_players)
         self.phase = "roll"
         self.can_roll = True
-        # Don't reset dice - they stay visible until next roll
+        self.dice_values = (0, 0)
     
     def update(self, dt: float):
         """Update game state"""
@@ -307,12 +265,10 @@ class MonopolyGame:
                 else:
                     current.consecutive_doubles = 0
                 
-                # Move player with animation
+                # Move player
                 spaces = sum(self.dice_values)
                 old_pos = current.position
-                new_pos = (current.position + spaces) % 40
-                self._start_token_animation(current.idx, old_pos, new_pos)
-                current.position = new_pos
+                current.position = (current.position + spaces) % 40
                 
                 if current.position < old_pos:
                     current.add_money(PASSING_GO_MONEY)
@@ -320,97 +276,86 @@ class MonopolyGame:
                 self._land_on_space(current)
     
     def _show_buy_prompt(self, player: Player, position: int):
-        """Show property purchase prompt as floating text box with panel buttons"""
-        # Close any existing popup first
-        if self.popup.active:
-            old_player_idx = self.popup.player_idx
-            self.popup.hide()
-            if old_player_idx is not None:
-                self._restore_default_buttons(old_player_idx)
-        
-        panel = self.panels[player.idx]
+        """Show buy property dialog"""
         space = self.properties[position]
         price = space.data.get("price", 0)
+        panel = self.panels[player.idx]
         
-        text_lines = create_monopoly_buy_popup(player.money, space.data["name"], price)
-        
-        self.popup.show(
-            player.idx, panel.rect, panel.orientation, "buy_prompt", text_lines,
-            {"player": player, "position": position, "price": price}
+        grid = create_monopoly_buy_popup(
+            player.money,
+            space.data.get("name", ""),
+            price,
+            panel.orientation
         )
         
-        # Set popup-specific buttons in panel
-        can_afford = player.money >= price
-        self._set_popup_buttons(player.idx, ["Buy" if can_afford else "Can't Buy", "Pass", ""], 
-                               [can_afford, True, False])
+        self.popup.show(
+            player.idx,
+            panel.rect,
+            panel.orientation,
+            "buy_prompt",
+            grid,
+            {"player": player, "position": position, "price": price, "space": space}
+        )
     
     def _show_card_popup(self, player: Player, card: Dict, deck_type: str):
-        """Show card dialog as floating text box"""
-        # Close any existing popup first
-        if self.popup.active:
-            old_player_idx = self.popup.player_idx
-            self.popup.hide()
-            if old_player_idx is not None:
-                self._restore_default_buttons(old_player_idx)
-        
+        """Show card dialog"""
         panel = self.panels[player.idx]
         
-        text_lines = create_monopoly_card_popup(card.get("text", ""), deck_type)
+        grid = create_monopoly_card_popup(
+            card.get("text", ""),
+            deck_type,
+            panel.orientation
+        )
         
         self.popup.show(
-            player.idx, panel.rect, panel.orientation, "card", text_lines,
+            player.idx,
+            panel.rect,
+            panel.orientation,
+            "card",
+            grid,
             {"player": player, "card": card, "deck_type": deck_type}
         )
-        
-        # Set OK button in panel
-        self._set_popup_buttons(player.idx, ["OK", "", ""], [True, False, False])
     
     def _show_properties_popup(self, player: Player):
-        """Show properties list dialog as floating text box"""
-        # Close any existing popup first
-        if self.popup.active:
-            old_player_idx = self.popup.player_idx
-            self.popup.hide()
-            if old_player_idx is not None:
-                self._restore_default_buttons(old_player_idx)
-        
+        """Show properties list dialog"""
         panel = self.panels[player.idx]
         
-        # Get property data (name and color)
-        prop_data = [(self.properties[idx].data.get("name", ""), 
-                      self.properties[idx].data.get("color", (200, 200, 200))) 
-                     for idx in player.properties]
+        # Get property names
+        prop_names = [self.properties[idx].data.get("name", "") for idx in player.properties]
         
-        text_lines = create_monopoly_properties_popup(prop_data)
-        
-        self.popup.show(
-            player.idx, panel.rect, panel.orientation, "properties", text_lines,
-            {"player": player}
+        grid = create_monopoly_properties_popup(
+            prop_names,
+            panel.orientation
         )
         
-        # Set Close button in panel
-        self._set_popup_buttons(player.idx, ["Close", "", ""], [True, False, False])
+        self.popup.show(
+            player.idx,
+            panel.rect,
+            panel.orientation,
+            "properties",
+            grid,
+            {"player": player}
+        )
     
     def _show_build_popup(self, player: Player):
-        """Show build menu dialog as floating text box"""
-        # Close any existing popup first
-        if self.popup.active:
-            old_player_idx = self.popup.player_idx
-            self.popup.hide()
-            if old_player_idx is not None:
-                self._restore_default_buttons(old_player_idx)
-        
+        """Show build menu dialog"""
         panel = self.panels[player.idx]
         
-        text_lines = create_info_popup("Building", "Coming soon")
-        
-        self.popup.show(
-            player.idx, panel.rect, panel.orientation, "build", text_lines,
-            {"player": player}
+        grid = create_info_popup(
+            "Building",
+            "Coming soon",
+            panel.orientation,
+            "Close"
         )
         
-        # Set Close button in panel
-        self._set_popup_buttons(player.idx, ["Close", "", ""], [True, False, False])
+        self.popup.show(
+            player.idx,
+            panel.rect,
+            panel.orientation,
+            "build",
+            grid,
+            {"player": player}
+        )
     
     def _land_on_space(self, player: Player):
         """Handle landing on space"""
@@ -485,7 +430,6 @@ class MonopolyGame:
             player.properties.append(position)
         
         self.popup.hide()
-        self._restore_default_buttons(player.idx)
         self._finish_turn_or_allow_double()
     
     def _pay_rent(self, player: Player, position: int):
@@ -543,7 +487,6 @@ class MonopolyGame:
         if action_type == "advance_to":
             position = action[1]
             old_pos = player.position
-            self._start_token_animation(player.idx, old_pos, position)
             player.position = position
             if position < old_pos:
                 player.add_money(PASSING_GO_MONEY)
@@ -551,9 +494,7 @@ class MonopolyGame:
         elif action_type == "advance_spaces":
             spaces = action[1]
             old_pos = player.position
-            new_pos = (player.position + spaces) % 40
-            self._start_token_animation(player.idx, old_pos, new_pos)
-            player.position = new_pos
+            player.position = (player.position + spaces) % 40
             if player.position < old_pos:
                 player.add_money(PASSING_GO_MONEY)
         
@@ -585,7 +526,6 @@ class MonopolyGame:
                              key=lambda p: (p - current_pos) % 40)
             
             old_pos = player.position
-            self._start_token_animation(player.idx, old_pos, nearest)
             player.position = nearest
             if nearest < old_pos:
                 player.add_money(PASSING_GO_MONEY)
@@ -634,23 +574,19 @@ class MonopolyGame:
         # Board
         self._draw_board()
         
+        # Tokens
+        self._draw_tokens()
+        
         # Dice - show during roll animation or when values are set
         if self.dice_rolling or self.dice_values != (0, 0):
             self._draw_dice()
         
-        # Hover indicators
-        self._draw_hover_indicators()
-        
-        # Popups with dimming (batched, will be drawn after tokens)
+        # Popups
         if self.popup.active:
-            # Screen dimming to cover board text
-            self.renderer.draw_rect((0, 0, 0, 50), (0, 0, self.width, self.height))
-            self.popup.draw(self.renderer)
-    
-    def draw_immediate(self):
-        """Draw tokens on top of board text using immediate rendering (called after batch rendering)"""
-        if self.state != "player_select":
-            self._draw_tokens()
+            self._draw_popup()
+        
+        # Hover indicators on top
+        self._draw_hover_indicators()
     
     def _draw_panels(self):
         """Draw all player panels"""
@@ -667,7 +603,7 @@ class MonopolyGame:
             # Info with orientation-aware text
             self._draw_panel_info(player, panel)
             
-            # Buttons - show for ALL players (not just current)
+            # Buttons (draw only, input handled in handle_input)
             if idx in self.buttons:
                 current_time = time.time()
                 for btn in self.buttons[idx].values():
@@ -678,37 +614,37 @@ class MonopolyGame:
                     btn.draw(self.renderer, progress)
     
     def _draw_panel_info(self, player: Player, panel: PlayerPanel):
-        """Draw player balance using absolute panel coordinates - bold black text"""
-        x, y, w, h = panel.rect
-        
-        if panel.orientation == 0:  # Bottom - balance at top of panel
-            tx = x + w // 2
-            ty = y + int(h * 0.30)
-            self.renderer.draw_text(
-                f"${player.money}", tx, ty, 'Arial', 20, (0, 0, 0),
-                bold=True, anchor_x='center', anchor_y='center', rotation=0
+        """Draw player info with proper orientation using grid system"""
+        # For vertical panels (left/right), place text in INFO area (30% on FAR side)
+        if panel.orientation in [90, 270]:
+            # Left panel (270): info on RIGHT side (far from player), buttons on LEFT
+            # Right panel (90): info on LEFT side (far from player), buttons on RIGHT
+            if panel.orientation == 270:  # Left panel - info on right side
+                x_pos = 0.85  # Right side (far from left player)
+            else:  # Right panel (90) - info on left side
+                x_pos = 0.15  # Left side (far from right player)
+            
+            # Place at top of panel from player's perspective
+            panel.draw_text_oriented(
+                self.renderer, f"${player.money}",
+                x_pos, 0.90, 16, (255, 255, 100)
             )
-        elif panel.orientation == 180:  # Top - balance at bottom of panel
-            tx = x + w // 2
-            ty = y + int(h * 0.70)
-            self.renderer.draw_text(
-                f"${player.money}", tx, ty, 'Arial', 20, (0, 0, 0),
-                bold=True, anchor_x='center', anchor_y='center', rotation=180
+            if player.properties:
+                panel.draw_text_oriented(
+                    self.renderer, f"{len(player.properties)} props",
+                    x_pos, 0.80, 11, (200, 200, 200)
+                )
+        else:
+            # Horizontal panels - normal positioning
+            panel.draw_text_oriented(
+                self.renderer, f"${player.money}",
+                0.5, 0.25, 20, (255, 255, 100)
             )
-        elif panel.orientation == 270:  # Left - buttons left, balance right
-            tx = x + int(w * 0.85)
-            ty = y + h // 2
-            self.renderer.draw_text(
-                f"${player.money}", tx, ty, 'Arial', 16, (0, 0, 0),
-                bold=True, anchor_x='center', anchor_y='center', rotation=90
-            )
-        else:  # 90 - Right - buttons right, balance left
-            tx = x + int(w * 0.15)
-            ty = y + h // 2
-            self.renderer.draw_text(
-                f"${player.money}", tx, ty, 'Arial', 16, (0, 0, 0),
-                bold=True, anchor_x='center', anchor_y='center', rotation=270
-            )
+            if player.properties:
+                panel.draw_text_oriented(
+                    self.renderer, f"{len(player.properties)} props",
+                    0.5, 0.12, 14, (200, 200, 200)
+                )
     
     def _draw_board(self):
         """Draw monopoly board with property colors and names"""
@@ -734,139 +670,36 @@ class MonopolyGame:
                 bar_h = max(10, sh // 3)
                 self.renderer.draw_rect(prop_color, (sx, sy, sw, bar_h))
             
-            # Draw space name with text wrapping - NO ROTATION, always readable from bottom
-            # Hide names when popup is active to prevent overlap
+            # Draw space name - NO ROTATION, always readable from bottom
             name = space_data.get("name", "")
-            if name and not self.popup.active:
+            if name:
                 cx, cy = sx + sw // 2, sy + sh // 2
+                # Shorten name if too long
+                if len(name) > 12:
+                    name = name[:9] + "..."
                 
-                # Wrap text to fit in space
-                words = name.split()
-                if len(words) > 1:
-                    # Multiple words - split into lines
-                    lines = []
-                    current_line = ""
-                    for word in words:
-                        test_line = (current_line + " " + word).strip()
-                        if len(test_line) <= 10:  # Max chars per line
-                            current_line = test_line
-                        else:
-                            if current_line:
-                                lines.append(current_line)
-                            current_line = word
-                    if current_line:
-                        lines.append(current_line)
-                    
-                    # Draw multi-line text (reverse order because Y increases downward in pygame coords)
-                    font_size = 7 if space_type in ["property", "railroad", "utility"] else 6
-                    line_spacing = font_size + 2
-                    total_height = len(lines) * line_spacing
-                    start_y = cy - total_height // 2 + line_spacing // 2
-                    
-                    for i, line in enumerate(lines):
-                        ly = start_y + i * line_spacing
-                        self.renderer.draw_text(
-                            line, cx, ly,
-                            'Arial', font_size, (0, 0, 0),
-                            anchor_x='center', anchor_y='center',
-                            rotation=0
-                        )
-                else:
-                    # Single word - adjust size if too long
-                    if len(name) > 12:
-                        font_size = 6  # Smaller for long words
-                    elif len(name) > 10:
-                        font_size = 7
-                    else:
-                        font_size = 8 if space_type in ["property", "railroad", "utility"] else 7
-                    
-                    self.renderer.draw_text(
-                        name, cx, cy,
-                        'Arial', font_size, (0, 0, 0),
-                        anchor_x='center', anchor_y='center',
-                        rotation=0
-                    )
+                font_size = 8 if space_type in ["property", "railroad", "utility"] else 7
+                self.renderer.draw_text(
+                    name, cx, cy,
+                    'Arial', font_size, (0, 0, 0),
+                    anchor_x='center', anchor_y='center',
+                    rotation=0  # Always horizontal for readability
+                )
             
             # Border
             self.renderer.draw_rect((80, 80, 80), (sx, sy, sw, sh), width=1)
     
-    def _start_token_animation(self, player_idx: int, from_pos: int, to_pos: int):
-        """Start sequential jumping animation for token movement (one property at a time)"""
-        # Calculate path of properties to move through
-        path = []
-        current = from_pos
-        
-        # Move one space at a time until reaching destination
-        while current != to_pos:
-            current = (current + 1) % 40
-            path.append(current)
-        
-        # Each property takes 0.5 seconds
-        self.token_animations[player_idx] = {
-            'path': path,
-            'start_pos': from_pos,  # Remember where we started
-            'current_segment': 0,
-            'start_time': time.time(),
-            'segment_duration': 0.5  # 0.5 seconds per property
-        }
-    
     def _draw_tokens(self):
-        """Draw player tokens with sequential jumping animation through each property"""
-        current_time = time.time()
-        
+        """Draw player tokens"""
         for idx in self.active_players:
             player = self.players[idx]
             if player.is_bankrupt:
                 continue
             
-            # Check if token is animating
-            if idx in self.token_animations:
-                anim = self.token_animations[idx]
-                path = anim['path']
-                segment_duration = anim['segment_duration']
-                total_elapsed = current_time - anim['start_time']
-                
-                # Determine which segment we're on
-                current_segment = int(total_elapsed / segment_duration)
-                
-                if current_segment >= len(path):
-                    # Animation complete
-                    del self.token_animations[idx]
-                    sx, sy, sw, sh = self.spaces[player.position]
-                    cx, cy = sx + sw // 2, sy + sh // 2
-                else:
-                    # Interpolate within current segment
-                    segment_progress = (total_elapsed - current_segment * segment_duration) / segment_duration
-                    
-                    # Get start and end positions for this segment
-                    if current_segment == 0:
-                        # First segment starts from the original starting position
-                        start_pos = anim['start_pos']
-                    else:
-                        start_pos = path[current_segment - 1]
-                    end_pos = path[current_segment]
-                    
-                    start_x, start_y, start_w, start_h = self.spaces[start_pos]
-                    end_x, end_y, end_w, end_h = self.spaces[end_pos]
-                    
-                    start_cx = start_x + start_w // 2
-                    start_cy = start_y + start_h // 2
-                    end_cx = end_x + end_w // 2
-                    end_cy = end_y + end_h // 2
-                    
-                    # Linear interpolation for x, y
-                    cx = int(start_cx + (end_cx - start_cx) * segment_progress)
-                    cy = int(start_cy + (end_cy - start_cy) * segment_progress)
-                    
-                    # Add jump height (parabolic: peaks at 0.5 progress)
-                    jump_height = 40 * (1 - (2 * segment_progress - 1) ** 2)  # Max 40 pixels up
-                    cy -= int(jump_height)
-            else:
-                # No animation - static position
-                sx, sy, sw, sh = self.spaces[player.position]
-                cx, cy = sx + sw // 2, sy + sh // 2
+            sx, sy, sw, sh = self.spaces[player.position]
+            cx, cy = sx + sw // 2, sy + sh // 2
             
-            # Offset for multiple players at same position
+            # Offset for multiple players
             offset_idx = self.active_players.index(idx)
             num_players = len(self.active_players)
             if num_players > 1:
@@ -874,10 +707,10 @@ class MonopolyGame:
                 offset = 15
                 cx += int(offset * (0.5 - abs(0.5 - offset_idx / num_players)))
             
-            # Draw token using immediate rendering to ensure it's on top of board text
+            # Draw token
             color = PLAYER_COLORS[idx]
-            self.renderer.draw_circle_immediate(color, (cx, cy), 12)
-            self.renderer.draw_circle_immediate((0, 0, 0), (cx, cy), 12, width=2)
+            self.renderer.draw_circle(color, (cx, cy), 12)
+            self.renderer.draw_circle((0, 0, 0), (cx, cy), 12, width=2)
     
     def _draw_dice(self):
         """Draw dice with animation during roll"""
@@ -919,9 +752,15 @@ class MonopolyGame:
         draw_hover_indicators(self.renderer, self.buttons, self.active_players, current_time)
     
     def _draw_popup(self):
-        """Draw floating popup box (text only, buttons are in panel) - dimming done in main draw"""
-        # Note: Screen dimming is now handled in main draw() method
-        pass  # This method is deprecated but kept for compatibility
+        """Draw active popup with screen dimming"""
+        if not self.popup.active:
+            return
+        
+        # Dim entire screen
+        self.renderer.draw_rect((0, 0, 0, 160), (0, 0, self.width, self.height))
+        
+        # Draw popup using UniversalPopup system
+        self.popup.draw(self.renderer)
     
     def _draw_pips(self, cx: int, cy: int, size: int, value: int):
         """Draw dice pips"""

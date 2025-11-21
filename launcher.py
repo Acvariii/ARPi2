@@ -13,6 +13,7 @@ class GameLauncher:
         # Note: Pygame init and screen are handled by game_server_full.py
         self.screen = None  # Will be set by server
         self.font = pygame.font.SysFont(None, max(32, int(WINDOW_SIZE[1] * 0.05)))
+        self.clock = pygame.time.Clock()  # Initialize clock
         
         # UI state
         self.state = "menu"
