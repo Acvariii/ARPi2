@@ -359,3 +359,43 @@ PROPERTY_GROUPS = {
     "Railroad": [5, 15, 25, 35],
     "Utility": [12, 28],
 }
+
+# Community Chest cards (full list)
+COMMUNITY_CHEST_CARDS = [
+    {"id": "cc_collect_100", "text": "You set aside time every week to hang out with your elderly neighbor – you've heard some amazing stories! COLLECT $100.", "action": ("money", 100)},
+    {"id": "cc_collect_50",  "text": "You organize a group to clean up your town's footpaths. COLLECT $50.", "action": ("money", 50)},
+    {"id": "cc_collect_10",  "text": "You volunteered at a blood donation. There were free cookies! COLLECT $10.", "action": ("money", 10)},
+    {"id": "cc_pay_50",      "text": "You buy a few bags of cookies from that school bake sale. Yum! PAY $50.", "action": ("money", -50)},
+    {"id": "cc_getout",      "text": "GET OUT OF JAIL FREE. Keep this card until needed.", "action": ("jail_free", 1)},
+    {"id": "cc_collect_from_each_10", "text": "You organize a street party... COLLECT $10 FROM EACH PLAYER.", "action": ("collect_from_each", 10)},
+    {"id": "cc_go_to_jail",  "text": "GO TO JAIL. DO NOT PASS GO.", "action": ("go_to_jail", None)},
+    {"id": "cc_collect_20",  "text": "You help your neighbor bring in her groceries. COLLECT $20.", "action": ("money", 20)},
+    {"id": "cc_collect_100_b","text": "You help build a new school playground – COLLECT $100.", "action": ("money", 100)},
+    {"id": "cc_collect_100_c","text": "You spend the day playing games with kids at a local children's hospital. COLLECT $100.", "action": ("money", 100)},
+    {"id": "cc_pay_100",     "text": "You go to the local school's car wash fundraiser – PAY $100.", "action": ("money", -100)},
+    {"id": "cc_advance_go",  "text": "ADVANCE TO GO. (COLLECT $200)", "action": ("advance", 0, True)},
+    {"id": "cc_collect_200", "text": "You help your neighbors clean up after a storm. COLLECT $200.", "action": ("money", 200)},
+    {"id": "cc_pay_50_b",    "text": "Donation to animal shelter. PAY $50.", "action": ("money", -50)},
+    {"id": "cc_pay_for_repairs", "text": "For each house pay $40. For each hotel pay $115.", "action": ("pay_per_house_hotel", (40, 115))},
+    {"id": "cc_collect_25",  "text": "You organize a bake sale. COLLECT $25.", "action": ("money", 25)}
+]
+
+# Chance cards (full list)
+CHANCE_CARDS = [
+    {"id": "ch_boardwalk", "text": "Advance to Boardwalk.", "action": ("advance", 39, False)},
+    {"id": "ch_go",        "text": "Advance to Go (Collect $200).", "action": ("advance", 0, True)},
+    {"id": "ch_illinois",  "text": "Advance to Illinois Avenue. If you pass Go, collect $200.", "action": ("advance", 24, True)},
+    {"id": "ch_st_charles","text": "Advance to St. Charles Place. If you pass Go, collect $200.", "action": ("advance", 11, True)},
+    {"id": "ch_nearest_rail","text": "Advance to the nearest Railroad.", "action": ("advance_nearest", "railroad")},
+    {"id": "ch_nearest_rail_b","text": "Advance to the nearest Railroad.", "action": ("advance_nearest", "railroad")},
+    {"id": "ch_nearest_utility","text": "Advance token to nearest Utility.", "action": ("advance_nearest", "utility")},
+    {"id": "ch_dividend",  "text": "Bank pays you dividend of $50.", "action": ("money", 50)},
+    {"id": "ch_getout",    "text": "Get Out of Jail Free.", "action": ("jail_free", 1)},
+    {"id": "ch_back_3",    "text": "Go Back 3 Spaces.", "action": ("advance_relative", -3)},
+    {"id": "ch_go_to_jail","text": "Go to Jail. Do not pass Go.", "action": ("go_to_jail", None)},
+    {"id": "ch_repairs",   "text": "For each house pay $25. For each hotel pay $100.", "action": ("pay_per_house_hotel", (25, 100))},
+    {"id": "ch_speeding",  "text": "Speeding fine $15.", "action": ("money", -15)},
+    {"id": "ch_reading",   "text": "Advance to Reading Railroad.", "action": ("advance", 5, True)},
+    {"id": "ch_chairman",  "text": "Pay each player $50.", "action": ("pay_each_player", 50)},
+    {"id": "ch_loan",      "text": "Collect $150.", "action": ("money", 150)}
+]

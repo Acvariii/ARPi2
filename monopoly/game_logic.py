@@ -3,9 +3,9 @@ import random
 from typing import Dict, Optional
 from monopoly_data import (
     PASSING_GO_MONEY, INCOME_TAX, LUXURY_TAX, 
-    JAIL_POSITION, GO_TO_JAIL_POSITION, JAIL_FINE, MAX_JAIL_TURNS
+    JAIL_POSITION, GO_TO_JAIL_POSITION, JAIL_FINE, MAX_JAIL_TURNS,
+    COMMUNITY_CHEST_CARDS, CHANCE_CARDS
 )
-from constants import COMMUNITY_CHEST_CARDS, CHANCE_CARDS
 
 
 class GameLogic:

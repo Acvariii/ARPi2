@@ -10,9 +10,9 @@ from pyglet_games.renderer import PygletRenderer
 from config import PLAYER_COLORS, Colors, HOVER_TIME_THRESHOLD
 from monopoly_data import (
     BOARD_SPACES, STARTING_MONEY, PASSING_GO_MONEY,
-    LUXURY_TAX, INCOME_TAX, JAIL_POSITION, GO_TO_JAIL_POSITION
+    LUXURY_TAX, INCOME_TAX, JAIL_POSITION, GO_TO_JAIL_POSITION,
+    COMMUNITY_CHEST_CARDS, CHANCE_CARDS
 )
-from constants import COMMUNITY_CHEST_CARDS, CHANCE_CARDS
 from monopoly.property import Property
 from monopoly.player import Player
 from monopoly.game_logic import GameLogic
