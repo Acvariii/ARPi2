@@ -1328,7 +1328,7 @@ class MonopolyGame:
     
     def _has_monopoly(self, player_idx: int, position: int) -> bool:
         """Check if player owns all properties in the group"""
-        from monopoly_data import PROPERTY_GROUPS
+        from games.monopoly.data import PROPERTY_GROUPS
         
         prop = self.properties[position]
         prop_group = prop.data.get("group")
@@ -1349,7 +1349,7 @@ class MonopolyGame:
     
     def _can_build_on_property(self, player_idx: int, position: int) -> bool:
         """Check if player can build on this property (even building rule)"""
-        from monopoly_data import PROPERTY_GROUPS
+        from games.monopoly.data import PROPERTY_GROUPS
         
         prop = self.properties[position]
         prop_group = prop.data.get("group")

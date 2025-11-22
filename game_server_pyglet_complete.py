@@ -353,7 +353,7 @@ class PygletGameServer:
             self.current_fps = self.frame_count / (current_time - self.last_fps_time)
             self.frame_count = 0
             self.last_fps_time = current_time
-            print(f"Server FPS: {self.current_fps:.1f} | Hands tracked: {len(self.fingertip_data)}")
+            """print(f"Server FPS: {self.current_fps:.1f} | Hands tracked: {len(self.fingertip_data)}")"""
     
     async def handle_client(self, websocket, path):
         """Handle WebSocket client connection"""

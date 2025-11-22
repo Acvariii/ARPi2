@@ -11,6 +11,7 @@ class PlayerSelectionUI:
         self.screen_width = screen_width
         self.screen_height = screen_height
         self.selected = [False] * 8
+        self.selected[7] = True  # Player 8 (DM) is always selected
         self.hover_states = {}
         self.start_ready = False  # Track if start button was clicked
         
@@ -91,7 +92,9 @@ class PlayerSelectionUI:
                     
                     hover_duration = current_time - self.hover_states[key]["start_time"]
                     if hover_duration >= HOVER_TIME_THRESHOLD:
-                        self.selected[i] = not self.selected[i]
+                        # Don't allow deselecting Player 8 (DM)
+                        if i != 7:
+                            self.selected[i] = not self.selected[i]
                         del self.hover_states[key]
                     break
         

@@ -1,7 +1,7 @@
 import json
 import os
 import random
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 RACES = ["Human", "Elf", "Dwarf", "Halfling", "Orc", "Tiefling"]
 CLASSES = ["Fighter", "Wizard", "Rogue", "Cleric", "Ranger", "Paladin"]
@@ -178,3 +178,33 @@ class Character:
     def character_exists(player_idx: int) -> bool:
         filename = f"dnd_saves/character_{player_idx}.json"
         return os.path.exists(filename)
+
+
+class Enemy:
+    """Monster/NPC enemy for combat encounters"""
+    
+    def __init__(self, template: Dict):
+        self.name = template["name"]
+        self.max_hp = template["hp"]
+        self.current_hp = template["hp"]
+        self.armor_class = template["ac"]
+        self.abilities = template["abilities"]
+        self.attacks = template["attacks"]
+        self.cr = template["cr"]
+        self.xp = template["xp"]
+        self.special = template.get("special", None)
+        self.conditions = []
+        self.initiative = 0
+    
+    def get_ability_modifier(self, ability: str) -> int:
+        score = self.abilities.get(ability, 10)
+        return (score - 10) // 2
+    
+    def is_alive(self) -> bool:
+        return self.current_hp > 0
+    
+    def take_damage(self, amount: int):
+        self.current_hp = max(0, self.current_hp - amount)
+    
+    def heal(self, amount: int):
+        self.current_hp = min(self.max_hp, self.current_hp + amount)
