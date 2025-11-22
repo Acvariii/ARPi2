@@ -1594,7 +1594,7 @@ class MonopolyGame:
         
         # Get out of jail free card
         elif action_type == "jail_free":
-            player.get_out_of_jail_free_cards += 1
+            player.get_out_of_jail_cards += 1
         
         # Advance to nearest Railroad or Utility
         elif action_type == "advance_nearest":

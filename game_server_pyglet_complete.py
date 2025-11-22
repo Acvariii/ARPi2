@@ -18,7 +18,7 @@ import mediapipe as mp
 from config import WINDOW_SIZE, FPS, HOVER_TIME_THRESHOLD, Colors
 from pyglet_games.renderer import PygletRenderer
 from pyglet_games.monopoly_rebuilt import MonopolyGame
-from pyglet_games.blackjack_rebuilt import BlackjackGame
+from pyglet_games.blackjack_complete import BlackjackGame
 from pyglet_games.dnd_complete import DnDCharacterCreation
 
 

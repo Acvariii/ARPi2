@@ -241,41 +241,98 @@ class PlayerPanel:
         renderer.draw_text(text, tx, ty, 'Arial', font_size, color, 
                           anchor_x=anchor_x, anchor_y=anchor_y, rotation=rotation)
     
-    def get_button_layout(self) -> List[Tuple[int, int, int, int]]:
-        """Get button rectangles for this panel's orientation"""
+    def get_button_layout(self, max_buttons: int = 3) -> List[Tuple[int, int, int, int]]:
+        """Get button rectangles for this panel's orientation
+        
+        Args:
+            max_buttons: Maximum number of buttons to layout (3 for Monopoly, 5+ for Blackjack)
+        """
         x, y, w, h = self.rect
         margin = 10
         gap = 8
         
         if self.orientation == 0:  # Bottom
-            info_h = int(h * 0.45)
-            btn_h = h - info_h - 2 * margin
-            btn_w = (w - 2 * margin - 2 * gap) // 3
-            btn_y = y + info_h + margin
-            
-            return [
-                (x + margin, btn_y, btn_w, btn_h),
-                (x + margin + btn_w + gap, btn_y, btn_w, btn_h),
-                (x + margin + 2*(btn_w+gap), btn_y, btn_w, btn_h)
-            ]
+            if max_buttons <= 3:
+                # Single row layout for Monopoly (3 buttons)
+                info_h = int(h * 0.45)
+                btn_h = h - info_h - 2 * margin
+                btn_w = (w - 2 * margin - 2 * gap) // 3
+                btn_y = y + info_h + margin
+                
+                return [
+                    (x + margin, btn_y, btn_w, btn_h),
+                    (x + margin + btn_w + gap, btn_y, btn_w, btn_h),
+                    (x + margin + 2*(btn_w+gap), btn_y, btn_w, btn_h)
+                ]
+            else:
+                # Two row layout for Blackjack (5+ buttons)
+                info_h = int(h * 0.35)
+                btn_area_h = h - info_h - 2 * margin
+                btn_h = (btn_area_h - gap) // 2
+                btn_y = y + info_h + margin
+                
+                # First row: 3 buttons
+                btn_w = (w - 2 * margin - 2 * gap) // 3
+                buttons = [
+                    (x + margin, btn_y, btn_w, btn_h),
+                    (x + margin + btn_w + gap, btn_y, btn_w, btn_h),
+                    (x + margin + 2*(btn_w+gap), btn_y, btn_w, btn_h)
+                ]
+                
+                # Second row: up to 3 more buttons
+                btn_y2 = btn_y + btn_h + gap
+                remaining = max_buttons - 3
+                if remaining > 0:
+                    btn_w2 = (w - 2 * margin - (remaining-1) * gap) // remaining
+                    for i in range(remaining):
+                        buttons.append((x + margin + i*(btn_w2+gap), btn_y2, btn_w2, btn_h))
+                
+                return buttons
         
         elif self.orientation == 180:  # Top
-            info_h = int(h * 0.45)
-            btn_h = h - info_h - 2 * margin
-            btn_w = (w - 2 * margin - 2 * gap) // 3
-            btn_y = y + margin
-            
-            return [
-                (x + margin, btn_y, btn_w, btn_h),
-                (x + margin + btn_w + gap, btn_y, btn_w, btn_h),
-                (x + margin + 2*(btn_w+gap), btn_y, btn_w, btn_h)
-            ]
+            if max_buttons <= 3:
+                # Single row layout for Monopoly (3 buttons)
+                info_h = int(h * 0.45)
+                btn_h = h - info_h - 2 * margin
+                btn_w = (w - 2 * margin - 2 * gap) // 3
+                btn_y = y + margin
+                
+                return [
+                    (x + margin, btn_y, btn_w, btn_h),
+                    (x + margin + btn_w + gap, btn_y, btn_w, btn_h),
+                    (x + margin + 2*(btn_w+gap), btn_y, btn_w, btn_h)
+                ]
+            else:
+                # Two row layout for Blackjack (5+ buttons)
+                info_h = int(h * 0.35)
+                btn_area_h = h - info_h - 2 * margin
+                btn_h = (btn_area_h - gap) // 2
+                btn_y = y + margin
+                
+                # First row: 3 buttons
+                btn_w = (w - 2 * margin - 2 * gap) // 3
+                buttons = [
+                    (x + margin, btn_y, btn_w, btn_h),
+                    (x + margin + btn_w + gap, btn_y, btn_w, btn_h),
+                    (x + margin + 2*(btn_w+gap), btn_y, btn_w, btn_h)
+                ]
+                
+                # Second row: up to 3 more buttons
+                btn_y2 = btn_y + btn_h + gap
+                remaining = max_buttons - 3
+                if remaining > 0:
+                    btn_w2 = (w - 2 * margin - (remaining-1) * gap) // remaining
+                    for i in range(remaining):
+                        buttons.append((x + margin + i*(btn_w2+gap), btn_y2, btn_w2, btn_h))
+                
+                return buttons
         
         elif self.orientation in [90, 270]:  # Left/Right - vertical layout
             # Grid system: 70% buttons (close to player), 30% info (far from player)
             btn_area_w = int(w * 0.70)
             info_area_w = w - btn_area_w
-            btn_h = (h - 2 * margin - 2 * gap) // 3
+            num_gaps = max_buttons - 1
+            btn_h = (h - 2 * margin - num_gaps * gap) // max_buttons
             
             if self.orientation == 270:  # Left panel: buttons CLOSE to left player (on left), info on right
                 btn_x = x + margin
@@ -284,11 +341,11 @@ class PlayerPanel:
                 btn_x = x + info_area_w + margin
                 btn_w = btn_area_w - 2 * margin
             
-            return [
-                (btn_x, y + margin, btn_w, btn_h),
-                (btn_x, y + margin + btn_h + gap, btn_w, btn_h),
-                (btn_x, y + margin + 2*(btn_h+gap), btn_w, btn_h)
-            ]
+            buttons = []
+            for i in range(max_buttons):
+                buttons.append((btn_x, y + margin + i*(btn_h+gap), btn_w, btn_h))
+            
+            return buttons
         
         return []
 
