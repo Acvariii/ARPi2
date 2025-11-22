@@ -12,11 +12,11 @@ Features:
 import time
 import random
 from typing import List, Dict, Tuple, Optional
-from pyglet_games.renderer import PygletRenderer
+from core.renderer import PygletRenderer
 from config import PLAYER_COLORS, Colors, HOVER_TIME_THRESHOLD
-from pyglet_games.player_selection import PlayerSelectionUI
-from pyglet_games.ui_components_pyglet import PygletButton, PlayerPanel, calculate_all_panels
-from pyglet_games.popup_system import UniversalPopup
+from core.player_selection import PlayerSelectionUI
+from core.ui_components import PygletButton, PlayerPanel, calculate_all_panels
+from core.popup_system import UniversalPopup
 
 
 class Card:

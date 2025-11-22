@@ -1,12 +1,12 @@
 {
-  "name": "Thranduil the Phantom",
+  "name": "Caladrel Leafdancer",
   "player_color": [
     40,
     120,
     200
   ],
   "race": "Elf",
-  "char_class": "Rogue",
+  "char_class": "Cleric",
   "level": 1,
   "alignment": "",
   "abilities": {
@@ -14,16 +14,16 @@
     "DEX": 15,
     "CON": 8,
     "INT": 15,
-    "WIS": 8,
-    "CHA": 15
+    "WIS": 15,
+    "CHA": 8
   },
   "max_hp": 8,
   "current_hp": 8,
   "armor_class": 10,
   "skills": [
-    "Stealth",
-    "Sleight of Hand",
-    "Acrobatics"
+    "Medicine",
+    "Insight",
+    "Religion"
   ],
   "inventory": [],
   "gold": 0,

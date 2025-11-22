@@ -6,21 +6,20 @@ Carbon copy of Pygame version with full UI and game logic
 import time
 import random
 from typing import List, Dict, Tuple, Optional
-from pyglet_games.renderer import PygletRenderer
+from core.renderer import PygletRenderer
 from config import PLAYER_COLORS, Colors, HOVER_TIME_THRESHOLD
-from monopoly_data import (
+from games.monopoly.data import (
     BOARD_SPACES, STARTING_MONEY, PASSING_GO_MONEY,
     LUXURY_TAX, INCOME_TAX, JAIL_POSITION, GO_TO_JAIL_POSITION,
     COMMUNITY_CHEST_CARDS, CHANCE_CARDS
 )
-from monopoly.property import Property
-from monopoly.player import Player
-from monopoly.game_logic import GameLogic
-from pyglet_games.player_selection import PlayerSelectionUI
-from pyglet_games.ui_components_pyglet import (
+from games.monopoly.models import Property, Player
+from games.monopoly.logic import GameLogic
+from core.player_selection import PlayerSelectionUI
+from core.ui_components import (
     PygletButton, PlayerPanel, calculate_all_panels, draw_hover_indicators
 )
-from pyglet_games.popup_system import (
+from core.popup_system import (
     UniversalPopup, create_monopoly_buy_popup, create_monopoly_card_popup,
     create_monopoly_properties_popup, create_info_popup
 )

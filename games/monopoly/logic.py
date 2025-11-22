@@ -1,7 +1,8 @@
+"""Monopoly game logic - Movement, cards, rent calculation"""
 import time
 import random
 from typing import Dict, Optional
-from monopoly_data import (
+from games.monopoly.data import (
     PASSING_GO_MONEY, INCOME_TAX, LUXURY_TAX, 
     JAIL_POSITION, GO_TO_JAIL_POSITION, JAIL_FINE, MAX_JAIL_TURNS,
     COMMUNITY_CHEST_CARDS, CHANCE_CARDS
@@ -9,6 +10,7 @@ from monopoly_data import (
 
 
 class GameLogic:
+    """Core Monopoly game rules and logic"""
     
     @staticmethod
     def move_player(player, spaces: int):

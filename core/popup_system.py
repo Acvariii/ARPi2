@@ -4,7 +4,7 @@ Grid-based layout system for clean, readable popups across all player orientatio
 """
 
 from typing import Tuple, List, Dict, Optional, Any
-from pyglet_games.renderer import PygletRenderer
+from core.renderer import PygletRenderer
 from config import PLAYER_COLORS
 
 

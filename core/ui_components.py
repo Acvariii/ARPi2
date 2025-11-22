@@ -5,7 +5,7 @@ Includes buttons, panels, and text rendering with proper orientations
 
 import time
 from typing import List, Dict, Tuple, Optional
-from pyglet_games.renderer import PygletRenderer
+from core.renderer import PygletRenderer
 from config import PLAYER_COLORS, HOVER_TIME_THRESHOLD
 
 

@@ -8,10 +8,10 @@ import random
 import math
 from typing import List, Dict, Tuple, Optional
 import pyglet
-from pyglet_games.renderer import PygletRenderer
-from pyglet_games.player_selection import PlayerSelectionUI
+from core.renderer import PygletRenderer
+from core.player_selection import PlayerSelectionUI
 from config import PLAYER_COLORS, Colors, HOVER_TIME_THRESHOLD
-from dnd.character import Character, RACES, CLASSES, generate_character_name, CLASS_SKILLS
+from games.dnd.models import Character, RACES, CLASSES, generate_character_name, CLASS_SKILLS
 
 
 class PygletParticle:
