@@ -89,11 +89,11 @@ class PiThinClient:
         if not ret:
             return
         
-        # Smaller resolution for faster transmission (hand tracking doesn't need high res)
-        frame_small = cv2.resize(frame, (160, 120))
+        # Keep original resolution for quality
+        frame_small = cv2.resize(frame, (640, 480))
         
-        # Lower quality for speed
-        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 50]
+        # Good quality
+        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 85]
         result, encoded_img = cv2.imencode('.jpg', frame_small, encode_param)
         
         if result:

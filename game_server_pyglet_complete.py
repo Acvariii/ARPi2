@@ -14,6 +14,7 @@ import base64
 import time
 from typing import Dict, List
 import mediapipe as mp
+from concurrent.futures import ThreadPoolExecutor
 
 from config import WINDOW_SIZE, FPS, HOVER_TIME_THRESHOLD, Colors
 from core.renderer import PygletRenderer
@@ -67,6 +68,9 @@ class PygletGameServer:
         self.host = host
         self.port = port
         self.clients: Dict[str, websockets.WebSocketServerProtocol] = {}
+        
+        # Thread pool for CPU-intensive operations (hand tracking, encoding)
+        self.executor = ThreadPoolExecutor(max_workers=4)
         
         # Create Pyglet window with OpenGL - Fullscreen
         config = pyglet.gl.Config(double_buffer=True, sample_buffers=1, samples=4)
@@ -367,49 +371,60 @@ class PygletGameServer:
         
         self.broadcasting = True
         try:
-            # Read pixel data from the framebuffer
+            # Read pixel data from the framebuffer (must be done on main thread)
             buffer = pyglet.image.get_buffer_manager().get_color_buffer()
             image_data = buffer.get_image_data()
-            
-            # Convert to numpy array
             raw_data = image_data.get_data('RGB', image_data.width * 3)
-            arr = np.frombuffer(raw_data, dtype=np.uint8)
-            arr = arr.reshape(image_data.height, image_data.width, 3)
             
-            # Flip vertically (OpenGL has origin at bottom-left)
-            arr = np.flipud(arr)
+            # Process encoding in thread pool (CPU intensive)
+            loop = asyncio.get_event_loop()
             
-            # Downsample for faster encoding/transmission (half resolution)
-            arr = cv2.resize(arr, (image_data.width // 2, image_data.height // 2), 
-                           interpolation=cv2.INTER_LINEAR)
+            def encode_frame():
+                # Convert to numpy array
+                arr = np.frombuffer(raw_data, dtype=np.uint8)
+                arr = arr.reshape(image_data.height, image_data.width, 3)
+                
+                # Flip vertically (OpenGL has origin at bottom-left)
+                arr = np.flipud(arr)
+                
+                # Convert RGB to BGR for cv2
+                arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+                
+                # Encode as JPEG with high quality
+                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 85]
+                result, encoded = cv2.imencode('.jpg', arr, encode_param)
+                
+                if result:
+                    return base64.b64encode(encoded.tobytes()).decode('utf-8')
+                return None
             
-            # Convert RGB to BGR for cv2
-            arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+            # Encode in thread pool
+            frame_base64 = await loop.run_in_executor(self.executor, encode_frame)
             
-            # Encode as JPEG with lower quality for speed
-            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 60]
-            result, encoded = cv2.imencode('.jpg', arr, encode_param)
-            
-            if result:
-                frame_base64 = base64.b64encode(encoded.tobytes()).decode('utf-8')
+            if frame_base64:
                 message = json.dumps({
                     "type": "game_frame",
                     "frame": frame_base64,
                     "timestamp": time.time()
                 })
                 
-                # Send to all connected clients (non-blocking)
+                # Send to all connected clients in parallel
                 disconnected = []
-                for client_id, websocket in self.clients.items():
-                    try:
-                        await websocket.send(message)
-                    except:
-                        disconnected.append(client_id)
-                
-                # Clean up disconnected clients
-                for client_id in disconnected:
-                    if client_id in self.clients:
-                        del self.clients[client_id]
+                if self.clients:
+                    send_tasks = []
+                    for client_id, websocket in list(self.clients.items()):
+                        send_tasks.append((client_id, websocket.send(message)))
+                    
+                    # Wait for all sends to complete
+                    results = await asyncio.gather(*[task for _, task in send_tasks], return_exceptions=True)
+                    for (client_id, _), result in zip(send_tasks, results):
+                        if isinstance(result, Exception):
+                            disconnected.append(client_id)
+                    
+                    # Clean up disconnected clients
+                    for client_id in disconnected:
+                        if client_id in self.clients:
+                            del self.clients[client_id]
         
         except Exception as e:
             print(f"Error broadcasting frame: {e}")
@@ -428,14 +443,23 @@ class PygletGameServer:
                     data = json.loads(message)
                     
                     if data.get("type") == "camera_frame":
-                        # Decode frame
-                        frame_data = base64.b64decode(data["frame"])
-                        nparr = np.frombuffer(frame_data, np.uint8)
-                        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                        # Decode frame in thread pool to avoid blocking
+                        loop = asyncio.get_event_loop()
                         
-                        if frame is not None:
-                            # Process hand tracking
-                            self.fingertip_data = self.hand_tracker.process_frame(frame)
+                        def process_camera_frame():
+                            frame_data = base64.b64decode(data["frame"])
+                            nparr = np.frombuffer(frame_data, np.uint8)
+                            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                            
+                            if frame is not None:
+                                # Process hand tracking (CPU intensive)
+                                return self.hand_tracker.process_frame(frame)
+                            return None
+                        
+                        # Run in thread pool without waiting (fire and forget for max speed)
+                        result = await loop.run_in_executor(self.executor, process_camera_frame)
+                        if result is not None:
+                            self.fingertip_data = result
                 
                 except Exception as e:
                     print(f"Error processing message: {e}")
