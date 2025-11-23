@@ -6,7 +6,6 @@ import numpy as np
 import json
 import time
 from typing import Optional
-from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor
 
 from config import WINDOW_SIZE, FPS, SERVER_IP, SERVER_PORT
@@ -261,7 +260,7 @@ class PiThinClient:
         if not await self.connect():
             print("Could not connect to server. Exiting.")
             return
-        self.decode_queue = asyncio.Queue(maxsize=2)
+        self.decode_queue = asyncio.Queue(maxsize=1)
         
         try:
             await asyncio.gather(

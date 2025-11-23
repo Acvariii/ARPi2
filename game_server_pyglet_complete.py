@@ -74,7 +74,8 @@ class PygletGameServer:
         self.encode_worker_count = 2
         self.hand_executor = ThreadPoolExecutor(max_workers=self.hand_worker_count)
         self.encode_executor = ThreadPoolExecutor(max_workers=self.encode_worker_count)
-        self.pending_hand_tasks = 0
+        self.latest_hand_frame = None
+        self.hand_frame_event = None
         
         # Create Pyglet window with OpenGL - Fullscreen
         config = pyglet.gl.Config(double_buffer=True, sample_buffers=1, samples=4)
@@ -453,6 +454,35 @@ class PygletGameServer:
             print(f"Error broadcasting frame: {e}")
         finally:
             self.broadcasting = False
+
+    async def hand_tracking_loop(self):
+        if self.hand_frame_event is None:
+            self.hand_frame_event = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        while self.running:
+            await self.hand_frame_event.wait()
+            frame_bytes = self.latest_hand_frame
+            self.latest_hand_frame = None
+            self.hand_frame_event.clear()
+            if not frame_bytes:
+                continue
+
+            def process_camera_frame():
+                try:
+                    nparr = np.frombuffer(frame_bytes, np.uint8)
+                    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                    if frame is not None:
+                        return self.hand_tracker.process_frame(frame)
+                except Exception as e:
+                    print(f"Error in hand tracking: {e}")
+                return None
+
+            try:
+                fingertips = await loop.run_in_executor(self.hand_executor, process_camera_frame)
+                if fingertips is not None:
+                    self.fingertip_data = fingertips
+            except Exception as e:
+                print(f"Hand tracking processing error: {e}")
     
     async def handle_client(self, websocket, path):
         """Handle WebSocket client connection"""
@@ -464,38 +494,9 @@ class PygletGameServer:
             async for message in websocket:
                 try:
                     if isinstance(message, bytes):
-                        if self.pending_hand_tasks >= self.hand_worker_count:
-                            continue
-                        self.pending_hand_tasks += 1
-                        frame_bytes = bytes(message)
-                        loop = asyncio.get_running_loop()
-
-                        def process_camera_frame():
-                            try:
-                                nparr = np.frombuffer(frame_bytes, np.uint8)
-                                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                                if frame is not None:
-                                    return self.hand_tracker.process_frame(frame)
-                            except Exception as e:
-                                print(f"Error in hand tracking: {e}")
-                            return None
-
-                        def update_fingertips(future):
-                            try:
-                                result = future.result()
-                                if result is not None:
-                                    self.fingertip_data = result
-                            except Exception as e:
-                                print(f"Error updating fingertips: {e}")
-                            finally:
-                                self.pending_hand_tasks = max(0, self.pending_hand_tasks - 1)
-
-                        try:
-                            future = loop.run_in_executor(self.hand_executor, process_camera_frame)
-                            future.add_done_callback(update_fingertips)
-                        except Exception:
-                            self.pending_hand_tasks = max(0, self.pending_hand_tasks - 1)
-                            raise
+                        self.latest_hand_frame = bytes(message)
+                        if self.hand_frame_event:
+                            self.hand_frame_event.set()
                         continue
 
                     data = json.loads(message)
@@ -539,7 +540,9 @@ class PygletGameServer:
         
         # Run asyncio event loop with Pyglet
         async def main():
-            # Start server
+            # Start server and hand tracking loop
+            self.hand_frame_event = asyncio.Event()
+            hand_task = asyncio.create_task(self.hand_tracking_loop())
             server_task = asyncio.create_task(self.start_server())
             
             try:
@@ -568,6 +571,12 @@ class PygletGameServer:
                 server_task.cancel()
                 try:
                     await server_task
+                except asyncio.CancelledError:
+                    pass
+                # Cancel hand tracking loop
+                hand_task.cancel()
+                try:
+                    await hand_task
                 except asyncio.CancelledError:
                     pass
                 print("Server shut down successfully")
