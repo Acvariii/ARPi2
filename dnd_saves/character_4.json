@@ -1,21 +1,21 @@
 {
-  "name": "Diana the Mighty",
+  "name": "Poppy the Just",
   "player_color": [
     200,
     40,
     200
   ],
-  "race": "Human",
-  "char_class": "Fighter",
+  "race": "Halfling",
+  "char_class": "Paladin",
   "level": 1,
   "alignment": "Neutral Good",
   "abilities": {
-    "Strength": 14,
-    "Dexterity": 15,
+    "Strength": 13,
+    "Dexterity": 14,
     "Constitution": 13,
-    "Intelligence": 7,
-    "Wisdom": 13,
-    "Charisma": 15
+    "Intelligence": 17,
+    "Wisdom": 10,
+    "Charisma": 10
   },
   "max_hp": 11,
   "current_hp": 11,

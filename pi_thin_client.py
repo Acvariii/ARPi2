@@ -23,7 +23,8 @@ class PiThinClient:
         
         pygame.init()
         pygame.mouse.set_visible(True)
-        self.screen = pygame.display.set_mode(WINDOW_SIZE, pygame.FULLSCREEN | pygame.NOFRAME)
+        display_flags = pygame.FULLSCREEN | pygame.NOFRAME | pygame.HWSURFACE | pygame.DOUBLEBUF
+        self.screen = pygame.display.set_mode(WINDOW_SIZE, display_flags)
         self.clock = pygame.time.Clock()
         
         self.camera = cv2.VideoCapture(0)
@@ -115,15 +116,15 @@ class PiThinClient:
                 pass
 
     @staticmethod
-    def _decode_frame_array(frame_bytes):
+    def _decode_frame_surface(frame_bytes):
         try:
             nparr = np.frombuffer(frame_bytes, np.uint8)
             frame_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             if frame_bgr is None:
                 return None
             frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-            # Transpose so surfarray.make_surface doesn't need extra copy later
-            return np.transpose(frame_rgb, (1, 0, 2))
+            h, w = frame_rgb.shape[:2]
+            return frame_rgb.tobytes(), (w, h)
         except Exception as e:
             print(f"Decode error: {e}")
             return None
@@ -174,13 +175,14 @@ class PiThinClient:
                 frame_bytes = await self.decode_queue.get()
             except asyncio.CancelledError:
                 break
-            frame_array = await loop.run_in_executor(self.decode_executor, self._decode_frame_array, frame_bytes)
-            if frame_array is not None:
+            result = await loop.run_in_executor(self.decode_executor, self._decode_frame_surface, frame_bytes)
+            if result is not None:
                 try:
-                    frame_surface = pygame.surfarray.make_surface(frame_array)
-                    if frame_surface.get_size() != WINDOW_SIZE:
-                        frame_surface = pygame.transform.scale(frame_surface, WINDOW_SIZE)
-                    self.last_frame_surface = frame_surface
+                    buffer_bytes, size = result
+                    frame_surface = pygame.image.frombuffer(buffer_bytes, size, 'RGB')
+                    if size != WINDOW_SIZE:
+                        frame_surface = pygame.transform.smoothscale(frame_surface, WINDOW_SIZE)
+                    self.last_frame_surface = frame_surface.convert()
                 except Exception as e:
                     print(f"Surface error: {e}")
             self.decode_queue.task_done()
@@ -219,11 +221,10 @@ class PiThinClient:
     
     async def render_loop(self):
         while self.running:
-            self.screen.fill((20, 20, 30))
-            
             if self.last_frame_surface:
                 self.screen.blit(self.last_frame_surface, (0, 0))
             else:
+                self.screen.fill((20, 20, 30))
                 font = pygame.font.SysFont("Arial", 48)
                 text = font.render("Connecting to server...", True, (255, 255, 255))
                 text_rect = text.get_rect(center=(WINDOW_SIZE[0]//2, WINDOW_SIZE[1]//2))

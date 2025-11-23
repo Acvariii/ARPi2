@@ -1,25 +1,25 @@
 {
-  "name": "Helena Stormwind",
+  "name": "Jade Blackwood",
   "player_color": [
     255,
     120,
     60
   ],
   "race": "Human",
-  "char_class": "Fighter",
+  "char_class": "Wizard",
   "level": 1,
   "alignment": "Neutral Good",
   "abilities": {
-    "Strength": 16,
-    "Dexterity": 15,
-    "Constitution": 5,
+    "Strength": 12,
+    "Dexterity": 13,
+    "Constitution": 17,
     "Intelligence": 14,
-    "Wisdom": 13,
-    "Charisma": 13
+    "Wisdom": 15,
+    "Charisma": 10
   },
-  "max_hp": 7,
-  "current_hp": 7,
-  "armor_class": 12,
+  "max_hp": 9,
+  "current_hp": 9,
+  "armor_class": 11,
   "skills": [],
   "inventory": [],
   "gold": 0,
