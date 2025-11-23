@@ -115,28 +115,23 @@ class PiThinClient:
         try:
             async for message in self.websocket:
                 try:
+                    if isinstance(message, bytes):
+                        nparr = np.frombuffer(message, np.uint8)
+                        frame_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                        if frame_bgr is not None:
+                            frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                            frame_surface = pygame.surfarray.make_surface(
+                                np.transpose(frame_rgb, (1, 0, 2))
+                            )
+                            if frame_surface.get_size() != WINDOW_SIZE:
+                                frame_surface = pygame.transform.scale(frame_surface, WINDOW_SIZE)
+                            self.last_frame = frame_surface
+                        continue
+                    
                     data = json.loads(message)
                     msg_type = data.get("type")
                     
-                    if msg_type == "game_frame":
-                        frame_base64 = data.get("frame", "")
-                        if frame_base64:
-                            frame_bytes = base64.b64decode(frame_base64)
-                            nparr = np.frombuffer(frame_bytes, np.uint8)
-                            frame_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                            
-                            if frame_bgr is not None:
-                                frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-                                frame_surface = pygame.surfarray.make_surface(
-                                    np.transpose(frame_rgb, (1, 0, 2))
-                                )
-                                
-                                if frame_surface.get_size() != WINDOW_SIZE:
-                                    frame_surface = pygame.transform.scale(frame_surface, WINDOW_SIZE)
-                                
-                                self.last_frame = frame_surface
-                    
-                    elif msg_type == "pong":
+                    if msg_type == "pong":
                         pass
                 
                 except json.JSONDecodeError:

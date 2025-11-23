@@ -12,6 +12,7 @@ import numpy as np
 import json
 import base64
 import time
+import ctypes
 from typing import Dict, List
 import mediapipe as mp
 from concurrent.futures import ThreadPoolExecutor
@@ -69,8 +70,12 @@ class PygletGameServer:
         self.port = port
         self.clients: Dict[str, websockets.WebSocketServerProtocol] = {}
         
-        # Thread pool for CPU-intensive operations (hand tracking, encoding)
-        self.executor = ThreadPoolExecutor(max_workers=4)
+        # Thread pools for CPU-intensive operations
+        self.hand_worker_count = 2
+        self.encode_worker_count = 2
+        self.hand_executor = ThreadPoolExecutor(max_workers=self.hand_worker_count)
+        self.encode_executor = ThreadPoolExecutor(max_workers=self.encode_worker_count)
+        self.pending_hand_tasks = 0
         
         # Create Pyglet window with OpenGL - Fullscreen
         config = pyglet.gl.Config(double_buffer=True, sample_buffers=1, samples=4)
@@ -78,7 +83,7 @@ class PygletGameServer:
             fullscreen=True,
             caption="ARPi2 Game Server - Pyglet/OpenGL (Complete UI)",
             config=config,
-            vsync=True
+            sync=True
         )
         
         # Update window size to actual screen size
@@ -108,6 +113,20 @@ class PygletGameServer:
         self.broadcast_fps = 60  # Send 60 frames per second to clients
         self.broadcasting = False  # Flag to prevent overlapping broadcasts
         
+        # GPU capture buffers (double-buffered PBOs)
+        self.capture_width = self.window.width
+        self.capture_height = self.window.height
+        self.capture_stride = self.capture_width * 3
+        self.capture_buffer_size = self.capture_stride * self.capture_height
+        self.capture_pbos = (gl.GLuint * 2)()
+        gl.glGenBuffers(2, self.capture_pbos)
+        for idx in range(2):
+            gl.glBindBuffer(gl.GL_PIXEL_PACK_BUFFER, self.capture_pbos[idx])
+            gl.glBufferData(gl.GL_PIXEL_PACK_BUFFER, self.capture_buffer_size, None, gl.GL_STREAM_READ)
+        gl.glBindBuffer(gl.GL_PIXEL_PACK_BUFFER, 0)
+        self.capture_pbo_index = 0
+        self.capture_ready = False
+
         # Input state
         self.last_keyboard_event = None
         self.mouse_x = 0
@@ -365,67 +384,72 @@ class PygletGameServer:
             """print(f"Server FPS: {self.current_fps:.1f} | Hands tracked: {len(self.fingertip_data)}")"""
     
     async def broadcast_frame(self):
-        """Capture screen and broadcast to all clients - optimized for speed"""
-        if self.broadcasting:  # Skip if previous broadcast still in progress
+        """Capture screen and broadcast to all clients with GPU/CPU overlap"""
+        if self.broadcasting:
             return
         
         self.broadcasting = True
         try:
-            # Read pixel data from the framebuffer (must be done on main thread)
-            buffer = pyglet.image.get_buffer_manager().get_color_buffer()
-            image_data = buffer.get_image_data()
-            raw_data = image_data.get_data('RGB', image_data.width * 3)
+            width = self.capture_width
+            height = self.capture_height
+            bytes_per_frame = self.capture_buffer_size
+            current_index = self.capture_pbo_index
+            next_index = (current_index + 1) % 2
+            frame_bytes = None
             
-            # Process encoding in thread pool (CPU intensive)
-            loop = asyncio.get_event_loop()
+            # Kick off asynchronous GPU read into current PBO
+            gl.glBindBuffer(gl.GL_PIXEL_PACK_BUFFER, self.capture_pbos[current_index])
+            gl.glReadPixels(0, 0, width, height, gl.GL_RGB, gl.GL_UNSIGNED_BYTE, ctypes.c_void_p(0))
+            
+            # Map the previously used PBO to access completed pixel data
+            if self.capture_ready:
+                gl.glBindBuffer(gl.GL_PIXEL_PACK_BUFFER, self.capture_pbos[next_index])
+                ptr = gl.glMapBuffer(gl.GL_PIXEL_PACK_BUFFER, gl.GL_READ_ONLY)
+                if ptr:
+                    frame_bytes = ctypes.string_at(ptr, bytes_per_frame)
+                    gl.glUnmapBuffer(gl.GL_PIXEL_PACK_BUFFER)
+                gl.glBindBuffer(gl.GL_PIXEL_PACK_BUFFER, 0)
+            else:
+                # Skip first frame (no data yet)
+                gl.glBindBuffer(gl.GL_PIXEL_PACK_BUFFER, 0)
+                self.capture_ready = True
+            
+            # Advance PBO index for next call
+            self.capture_pbo_index = next_index
+            
+            if not frame_bytes:
+                return
+            
+            loop = asyncio.get_running_loop()
             
             def encode_frame():
-                # Convert to numpy array
-                arr = np.frombuffer(raw_data, dtype=np.uint8)
-                arr = arr.reshape(image_data.height, image_data.width, 3)
-                
-                # Flip vertically (OpenGL has origin at bottom-left)
-                arr = np.flipud(arr)
-                
-                # Convert RGB to BGR for cv2
+                arr = np.frombuffer(frame_bytes, dtype=np.uint8)
+                arr = arr.reshape((height, width, 3))
+                arr = np.flip(arr, axis=0)  # Flip vertically
                 arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
-                
-                # Encode as JPEG with high quality
                 encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 85]
                 result, encoded = cv2.imencode('.jpg', arr, encode_param)
-                
                 if result:
-                    return base64.b64encode(encoded.tobytes()).decode('utf-8')
+                    return encoded.tobytes()
                 return None
             
-            # Encode in thread pool
-            frame_base64 = await loop.run_in_executor(self.executor, encode_frame)
+            encoded_bytes = await loop.run_in_executor(self.encode_executor, encode_frame)
+            if not encoded_bytes or not self.clients:
+                return
             
-            if frame_base64:
-                message = json.dumps({
-                    "type": "game_frame",
-                    "frame": frame_base64,
-                    "timestamp": time.time()
-                })
-                
-                # Send to all connected clients in parallel
-                disconnected = []
-                if self.clients:
-                    send_tasks = []
-                    for client_id, websocket in list(self.clients.items()):
-                        send_tasks.append((client_id, websocket.send(message)))
-                    
-                    # Wait for all sends to complete
-                    results = await asyncio.gather(*[task for _, task in send_tasks], return_exceptions=True)
-                    for (client_id, _), result in zip(send_tasks, results):
-                        if isinstance(result, Exception):
-                            disconnected.append(client_id)
-                    
-                    # Clean up disconnected clients
-                    for client_id in disconnected:
-                        if client_id in self.clients:
-                            del self.clients[client_id]
-        
+            disconnected = []
+            send_tasks = []
+            for client_id, websocket in list(self.clients.items()):
+                send_tasks.append((client_id, websocket.send(encoded_bytes)))
+            
+            results = await asyncio.gather(*[task for _, task in send_tasks], return_exceptions=True)
+            for (client_id, _), result in zip(send_tasks, results):
+                if isinstance(result, Exception):
+                    disconnected.append(client_id)
+            
+            for client_id in disconnected:
+                if client_id in self.clients:
+                    del self.clients[client_id]
         except Exception as e:
             print(f"Error broadcasting frame: {e}")
         finally:
@@ -442,24 +466,51 @@ class PygletGameServer:
                 try:
                     data = json.loads(message)
                     
-                    if data.get("type") == "camera_frame":
-                        # Decode frame in thread pool to avoid blocking
-                        loop = asyncio.get_event_loop()
+                    msg_type = data.get("type")
+
+                    if msg_type == "camera_frame":
+                        # Skip processing if executor is saturated
+                        if self.pending_hand_tasks >= self.hand_worker_count:
+                            continue
+
+                        self.pending_hand_tasks += 1
+
+                        # Process hand tracking asynchronously without blocking
+                        loop = asyncio.get_running_loop()
                         
                         def process_camera_frame():
-                            frame_data = base64.b64decode(data["frame"])
-                            nparr = np.frombuffer(frame_data, np.uint8)
-                            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                            
-                            if frame is not None:
-                                # Process hand tracking (CPU intensive)
-                                return self.hand_tracker.process_frame(frame)
+                            try:
+                                frame_data = base64.b64decode(data["frame"])
+                                nparr = np.frombuffer(frame_data, np.uint8)
+                                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                                
+                                if frame is not None:
+                                    # Process hand tracking (CPU intensive)
+                                    return self.hand_tracker.process_frame(frame)
+                            except Exception as e:
+                                print(f"Error in hand tracking: {e}")
                             return None
                         
-                        # Run in thread pool without waiting (fire and forget for max speed)
-                        result = await loop.run_in_executor(self.executor, process_camera_frame)
-                        if result is not None:
-                            self.fingertip_data = result
+                        # Fire and forget - don't await, just update when done
+                        def update_fingertips(future):
+                            try:
+                                result = future.result()
+                                if result is not None:
+                                    self.fingertip_data = result
+                            except Exception as e:
+                                print(f"Error updating fingertips: {e}")
+                            finally:
+                                self.pending_hand_tasks = max(0, self.pending_hand_tasks - 1)
+                        
+                        # Submit to executor and add callback
+                        try:
+                            future = loop.run_in_executor(self.hand_executor, process_camera_frame)
+                            future.add_done_callback(update_fingertips)
+                        except Exception:
+                            self.pending_hand_tasks = max(0, self.pending_hand_tasks - 1)
+                            raise
+                    elif msg_type == "ping":
+                        await websocket.send(json.dumps({"type": "pong"}))
                 
                 except Exception as e:
                     print(f"Error processing message: {e}")
@@ -507,11 +558,12 @@ class PygletGameServer:
                             window.dispatch_event('on_draw')
                             window.flip()
                     
-                    # Broadcast frames to clients at specified FPS
+                    # Broadcast frames to clients at specified FPS (non-blocking)
                     current_time = time.time()
                     if current_time - self.last_broadcast_time >= (1.0 / self.broadcast_fps):
                         if self.clients:  # Only broadcast if we have clients
-                            await self.broadcast_frame()
+                            # Fire and forget - don't await
+                            asyncio.create_task(self.broadcast_frame())
                         self.last_broadcast_time = current_time
                     
                     await asyncio.sleep(0.001)  # Small sleep to prevent CPU spinning
@@ -540,7 +592,15 @@ class PygletGameServer:
                     self.window.close()
             except:
                 pass
-            print("Cleanup complete")
+            # Stop worker pools
+            self.hand_executor.shutdown(wait=False)
+            self.encode_executor.shutdown(wait=False)
+            if hasattr(self, "capture_pbos"):
+                try:
+                    gl.glDeleteBuffers(2, self.capture_pbos)
+                except Exception:
+                    pass
+        print("Cleanup complete")
 
 
 if __name__ == "__main__":
