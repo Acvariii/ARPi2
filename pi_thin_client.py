@@ -8,6 +8,7 @@ import base64
 import time
 from typing import Optional
 from io import BytesIO
+from concurrent.futures import ThreadPoolExecutor
 
 from config import WINDOW_SIZE, FPS, SERVER_IP, SERVER_PORT
 
@@ -31,7 +32,9 @@ class PiThinClient:
         self.camera.set(cv2.CAP_PROP_FPS, 30)
         
         self.running = True
-        self.last_frame = None
+        self.last_frame_surface = None
+        self.decode_executor = ThreadPoolExecutor(max_workers=2)
+        self.decode_queue: Optional[asyncio.Queue] = None
         
         self.frame_count = 0
         self.last_fps_time = time.time()
@@ -110,22 +113,40 @@ class PiThinClient:
                 await self.websocket.send(message)
             except:
                 pass
+
+    @staticmethod
+    def _decode_frame_array(frame_bytes):
+        try:
+            nparr = np.frombuffer(frame_bytes, np.uint8)
+            frame_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if frame_bgr is None:
+                return None
+            frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+            # Transpose so surfarray.make_surface doesn't need extra copy later
+            return np.transpose(frame_rgb, (1, 0, 2))
+        except Exception as e:
+            print(f"Decode error: {e}")
+            return None
     
     async def receive_frames(self):
         try:
             async for message in self.websocket:
                 try:
                     if isinstance(message, bytes):
-                        nparr = np.frombuffer(message, np.uint8)
-                        frame_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                        if frame_bgr is not None:
-                            frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-                            frame_surface = pygame.surfarray.make_surface(
-                                np.transpose(frame_rgb, (1, 0, 2))
-                            )
-                            if frame_surface.get_size() != WINDOW_SIZE:
-                                frame_surface = pygame.transform.scale(frame_surface, WINDOW_SIZE)
-                            self.last_frame = frame_surface
+                        if self.decode_queue is None:
+                            continue
+                        try:
+                            self.decode_queue.put_nowait(message)
+                        except asyncio.QueueFull:
+                            # Drop oldest frame to keep latency low
+                            try:
+                                self.decode_queue.get_nowait()
+                            except asyncio.QueueEmpty:
+                                pass
+                            try:
+                                self.decode_queue.put_nowait(message)
+                            except asyncio.QueueFull:
+                                pass
                         continue
                     
                     data = json.loads(message)
@@ -142,6 +163,27 @@ class PiThinClient:
         except websockets.exceptions.ConnectionClosed:
             print("Connection to server closed")
             self.running = False
+
+    async def decode_loop(self):
+        loop = asyncio.get_running_loop()
+        while self.running:
+            if not self.decode_queue:
+                await asyncio.sleep(0.001)
+                continue
+            try:
+                frame_bytes = await self.decode_queue.get()
+            except asyncio.CancelledError:
+                break
+            frame_array = await loop.run_in_executor(self.decode_executor, self._decode_frame_array, frame_bytes)
+            if frame_array is not None:
+                try:
+                    frame_surface = pygame.surfarray.make_surface(frame_array)
+                    if frame_surface.get_size() != WINDOW_SIZE:
+                        frame_surface = pygame.transform.scale(frame_surface, WINDOW_SIZE)
+                    self.last_frame_surface = frame_surface
+                except Exception as e:
+                    print(f"Surface error: {e}")
+            self.decode_queue.task_done()
     
     async def handle_input(self):
         while self.running:
@@ -179,8 +221,8 @@ class PiThinClient:
         while self.running:
             self.screen.fill((20, 20, 30))
             
-            if self.last_frame:
-                self.screen.blit(self.last_frame, (0, 0))
+            if self.last_frame_surface:
+                self.screen.blit(self.last_frame_surface, (0, 0))
             else:
                 font = pygame.font.SysFont("Arial", 48)
                 text = font.render("Connecting to server...", True, (255, 255, 255))
@@ -220,10 +262,12 @@ class PiThinClient:
         if not await self.connect():
             print("Could not connect to server. Exiting.")
             return
+        self.decode_queue = asyncio.Queue(maxsize=2)
         
         try:
             await asyncio.gather(
                 self.receive_frames(),
+                self.decode_loop(),
                 self.render_loop(),
                 self.camera_loop(),
                 self.handle_input(),
@@ -240,6 +284,14 @@ class PiThinClient:
             self.camera.release()
         if self.websocket:
             asyncio.create_task(self.websocket.close())
+        if self.decode_executor:
+            self.decode_executor.shutdown(wait=False)
+        if self.decode_queue:
+            while not self.decode_queue.empty():
+                try:
+                    self.decode_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
         pygame.quit()
 
 

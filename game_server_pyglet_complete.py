@@ -83,7 +83,7 @@ class PygletGameServer:
             fullscreen=True,
             caption="ARPi2 Game Server - Pyglet/OpenGL (Complete UI)",
             config=config,
-            sync=True
+            vsync=True
         )
         
         # Update window size to actual screen size
