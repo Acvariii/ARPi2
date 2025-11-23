@@ -10,7 +10,6 @@ from pyglet import gl
 import cv2
 import numpy as np
 import json
-import base64
 import time
 import ctypes
 from typing import Dict, List
@@ -464,34 +463,23 @@ class PygletGameServer:
         try:
             async for message in websocket:
                 try:
-                    data = json.loads(message)
-                    
-                    msg_type = data.get("type")
-
-                    if msg_type == "camera_frame":
-                        # Skip processing if executor is saturated
+                    if isinstance(message, bytes):
                         if self.pending_hand_tasks >= self.hand_worker_count:
                             continue
-
                         self.pending_hand_tasks += 1
-
-                        # Process hand tracking asynchronously without blocking
+                        frame_bytes = bytes(message)
                         loop = asyncio.get_running_loop()
-                        
+
                         def process_camera_frame():
                             try:
-                                frame_data = base64.b64decode(data["frame"])
-                                nparr = np.frombuffer(frame_data, np.uint8)
+                                nparr = np.frombuffer(frame_bytes, np.uint8)
                                 frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                                
                                 if frame is not None:
-                                    # Process hand tracking (CPU intensive)
                                     return self.hand_tracker.process_frame(frame)
                             except Exception as e:
                                 print(f"Error in hand tracking: {e}")
                             return None
-                        
-                        # Fire and forget - don't await, just update when done
+
                         def update_fingertips(future):
                             try:
                                 result = future.result()
@@ -501,17 +489,25 @@ class PygletGameServer:
                                 print(f"Error updating fingertips: {e}")
                             finally:
                                 self.pending_hand_tasks = max(0, self.pending_hand_tasks - 1)
-                        
-                        # Submit to executor and add callback
+
                         try:
                             future = loop.run_in_executor(self.hand_executor, process_camera_frame)
                             future.add_done_callback(update_fingertips)
                         except Exception:
                             self.pending_hand_tasks = max(0, self.pending_hand_tasks - 1)
                             raise
-                    elif msg_type == "ping":
+                        continue
+
+                    data = json.loads(message)
+                    msg_type = data.get("type")
+
+                    if msg_type == "ping":
                         await websocket.send(json.dumps({"type": "pong"}))
-                
+                    elif msg_type == "keyboard":
+                        # could handle keyboard inputs if needed
+                        pass
+                    elif msg_type == "mouse":
+                        pass
                 except Exception as e:
                     print(f"Error processing message: {e}")
         

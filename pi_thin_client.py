@@ -4,7 +4,6 @@ import pygame
 import cv2
 import numpy as np
 import json
-import base64
 import time
 from typing import Optional
 from io import BytesIO
@@ -36,6 +35,7 @@ class PiThinClient:
         self.last_frame_surface = None
         self.decode_executor = ThreadPoolExecutor(max_workers=2)
         self.decode_queue: Optional[asyncio.Queue] = None
+        self.camera_executor = ThreadPoolExecutor(max_workers=1)
         
         self.frame_count = 0
         self.last_fps_time = time.time()
@@ -92,28 +92,14 @@ class PiThinClient:
         ret, frame = self.camera.read()
         if not ret:
             return
-        
-        # Keep original resolution for quality
-        frame_small = cv2.resize(frame, (640, 480))
-        
-        # Good quality
-        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 85]
-        result, encoded_img = cv2.imencode('.jpg', frame_small, encode_param)
-        
-        if result:
-            frame_bytes = encoded_img.tobytes()
-            frame_base64 = base64.b64encode(frame_bytes).decode('utf-8')
-            
-            message = json.dumps({
-                "type": "camera_frame",
-                "frame": frame_base64,
-                "timestamp": time.time()
-            })
-            
-            try:
-                await self.websocket.send(message)
-            except:
-                pass
+        loop = asyncio.get_running_loop()
+        frame_bytes = await loop.run_in_executor(self.camera_executor, self._encode_camera_frame, frame)
+        if not frame_bytes:
+            return
+        try:
+            await self.websocket.send(frame_bytes)
+        except:
+            pass
 
     @staticmethod
     def _decode_frame_surface(frame_bytes):
@@ -128,6 +114,18 @@ class PiThinClient:
         except Exception as e:
             print(f"Decode error: {e}")
             return None
+
+    @staticmethod
+    def _encode_camera_frame(frame):
+        try:
+            frame_small = cv2.resize(frame, (640, 480))
+            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 80]
+            result, encoded_img = cv2.imencode('.jpg', frame_small, encode_param)
+            if result:
+                return encoded_img.tobytes()
+        except Exception as e:
+            print(f"Encode error: {e}")
+        return None
     
     async def receive_frames(self):
         try:
@@ -287,6 +285,8 @@ class PiThinClient:
             asyncio.create_task(self.websocket.close())
         if self.decode_executor:
             self.decode_executor.shutdown(wait=False)
+        if self.camera_executor:
+            self.camera_executor.shutdown(wait=False)
         if self.decode_queue:
             while not self.decode_queue.empty():
                 try:
