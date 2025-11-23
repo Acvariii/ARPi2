@@ -89,9 +89,11 @@ class PiThinClient:
         if not ret:
             return
         
-        frame_small = cv2.resize(frame, (320, 240))
+        # Smaller resolution for faster transmission (hand tracking doesn't need high res)
+        frame_small = cv2.resize(frame, (160, 120))
         
-        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 70]
+        # Lower quality for speed
+        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 50]
         result, encoded_img = cv2.imencode('.jpg', frame_small, encode_param)
         
         if result:
@@ -209,7 +211,7 @@ class PiThinClient:
     async def camera_loop(self):
         while self.running:
             await self.send_camera_frame()
-            await asyncio.sleep(1.0 / 15)
+            await asyncio.sleep(1.0 / 60)  # 60 FPS for fast hand tracking
     
     async def ping_loop(self):
         while self.running:

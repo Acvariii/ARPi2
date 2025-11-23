@@ -99,6 +99,11 @@ class PygletGameServer:
         self.last_fps_time = time.time()
         self.current_fps = 0
         
+        # Frame broadcasting
+        self.last_broadcast_time = time.time()
+        self.broadcast_fps = 60  # Send 60 frames per second to clients
+        self.broadcasting = False  # Flag to prevent overlapping broadcasts
+        
         # Input state
         self.last_keyboard_event = None
         self.mouse_x = 0
@@ -355,6 +360,62 @@ class PygletGameServer:
             self.last_fps_time = current_time
             """print(f"Server FPS: {self.current_fps:.1f} | Hands tracked: {len(self.fingertip_data)}")"""
     
+    async def broadcast_frame(self):
+        """Capture screen and broadcast to all clients - optimized for speed"""
+        if self.broadcasting:  # Skip if previous broadcast still in progress
+            return
+        
+        self.broadcasting = True
+        try:
+            # Read pixel data from the framebuffer
+            buffer = pyglet.image.get_buffer_manager().get_color_buffer()
+            image_data = buffer.get_image_data()
+            
+            # Convert to numpy array
+            raw_data = image_data.get_data('RGB', image_data.width * 3)
+            arr = np.frombuffer(raw_data, dtype=np.uint8)
+            arr = arr.reshape(image_data.height, image_data.width, 3)
+            
+            # Flip vertically (OpenGL has origin at bottom-left)
+            arr = np.flipud(arr)
+            
+            # Downsample for faster encoding/transmission (half resolution)
+            arr = cv2.resize(arr, (image_data.width // 2, image_data.height // 2), 
+                           interpolation=cv2.INTER_LINEAR)
+            
+            # Convert RGB to BGR for cv2
+            arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+            
+            # Encode as JPEG with lower quality for speed
+            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 60]
+            result, encoded = cv2.imencode('.jpg', arr, encode_param)
+            
+            if result:
+                frame_base64 = base64.b64encode(encoded.tobytes()).decode('utf-8')
+                message = json.dumps({
+                    "type": "game_frame",
+                    "frame": frame_base64,
+                    "timestamp": time.time()
+                })
+                
+                # Send to all connected clients (non-blocking)
+                disconnected = []
+                for client_id, websocket in self.clients.items():
+                    try:
+                        await websocket.send(message)
+                    except:
+                        disconnected.append(client_id)
+                
+                # Clean up disconnected clients
+                for client_id in disconnected:
+                    if client_id in self.clients:
+                        del self.clients[client_id]
+        
+        except Exception as e:
+            print(f"Error broadcasting frame: {e}")
+        finally:
+            self.broadcasting = False
+    
     async def handle_client(self, websocket, path):
         """Handle WebSocket client connection"""
         client_id = f"{websocket.remote_address[0]}:{websocket.remote_address[1]}"
@@ -366,7 +427,7 @@ class PygletGameServer:
                 try:
                     data = json.loads(message)
                     
-                    if data.get("type") == "frame":
+                    if data.get("type") == "camera_frame":
                         # Decode frame
                         frame_data = base64.b64decode(data["frame"])
                         nparr = np.frombuffer(frame_data, np.uint8)
@@ -382,11 +443,16 @@ class PygletGameServer:
         except websockets.exceptions.ConnectionClosed:
             print(f"Client disconnected: {client_id}")
         finally:
-            del self.clients[client_id]
+            if client_id in self.clients:
+                del self.clients[client_id]
     
     async def start_server(self):
         """Start WebSocket server"""
-        server = await websockets.serve(self.handle_client, self.host, self.port)
+        # Use lambda to properly wrap the handler for websockets 14.0+
+        async def handler(websocket):
+            await self.handle_client(websocket, websocket.request.path)
+        
+        server = await websockets.serve(handler, self.host, self.port)
         print(f"Server started on ws://{self.host}:{self.port}")
         print("Press ESC to exit")
         
@@ -416,6 +482,13 @@ class PygletGameServer:
                             window.dispatch_events()
                             window.dispatch_event('on_draw')
                             window.flip()
+                    
+                    # Broadcast frames to clients at specified FPS
+                    current_time = time.time()
+                    if current_time - self.last_broadcast_time >= (1.0 / self.broadcast_fps):
+                        if self.clients:  # Only broadcast if we have clients
+                            await self.broadcast_frame()
+                        self.last_broadcast_time = current_time
                     
                     await asyncio.sleep(0.001)  # Small sleep to prevent CPU spinning
             finally:
