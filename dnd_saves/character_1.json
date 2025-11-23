@@ -1,0 +1,28 @@
+{
+  "name": "Fiona the Mighty",
+  "player_color": [
+    40,
+    120,
+    200
+  ],
+  "race": "Human",
+  "char_class": "Fighter",
+  "level": 1,
+  "alignment": "Neutral Good",
+  "abilities": {
+    "Strength": 9,
+    "Dexterity": 10,
+    "Constitution": 6,
+    "Intelligence": 16,
+    "Wisdom": 16,
+    "Charisma": 14
+  },
+  "max_hp": 8,
+  "current_hp": 8,
+  "armor_class": 10,
+  "skills": [],
+  "inventory": [],
+  "gold": 0,
+  "experience": 0,
+  "background": ""
+}

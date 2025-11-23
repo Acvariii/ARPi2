@@ -1,7 +1,7 @@
 """Central configuration for ARPi2 game system."""
 
 # Network Configuration
-SERVER_IP = "192.168.1.44"
+SERVER_IP = "192.168.1.79"
 SERVER_PORT = 8765
 SERVER_WS = f"ws://{SERVER_IP}:{SERVER_PORT}"
 

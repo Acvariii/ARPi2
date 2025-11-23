@@ -1,0 +1,28 @@
+{
+  "name": "Diana the Mighty",
+  "player_color": [
+    200,
+    40,
+    200
+  ],
+  "race": "Human",
+  "char_class": "Fighter",
+  "level": 1,
+  "alignment": "Neutral Good",
+  "abilities": {
+    "Strength": 14,
+    "Dexterity": 15,
+    "Constitution": 13,
+    "Intelligence": 7,
+    "Wisdom": 13,
+    "Charisma": 15
+  },
+  "max_hp": 11,
+  "current_hp": 11,
+  "armor_class": 12,
+  "skills": [],
+  "inventory": [],
+  "gold": 0,
+  "experience": 0,
+  "background": ""
+}
