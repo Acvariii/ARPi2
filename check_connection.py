@@ -43,7 +43,7 @@ def check_connection(server_ip, port=8765):
         else:
             print(f"✗ Port {port} is CLOSED or filtered")
             print("  Possible causes:")
-            print(f"  - Server not running (start with: python game_server_full.py)")
+            print(f"  - Server not running (start with: python game_server_pyglet_complete.py)")
             print(f"  - Firewall blocking port {port}")
             print(f"  - Server listening on different port")
             sock.close()
@@ -96,7 +96,7 @@ if __name__ == "__main__":
         else:
             print("✗ Connection issues detected. Fix the above problems first.")
             print("\nQuick fixes:")
-            print("1. On server PC, run: python game_server_full.py")
+            print("1. On server PC, run: python game_server_pyglet_complete.py")
             print("2. Windows Firewall: Allow Python through firewall")
             print("3. Check both devices on same WiFi network")
     else:

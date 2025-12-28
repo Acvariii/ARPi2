@@ -11,7 +11,6 @@ class PlayerSelectionUI:
         self.screen_width = screen_width
         self.screen_height = screen_height
         self.selected = [False] * 8
-        self.selected[7] = True  # Player 8 (DM) is always selected
         self.hover_states = {}
         self.start_ready = False  # Track if start button was clicked
         
@@ -56,6 +55,7 @@ class PlayerSelectionUI:
         
         for meta in fingertip_meta:
             pos = meta["pos"]
+            is_click = bool(meta.get("click"))
             
             # Check start button first (if enough players selected)
             if self.selected_count() >= min_players:
@@ -63,6 +63,9 @@ class PlayerSelectionUI:
                 dist = ((pos[0] - cx) ** 2 + (pos[1] - cy) ** 2) ** 0.5
                 
                 if dist <= self.start_button_radius:
+                    if is_click:
+                        self.start_ready = True
+                        continue
                     key = "start_button"
                     active_hovers.add(key)
                     
@@ -84,6 +87,10 @@ class PlayerSelectionUI:
                 dist = ((pos[0] - cx) ** 2 + (pos[1] - cy) ** 2) ** 0.5
                 
                 if dist <= radius:
+                    if is_click:
+                        if i != 7:
+                            self.selected[i] = not self.selected[i]
+                        break
                     key = f"slot_{i}"
                     active_hovers.add(key)
                     

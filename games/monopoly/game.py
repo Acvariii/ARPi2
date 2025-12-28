@@ -57,11 +57,18 @@ class MonopolyGame:
         
         # Token animation tracking
         self.token_animations: Dict[int, Dict] = {}  # player_idx -> {start_pos, end_pos, start_time, duration}
+
+        # When a roll (or card move) starts token animation, defer resolving the landing
+        # until the pawn finishes moving. This prevents ending a turn prematurely.
+        self._pending_land_player_idx: Optional[int] = None
         
         # Universal popup system
         self.popup = UniversalPopup()
         self.property_scroll = 0
         self.mortgage_scroll_index = 0  # Track which property we're viewing in mortgage popup
+
+        # Some card actions move the player; we resolve the landing only after the card popup is dismissed.
+        self._pending_post_card_land_player_idx: Optional[int] = None
         
         # Trade system state
         self.trade_initiator = None  # Player who started the trade
@@ -86,7 +93,8 @@ class MonopolyGame:
         self.auction_current_bidder = None  # Current high bidder player index
         self.auction_current_bid = 0
         self.auction_bidder_index = 0  # Which player's turn to bid
-        self.auction_passed_players = []  # Players who passed
+        # Players who can still bid in the current auction (passing removes you permanently).
+        self.auction_active_bidders: List[int] = []
         
         # House/Hotel supply limits (real Monopoly rules)
         self.houses_remaining = 32
@@ -200,6 +208,74 @@ class MonopolyGame:
     
     def start_game(self, player_indices: List[int]):
         """Start game with selected players"""
+        # Reset persistent board state so re-starting Monopoly is always clean.
+        # (Properties, houses/hotels supply, free parking, auctions/trades, decks.)
+        try:
+            for prop in (self.properties or []):
+                if prop is None:
+                    continue
+                try:
+                    # Return improvements to the bank.
+                    houses = int(getattr(prop, "houses", 0) or 0)
+                    if houses == 5:
+                        self.hotels_remaining = min(12, int(getattr(self, "hotels_remaining", 12) or 0) + 1)
+                        self.houses_remaining = min(32, int(getattr(self, "houses_remaining", 32) or 0) + 4)
+                    elif houses > 0:
+                        self.houses_remaining = min(32, int(getattr(self, "houses_remaining", 32) or 0) + houses)
+                except Exception:
+                    pass
+                try:
+                    prop.houses = 0
+                except Exception:
+                    pass
+                try:
+                    prop.owner = None
+                except Exception:
+                    pass
+                try:
+                    prop.is_mortgaged = False
+                except Exception:
+                    pass
+
+            # Reset supply + pot to defaults.
+            self.houses_remaining = 32
+            self.hotels_remaining = 12
+            self.free_parking_pot = 0
+
+            # Reset decks.
+            self.community_chest_deck = list(COMMUNITY_CHEST_CARDS)
+            self.chance_deck = list(CHANCE_CARDS)
+            random.shuffle(self.community_chest_deck)
+            random.shuffle(self.chance_deck)
+
+            # Clear transient systems.
+            self.auction_active = False
+            self.auction_property = None
+            self.auction_current_bidder = None
+            self.auction_current_bid = 0
+            self.auction_bidder_index = 0
+            self.auction_active_bidders = []
+
+            self.trade_initiator = None
+            self.trade_partner = None
+            self.trade_offer = {"money": 0, "properties": []}
+            self.trade_request = {"money": 0, "properties": []}
+            self.trade_scroll_index = 0
+            self.trade_mode = None
+            self.trade_view_mode = "money"
+            self.trade_give_prop_scroll = 0
+            self.trade_get_prop_scroll = 0
+
+            self.popup.hide()
+            self._pending_post_card_land_player_idx = None
+            self._pending_land_player_idx = None
+            self.token_animations = {}
+            self.dice_values = (0, 0)
+            self.dice_rolling = False
+            self.dice_roll_start = 0.0
+        except Exception:
+            pass
+
         self.active_players = sorted(player_indices)
         self.players = [Player(i, PLAYER_COLORS[i]) for i in range(8)]
         
@@ -218,6 +294,144 @@ class MonopolyGame:
         self.phase = "roll"
         self.can_roll = True
         self.state = "playing"
+
+        # Web UI may snapshot immediately; ensure label matches can_roll.
+        try:
+            self._sync_default_action_button_text()
+        except Exception:
+            pass
+
+    def handle_player_quit(self, player_idx: int) -> None:
+        """Handle a player quitting mid-game.
+
+        - Player cash goes to Free Parking pot.
+        - All owned properties return to bank.
+        - Houses/hotels return to supply.
+        - Player removed from active_players.
+        """
+        try:
+            pidx = int(player_idx)
+        except Exception:
+            return
+        if pidx < 0 or pidx > 7:
+            return
+        if not isinstance(self.active_players, list) or pidx not in self.active_players:
+            return
+        if not self.players or pidx >= len(self.players):
+            return
+
+        player = self.players[pidx]
+        if player is None:
+            return
+
+        # Cancel any active popup owned by this player.
+        try:
+            if getattr(self.popup, "active", False) and getattr(self.popup, "player_idx", None) == pidx:
+                self.popup.hide()
+        except Exception:
+            pass
+
+        # If a trade involved this player, cancel it.
+        try:
+            if self.trade_initiator == pidx or self.trade_partner == pidx:
+                self.trade_initiator = None
+                self.trade_partner = None
+                self.trade_offer = {"money": 0, "properties": []}
+                self.trade_request = {"money": 0, "properties": []}
+                self.trade_mode = None
+        except Exception:
+            pass
+
+        # Move cash into Free Parking.
+        try:
+            cash = int(getattr(player, "money", 0) or 0)
+        except Exception:
+            cash = 0
+        if cash > 0:
+            try:
+                self.free_parking_pot += cash
+            except Exception:
+                pass
+        try:
+            player.money = 0
+        except Exception:
+            pass
+
+        # Return properties + improvements.
+        try:
+            owned = list(getattr(player, "properties", []) or [])
+        except Exception:
+            owned = []
+        for prop_idx in owned:
+            try:
+                pi = int(prop_idx)
+            except Exception:
+                continue
+            if pi < 0 or pi >= len(self.properties or []):
+                continue
+            prop = self.properties[pi]
+            if prop is None:
+                continue
+
+            try:
+                houses = int(getattr(prop, "houses", 0) or 0)
+                if houses == 5:
+                    self.hotels_remaining += 1
+                    self.houses_remaining += 4
+                elif houses > 0:
+                    self.houses_remaining += houses
+            except Exception:
+                pass
+            try:
+                prop.houses = 0
+            except Exception:
+                pass
+            try:
+                prop.owner = None
+            except Exception:
+                pass
+            try:
+                prop.is_mortgaged = False
+            except Exception:
+                pass
+
+        try:
+            player.properties = []
+        except Exception:
+            pass
+        try:
+            player.is_bankrupt = True
+        except Exception:
+            pass
+
+        # Remove from active players and keep current_player_idx sane.
+        try:
+            old_pos = self.active_players.index(pidx)
+        except Exception:
+            old_pos = None
+        try:
+            self.active_players.remove(pidx)
+        except Exception:
+            return
+
+        if not self.active_players:
+            self.state = "winner"
+            self.winner_idx = None
+            return
+
+        try:
+            if isinstance(old_pos, int) and old_pos < self.current_player_idx:
+                self.current_player_idx = max(0, self.current_player_idx - 1)
+            if self.current_player_idx >= len(self.active_players):
+                self.current_player_idx = 0
+        except Exception:
+            self.current_player_idx = 0
+
+        # Rebuild buttons to reflect removed player.
+        try:
+            self._init_buttons()
+        except Exception:
+            pass
     
     def handle_input(self, fingertips: List[Dict]) -> bool:
         """Handle input, return True to exit"""
@@ -226,11 +440,14 @@ class MonopolyGame:
             return True  # Return to menu
         
         if self.state == "player_select":
-            self.selection_ui.update_with_fingertips(fingertips, min_players=2)
-            if self.selection_ui.start_ready:
-                selected_indices = self.selection_ui.get_selected_indices()
-                if selected_indices:
-                    self.start_game(selected_indices)
+            # Web UI drives player selection (single-slot claim + Start button),
+            # so disable fingertip/hover-based selection in the game window.
+            if not getattr(self, "web_ui_only_player_select", False):
+                self.selection_ui.update_with_fingertips(fingertips, min_players=2)
+                if self.selection_ui.start_ready:
+                    selected_indices = self.selection_ui.get_selected_indices()
+                    if selected_indices:
+                        self.start_game(selected_indices)
             return False
         
         if self.state == "winner":
@@ -281,18 +498,29 @@ class MonopolyGame:
                 has_default_buttons = "action" in btns
                 
                 if has_default_buttons:
+                    moving = idx in (self.token_animations or {})
+                    pending_land = (getattr(self, "_pending_land_player_idx", None) == idx)
+                    locked = bool(self.dice_rolling) or bool(getattr(self.popup, "active", False)) or moving or pending_land
+
                     # Check if player is in jail - different button logic
                     if player.in_jail:
                         # Jail buttons - action (Roll) enabled for current player
                         # Props (Pay $50) stays as set in _restore_default_buttons
                         # Build (Use Card) stays as set in _restore_default_buttons
-                        btns["action"].enabled = is_current and not self.dice_rolling
+                        btns["action"].enabled = is_current and not locked
+                        # Keep jail button availability in sync with live money/card counts
+                        can_pay = player.money >= 50
+                        has_card = player.get_out_of_jail_cards > 0
+                        btns["props"].text = "Pay $50" if can_pay else "No $"
+                        btns["props"].enabled = can_pay
+                        btns["build"].text = "Use Card" if has_card else ""
+                        btns["build"].enabled = has_card
                         # Don't override props/build enabled states - already set correctly in _restore_default_buttons
                     else:
                         # Normal buttons - Action and Build only enabled for current player
                         # Props enabled for ANY player with properties
-                        btns["action"].enabled = is_current and not self.dice_rolling
-                        btns["action"].text = "Roll" if self.can_roll else "End"
+                        btns["action"].enabled = is_current and not locked
+                        btns["action"].text = "Roll" if self.can_roll else "End Turn"
                         btns["props"].enabled = len(player.properties) > 0  # Enabled for ANY player with properties
                         btns["build"].enabled = is_current and len(player.properties) > 0
                 
@@ -305,9 +533,31 @@ class MonopolyGame:
     
     def _handle_click(self, player_idx: int, button: str):
         """Handle button click"""
+        # Defense-in-depth: server should already gate these, but don't allow
+        # non-current players to advance the game state.
+        try:
+            curr_idx = self.active_players[self.current_player_idx]
+        except Exception:
+            curr_idx = None
+
+        if button in ("action", "build") and isinstance(curr_idx, int) and player_idx != curr_idx:
+            return
+
         player = self.players[player_idx]
         
         if button == "action":
+            # Defense-in-depth: never allow ending the turn while movement is still animating
+            # or before the landing (and any popups) have been resolved.
+            if not self.can_roll:
+                try:
+                    moving = player_idx in (self.token_animations or {})
+                except Exception:
+                    moving = False
+                pending_land = (getattr(self, "_pending_land_player_idx", None) == player_idx)
+                popup_active = bool(getattr(self.popup, "active", False))
+                if bool(self.dice_rolling) or moving or pending_land or popup_active:
+                    return
+
             if player.in_jail:
                 # In jail - just roll (will be handled in update)
                 if self.can_roll:
@@ -317,6 +567,10 @@ class MonopolyGame:
             else:
                 self.advance_turn()
         elif button == "props":
+            # Paying to leave jail should only be possible on your turn.
+            if player.in_jail and isinstance(curr_idx, int) and player_idx != curr_idx:
+                return
+
             if player.in_jail and player.money >= 50:
                 # Pay to get out of jail
                 player.remove_money(50)
@@ -359,14 +613,11 @@ class MonopolyGame:
                 if bidder.money >= min_bid:
                     self.auction_current_bid = min_bid
                     self.auction_current_bidder = bidder_idx
-                    
-                    # Reset passed players - everyone gets another chance to bid
-                    self.auction_passed_players = []
-                    
+
                     # Move to next bidder
                     self.popup.hide()
                     self._restore_default_buttons(bidder_idx)
-                    self.auction_bidder_index = (self.auction_bidder_index + 1) % len(self.active_players)
+                    self._advance_auction_bidder()
                     self._show_auction_popup()
             elif popup_type == "build_prompt":
                 # Pass button
@@ -378,7 +629,19 @@ class MonopolyGame:
                 self.popup.hide()
                 self._restore_default_buttons(player_idx)
                 if popup_type == "card":
-                    # After card, check for doubles to allow re-roll
+                    # Some cards move the player; resolve the landing now (this may open a buy prompt,
+                    # pay rent, draw another card, etc.). Only end the turn if nothing else happens.
+                    pending_idx = getattr(self, "_pending_post_card_land_player_idx", None)
+                    if pending_idx is not None:
+                        self._pending_post_card_land_player_idx = None
+                        try:
+                            self._land_on_space(self.players[int(pending_idx)])
+                        except Exception:
+                            # If anything goes wrong, fall back to ending turn.
+                            self._finish_turn_or_allow_double()
+                        return
+
+                    # No pending landing: after card, check for doubles to allow re-roll
                     self._finish_turn_or_allow_double()
             elif popup_type == "trade_select":
                 # Previous partner or Cancel
@@ -392,6 +655,20 @@ class MonopolyGame:
                     self.popup.hide()
                     self._restore_default_buttons(initiator_idx)
                     self.trade_mode = None
+            elif popup_type == "trade_web_edit":
+                # Cancel web trade
+                initiator_idx = self.popup.data["initiator"].idx
+                self.popup.hide()
+                self._restore_default_buttons(initiator_idx)
+                self.trade_mode = None
+            elif popup_type == "trade_web_response":
+                # Decline web trade
+                partner_idx = self.popup.data["partner"].idx
+                initiator_idx = self.popup.data["initiator"].idx
+                self.popup.hide()
+                self._restore_default_buttons(partner_idx)
+                self._restore_default_buttons(initiator_idx)
+                self.trade_mode = None
             elif popup_type == "trade_build":
                 # Cancel trade
                 initiator_idx = self.popup.data["initiator"].idx
@@ -463,12 +740,14 @@ class MonopolyGame:
             elif popup_type == "auction":
                 # Pass button
                 bidder_idx = self.popup.player_idx
-                self.auction_passed_players.append(bidder_idx)
+                # Passing removes you from the auction permanently.
+                if bidder_idx in self.auction_active_bidders:
+                    self.auction_active_bidders.remove(bidder_idx)
                 
                 # Move to next bidder
                 self.popup.hide()
                 self._restore_default_buttons(bidder_idx)
-                self.auction_bidder_index = (self.auction_bidder_index + 1) % len(self.active_players)
+                self._advance_auction_bidder()
                 self._show_auction_popup()
             elif popup_type == "build_prompt":
                 # Buy house/hotel button
@@ -520,13 +799,20 @@ class MonopolyGame:
                 partner_idx = self.popup.data["partner_idx"]
                 self.trade_partner = partner_idx
                 self.trade_mode = "build_offer"
-                self._show_trade_modify()
+                self._show_trade_web_edit()
             elif popup_type == "trade_build":
                 # Modify offer
                 self._show_trade_modify()
             elif popup_type == "trade_response":
                 # View trade details
                 self._show_trade_detail_view()
+            elif popup_type == "trade_web_edit":
+                # Send web trade proposal to partner
+                self.trade_mode = "await_response"
+                initiator_idx = self.popup.data["initiator"].idx
+                self.popup.hide()
+                self._restore_default_buttons(initiator_idx)
+                self._show_trade_web_response()
             elif popup_type == "trade_modify":
                 if self.trade_view_mode == "money":
                     # Cycle THEIR money amount (what you're requesting)
@@ -592,13 +878,48 @@ class MonopolyGame:
                 # Send trade proposal
                 self.trade_mode = "await_response"
                 self._show_trade_proposal()
+            elif popup_type == "trade_web_response":
+                # Accept web trade
+                ok = self._execute_trade()
+                if ok:
+                    self.popup.hide()
+                    self._restore_default_buttons(self.trade_initiator)
+                    self._restore_default_buttons(self.trade_partner)
+                    self.trade_mode = None
+                else:
+                    # Trade became invalid (money/ownership/mortgage/houses). Inform partner and cancel.
+                    partner_idx = self.popup.data["partner"].idx
+                    initiator_idx = self.popup.data["initiator"].idx
+                    panel = self.panels[partner_idx]
+                    text_lines = create_info_popup("Trade Failed", "Offer no longer valid")
+                    self.popup.show(
+                        partner_idx, panel.rect, panel.orientation, "info", text_lines,
+                        {"initiator": self.players[initiator_idx], "partner": self.players[partner_idx]}
+                    )
+                    self._set_popup_buttons(partner_idx, ["OK", "", ""], [True, False, False])
+                    self._restore_default_buttons(initiator_idx)
+                    self.trade_mode = None
             elif popup_type == "trade_response":
                 # Accept trade
-                self._execute_trade()
-                self.popup.hide()
-                self._restore_default_buttons(self.trade_initiator)
-                self._restore_default_buttons(self.trade_partner)
-                self.trade_mode = None
+                ok = self._execute_trade()
+                if ok:
+                    self.popup.hide()
+                    self._restore_default_buttons(self.trade_initiator)
+                    self._restore_default_buttons(self.trade_partner)
+                    self.trade_mode = None
+                else:
+                    # Trade became invalid (money/ownership/mortgage/houses). Inform partner and cancel.
+                    partner_idx = self.popup.data["partner"].idx
+                    initiator_idx = self.popup.data["initiator"].idx
+                    panel = self.panels[partner_idx]
+                    text_lines = create_info_popup("Trade Failed", "Offer no longer valid")
+                    self.popup.show(
+                        partner_idx, panel.rect, panel.orientation, "info", text_lines,
+                        {"initiator": self.players[initiator_idx], "partner": self.players[partner_idx]}
+                    )
+                    self._set_popup_buttons(partner_idx, ["OK", "", ""], [True, False, False])
+                    self._restore_default_buttons(initiator_idx)
+                    self.trade_mode = None
             elif popup_type == "trade_modify":
                 if self.trade_view_mode == "money":
                     # Switch to property selection - ask which: give or get
@@ -643,11 +964,24 @@ class MonopolyGame:
                         self._show_trade_build_offer()
             elif popup_type == "trade_detail":
                 # Accept trade from detail view
-                self._execute_trade()
-                self.popup.hide()
-                self._restore_default_buttons(self.trade_initiator)
-                self._restore_default_buttons(self.trade_partner)
-                self.trade_mode = None
+                ok = self._execute_trade()
+                if ok:
+                    self.popup.hide()
+                    self._restore_default_buttons(self.trade_initiator)
+                    self._restore_default_buttons(self.trade_partner)
+                    self.trade_mode = None
+                else:
+                    partner_idx = self.popup.data["partner"].idx
+                    initiator_idx = self.popup.data["initiator"].idx
+                    panel = self.panels[partner_idx]
+                    text_lines = create_info_popup("Trade Failed", "Offer no longer valid")
+                    self.popup.show(
+                        partner_idx, panel.rect, panel.orientation, "info", text_lines,
+                        {"initiator": self.players[initiator_idx], "partner": self.players[partner_idx]}
+                    )
+                    self._set_popup_buttons(partner_idx, ["OK", "", ""], [True, False, False])
+                    self._restore_default_buttons(initiator_idx)
+                    self.trade_mode = None
     
     def roll_dice(self):
         """Roll dice"""
@@ -657,6 +991,9 @@ class MonopolyGame:
         self.dice_rolling = True
         self.dice_roll_start = time.time()
         self.can_roll = False
+
+        # Ensure the UI label flips immediately (Web UI snapshots are async).
+        self._sync_default_action_button_text()
     
     def advance_turn(self):
         """Next player - ensure proper turn order"""
@@ -669,9 +1006,36 @@ class MonopolyGame:
         self.phase = "roll"
         self.can_roll = True
         # Don't reset dice - they stay visible until next roll
+
+        # Ensure the new current player's UI shows Roll immediately.
+        self._sync_default_action_button_text()
     
     def update(self, dt: float):
         """Update game state"""
+        # If a landing is pending, resolve it only after the pawn finishes moving
+        # and no popup is currently active.
+        try:
+            if self._pending_land_player_idx is not None and not self.dice_rolling:
+                pidx = int(self._pending_land_player_idx)
+
+                # Ensure animations can complete even if draw isn't called.
+                anim = (self.token_animations or {}).get(pidx)
+                if anim is not None:
+                    try:
+                        path = list(anim.get('path', []) or [])
+                        seg = float(anim.get('segment_duration', 0.5) or 0.5)
+                        start_t = float(anim.get('start_time', time.time()) or time.time())
+                        if (time.time() - start_t) >= (max(0, len(path)) * seg):
+                            self.token_animations.pop(pidx, None)
+                    except Exception:
+                        pass
+
+                if pidx not in (self.token_animations or {}) and not bool(getattr(self.popup, 'active', False)):
+                    self._pending_land_player_idx = None
+                    self._land_on_space(self.players[pidx])
+        except Exception:
+            pass
+
         if self.dice_rolling:
             elapsed = time.time() - self.dice_roll_start
             if elapsed >= 1.2:
@@ -697,8 +1061,9 @@ class MonopolyGame:
                         
                         if current.position < old_pos:
                             current.add_money(PASSING_GO_MONEY)
-                        
-                        self._land_on_space(current)
+
+                        # Defer landing resolution until movement completes.
+                        self._pending_land_player_idx = int(current.idx)
                     else:
                         # Didn't roll doubles - increment jail turns
                         current.jail_turns += 1
@@ -716,7 +1081,8 @@ class MonopolyGame:
                                 current.position = new_pos
                                 if current.position < old_pos:
                                     current.add_money(PASSING_GO_MONEY)
-                                self._land_on_space(current)
+                                # Defer landing resolution until movement completes.
+                                self._pending_land_player_idx = int(current.idx)
                             else:
                                 # Can't pay - bankrupt
                                 self._handle_bankruptcy(current)
@@ -748,8 +1114,12 @@ class MonopolyGame:
                 
                 if current.position < old_pos:
                     current.add_money(PASSING_GO_MONEY)
-                
-                self._land_on_space(current)
+
+                # Defer landing resolution until movement completes.
+                self._pending_land_player_idx = int(current.idx)
+
+                # Keep UI consistent while waiting.
+                self._sync_default_action_button_text()
     
     def _show_buy_prompt(self, player: Player, position: int):
         """Show property purchase prompt as floating text box with panel buttons"""
@@ -1107,6 +1477,45 @@ class MonopolyGame:
         self._set_popup_buttons(partner.idx,
                                ["Decline", "View", "Accept"],
                                [True, True, True])
+
+    def _show_trade_web_edit(self):
+        """Web-UI-first trade editor (shows all properties at once in Web UI)."""
+        initiator = self.players[self.trade_initiator]
+        partner = self.players[self.trade_partner]
+
+        panel = self.panels[initiator.idx]
+        text_lines = [
+            (f"Trade with P{partner.idx + 1}", 14, PLAYER_COLORS[partner.idx]),
+            ("Use the Web UI to edit the trade", 9, (200, 200, 200)),
+        ]
+
+        self.popup.show(
+            initiator.idx, panel.rect, panel.orientation, "trade_web_edit", text_lines,
+            {"initiator": initiator, "partner": partner}
+        )
+
+        # [Cancel] [Send] []
+        self._set_popup_buttons(initiator.idx, ["Cancel", "Send", ""], [True, True, False])
+
+    def _show_trade_web_response(self):
+        """Web-UI-first trade response view for partner."""
+        initiator = self.players[self.trade_initiator]
+        partner = self.players[self.trade_partner]
+
+        panel = self.panels[partner.idx]
+        text_lines = [
+            (f"P{initiator.idx + 1} offers a trade", 14, PLAYER_COLORS[initiator.idx]),
+            ("Review in the Web UI", 9, (200, 200, 200)),
+        ]
+
+        self.popup.show(
+            partner.idx, panel.rect, panel.orientation, "trade_web_response", text_lines,
+            {"initiator": initiator, "partner": partner}
+        )
+
+        # [Decline] [] [Accept]
+        self._set_popup_buttons(partner.idx, ["Decline", "", "Accept"], [True, False, True])
+
     def _show_trade_modify(self):
         """Show interface to modify trade offer (add money/properties)"""
         initiator = self.players[self.trade_initiator]
@@ -1141,12 +1550,13 @@ class MonopolyGame:
                 prop_idx = your_props[self.trade_give_prop_scroll]
                 prop = self.properties[prop_idx]
                 prop_name = prop.data.get("name", "Unknown")[:15]
+                prop_color = prop.data.get("color") or (255, 255, 255)
                 is_selected = prop_idx in self.trade_offer["properties"]
                 
                 text_lines = [
                     ("YOUR PROPERTIES", 14, (255, 100, 100)),
                     (f"{self.trade_give_prop_scroll + 1}/{len(your_props)}", 10, (200, 200, 200)),
-                    (prop_name, 12, (255, 255, 255)),
+                    (prop_name, 12, prop_color),
                     ("✓ Selected" if is_selected else "Not selected", 10, (100, 255, 100) if is_selected else (150, 150, 150)),
                 ]
                 
@@ -1168,12 +1578,13 @@ class MonopolyGame:
                 prop_idx = their_props[self.trade_get_prop_scroll]
                 prop = self.properties[prop_idx]
                 prop_name = prop.data.get("name", "Unknown")[:15]
+                prop_color = prop.data.get("color") or (255, 255, 255)
                 is_selected = prop_idx in self.trade_request["properties"]
                 
                 text_lines = [
                     ("THEIR PROPERTIES", 14, (100, 255, 100)),
                     (f"{self.trade_get_prop_scroll + 1}/{len(their_props)}", 10, (200, 200, 200)),
-                    (prop_name, 12, (255, 255, 255)),
+                    (prop_name, 12, prop_color),
                     ("✓ Selected" if is_selected else "Not selected", 10, (100, 255, 100) if is_selected else (150, 150, 150)),
                 ]
                 
@@ -1198,21 +1609,33 @@ class MonopolyGame:
         
         panel = self.panels[partner.idx]
         
-        # Show what properties are involved
-        offer_props = [self.properties[i].data.get("name", "???")[:12] for i in self.trade_offer["properties"][:2]]
-        request_props = [self.properties[i].data.get("name", "???")[:12] for i in self.trade_request["properties"][:2]]
+        # Show what properties are involved (include set color)
+        offer_prop_idxs = list(self.trade_offer["properties"])
+        request_prop_idxs = list(self.trade_request["properties"])
         
         text_lines = [
             (f"P{initiator.idx + 1}'s Offer", 12, PLAYER_COLORS[initiator.idx]),
             (f"${self.trade_offer['money']}", 10, (100, 255, 100)),
         ]
-        for prop_name in offer_props:
-            text_lines.append((prop_name, 9, (200, 200, 200)))
+        if offer_prop_idxs:
+            for prop_idx in offer_prop_idxs[:3]:
+                prop = self.properties[prop_idx]
+                text_lines.append((prop.data.get("name", "???")[:18], 9, prop.data.get("color") or (200, 200, 200)))
+            if len(offer_prop_idxs) > 3:
+                text_lines.append((f"+{len(offer_prop_idxs) - 3} more", 9, (200, 200, 200)))
+        else:
+            text_lines.append(("(no properties)", 9, (200, 200, 200)))
         
         text_lines.append(("For:", 10, (255, 255, 100)))
         text_lines.append((f"${self.trade_request['money']}", 10, (255, 100, 100)))
-        for prop_name in request_props:
-            text_lines.append((prop_name, 9, (200, 200, 200)))
+        if request_prop_idxs:
+            for prop_idx in request_prop_idxs[:3]:
+                prop = self.properties[prop_idx]
+                text_lines.append((prop.data.get("name", "???")[:18], 9, prop.data.get("color") or (200, 200, 200)))
+            if len(request_prop_idxs) > 3:
+                text_lines.append((f"+{len(request_prop_idxs) - 3} more", 9, (200, 200, 200)))
+        else:
+            text_lines.append(("(no properties)", 9, (200, 200, 200)))
         
         self.popup.show(
             partner.idx, panel.rect, panel.orientation, "trade_detail", text_lines,
@@ -1228,36 +1651,64 @@ class MonopolyGame:
         """Execute the trade between initiator and partner"""
         initiator = self.players[self.trade_initiator]
         partner = self.players[self.trade_partner]
+
+        # Validate trade state
+        if initiator.idx == partner.idx or initiator.is_bankrupt or partner.is_bankrupt:
+            return False
+
+        offer_money = int(self.trade_offer.get("money", 0) or 0)
+        request_money = int(self.trade_request.get("money", 0) or 0)
+        if offer_money < 0 or request_money < 0:
+            return False
+
+        if initiator.money < offer_money:
+            return False
+        if partner.money < request_money:
+            return False
         
-        # Validate trade - check for mortgaged properties or houses
-        for prop_idx in self.trade_offer["properties"] + self.trade_request["properties"]:
+        offer_prop_idxs = list(self.trade_offer.get("properties", []) or [])
+        request_prop_idxs = list(self.trade_request.get("properties", []) or [])
+
+        # Validate trade properties: ownership + no houses + not mortgaged
+        for prop_idx in offer_prop_idxs:
+            if prop_idx not in initiator.properties:
+                return False
             prop = self.properties[prop_idx]
             if prop.is_mortgaged or prop.houses > 0:
-                # Invalid trade - show error and cancel
-                return
+                return False
+        for prop_idx in request_prop_idxs:
+            if prop_idx not in partner.properties:
+                return False
+            prop = self.properties[prop_idx]
+            if prop.is_mortgaged or prop.houses > 0:
+                return False
         
-        # Transfer money
-        if self.trade_offer["money"] > 0:
-            initiator.remove_money(self.trade_offer["money"])
-            partner.add_money(self.trade_offer["money"])
-        
-        if self.trade_request["money"] > 0:
-            partner.remove_money(self.trade_request["money"])
-            initiator.add_money(self.trade_request["money"])
+        # Transfer money (safe: validated above)
+        if offer_money > 0:
+            if not initiator.remove_money(offer_money):
+                return False
+            partner.add_money(offer_money)
+
+        if request_money > 0:
+            if not partner.remove_money(request_money):
+                return False
+            initiator.add_money(request_money)
         
         # Transfer properties from initiator to partner
-        for prop_idx in self.trade_offer["properties"]:
+        for prop_idx in offer_prop_idxs:
             if prop_idx in initiator.properties:
                 initiator.properties.remove(prop_idx)
                 partner.properties.append(prop_idx)
                 self.properties[prop_idx].owner = partner.idx
         
         # Transfer properties from partner to initiator
-        for prop_idx in self.trade_request["properties"]:
+        for prop_idx in request_prop_idxs:
             if prop_idx in partner.properties:
                 partner.properties.remove(prop_idx)
                 initiator.properties.append(prop_idx)
                 self.properties[prop_idx].owner = initiator.idx
+
+        return True
     
     def _land_on_space(self, player: Player):
         """Handle landing on space"""
@@ -1285,8 +1736,13 @@ class MonopolyGame:
                     self.phase = "building"
                     self._show_build_prompt(player, pos)
                 else:
-                    self.phase = "action"
-                    self.can_roll = False
+                    # If the player rolled doubles, allow them to roll again without forcing an End Turn.
+                    if player.consecutive_doubles > 0:
+                        self.phase = "roll"
+                        self.can_roll = True
+                    else:
+                        self.phase = "action"
+                        self.can_roll = False
         
         elif space_type == "go_to_jail":
             self._send_to_jail(player)
@@ -1312,7 +1768,6 @@ class MonopolyGame:
             player.remove_money(tax_amount)
             self.free_parking_pot += tax_amount
             self._finish_turn_or_allow_double()
-        
         elif space_type == "free_parking":
             # Collect Free Parking pot
             if self.free_parking_pot > 0:
@@ -1322,6 +1777,10 @@ class MonopolyGame:
         
         else:
             self._finish_turn_or_allow_double()
+
+        # Web UI snapshots can occur between game-state transitions and the next update tick.
+        # Keep the default Action button label consistent with can_roll.
+        self._sync_default_action_button_text()
         
         if player.money < 0:
             self._handle_bankruptcy(player)
@@ -1377,29 +1836,58 @@ class MonopolyGame:
         self.auction_property = property_index
         self.auction_current_bid = 0
         self.auction_current_bidder = None
-        self.auction_passed_players = []
-        
-        # Start with next player after current player who declined
-        self.auction_bidder_index = (self.current_player_idx + 1) % len(self.active_players)
-        
-        # Show auction popup for first bidder
-        self._show_auction_popup()
-    
-    def _show_auction_popup(self):
-        """Show auction bidding popup"""
-        # Check if auction is over - everyone has passed since last bid
-        if len(self.auction_passed_players) >= len(self.active_players):
-            # Everyone passed - auction over
+
+        # Start with all non-bankrupt active players as bidders.
+        self.auction_active_bidders = [idx for idx in self.active_players if not self.players[idx].is_bankrupt]
+        # If nobody can bid, end immediately.
+        if not self.auction_active_bidders:
             self._end_auction()
             return
         
-        # Get current bidder, skip if bankrupt
-        bidder_idx = self.active_players[self.auction_bidder_index]
+        # Start with next player after current player who declined (if they are still a bidder).
+        start_idx = self.active_players[(self.current_player_idx + 1) % len(self.active_players)]
+        if start_idx in self.auction_active_bidders:
+            self.auction_bidder_index = self.auction_active_bidders.index(start_idx)
+        else:
+            self.auction_bidder_index = 0
+        
+        # Show auction popup for first bidder
+        self._show_auction_popup()
+
+    def _advance_auction_bidder(self) -> None:
+        """Advance to the next bidder who is still in the auction."""
+        if not self.auction_active_bidders:
+            self.auction_bidder_index = 0
+            return
+        self.auction_bidder_index = (self.auction_bidder_index + 1) % len(self.auction_active_bidders)
+    
+    def _show_auction_popup(self):
+        """Show auction bidding popup"""
+        # If there are no bidders left, the auction ends (no winner if no bids).
+        if not self.auction_active_bidders:
+            self._end_auction()
+            return
+
+        # If only the current high bidder remains, they win immediately.
+        if (
+            self.auction_current_bidder is not None
+            and self.auction_current_bid > 0
+            and self.auction_current_bidder in self.auction_active_bidders
+            and len(self.auction_active_bidders) == 1
+        ):
+            self._end_auction()
+            return
+        
+        # Get current bidder, skip if bankrupt / removed
+        self.auction_bidder_index = max(0, min(self.auction_bidder_index, len(self.auction_active_bidders) - 1))
+        bidder_idx = self.auction_active_bidders[self.auction_bidder_index]
         bidder = self.players[bidder_idx]
         
         # Skip bankrupt players
         if bidder.is_bankrupt:
-            self.auction_bidder_index = (self.auction_bidder_index + 1) % len(self.active_players)
+            if bidder_idx in self.auction_active_bidders:
+                self.auction_active_bidders.remove(bidder_idx)
+            self._advance_auction_bidder()
             self._show_auction_popup()
             return
         prop = self.properties[self.auction_property]
@@ -1440,10 +1928,31 @@ class MonopolyGame:
         self.auction_property = None
         self.auction_current_bid = 0
         self.auction_current_bidder = None
-        self.auction_passed_players = []
+        self.auction_active_bidders = []
         
         # Continue game
         self._finish_turn_or_allow_double()
+
+    def _sync_default_action_button_text(self) -> None:
+        """Keep default panel Action button text in sync with can_roll.
+
+        Some flows (notably closing popups after doubles) can flip can_roll and
+        then immediately snapshot buttons for the Web UI before the next update
+        tick rewrites the text. This method avoids showing "End Turn" while the
+        server will actually roll.
+        """
+        try:
+            for idx in list(getattr(self, "active_players", []) or []):
+                btns = getattr(self, "buttons", {}).get(idx)
+                if not isinstance(btns, dict) or "action" not in btns:
+                    continue
+                player = self.players[idx]
+                if getattr(player, "in_jail", False):
+                    btns["action"].text = "Roll"
+                else:
+                    btns["action"].text = "Roll" if self.can_roll else "End Turn"
+        except Exception:
+            return
     
     def _finish_turn_or_allow_double(self):
         """End turn or allow rolling again for doubles"""
@@ -1453,6 +1962,9 @@ class MonopolyGame:
             self.can_roll = True
         else:
             self.advance_turn()
+
+        # Ensure the UI button label matches the new can_roll immediately.
+        self._sync_default_action_button_text()
     
     def get_current_player(self) -> Player:
         """Get current player"""
@@ -1468,10 +1980,17 @@ class MonopolyGame:
             player.properties.append(position)
         
         self.popup.hide()
+        # If the player rolled doubles, allow the extra roll; otherwise allow ending the turn.
+        if player.consecutive_doubles > 0:
+            self.phase = "roll"
+            self.can_roll = True
+        else:
+            self.phase = "action"
+            self.can_roll = False
+
+        # Restore defaults after can_roll is finalized so the label is correct immediately.
         self._restore_default_buttons(player.idx)
-        # Allow player to continue their turn (build, trade, etc.)
-        self.phase = "action"
-        self.can_roll = False
+        self._sync_default_action_button_text()
     
     def _pay_rent(self, player: Player, position: int):
         """Pay rent to property owner"""
@@ -1577,6 +2096,7 @@ class MonopolyGame:
             
             self._start_token_animation(player.idx, old_pos, position)
             player.position = position
+            self._pending_post_card_land_player_idx = player.idx
         
         # Move relative to current position (like "Go Back 3 Spaces")
         elif action_type == "advance_relative":
@@ -1586,6 +2106,7 @@ class MonopolyGame:
             self._start_token_animation(player.idx, old_pos, new_pos)
             player.position = new_pos
             # No Go collection for relative moves (even if passing)
+            self._pending_post_card_land_player_idx = player.idx
         
         # Go to Jail
         elif action_type == "go_to_jail":
@@ -1621,6 +2142,7 @@ class MonopolyGame:
             
             self._start_token_animation(player.idx, old_pos, nearest)
             player.position = nearest
+            self._pending_post_card_land_player_idx = player.idx
         
         # Collect from each other player
         elif action_type == "collect_from_each":
@@ -1670,19 +2192,50 @@ class MonopolyGame:
     def draw(self):
         """Draw game"""
         if self.state == "player_select":
-            self._draw_player_select()
+            if getattr(self, "web_ui_only_player_select", False):
+                # Show the board full-screen while players are selecting on Web UI.
+                self._draw_player_select_board_only()
+            else:
+                self._draw_player_select()
             return
         
         if self.state == "winner":
             self._draw_winner_screen()
             return
         
+        # True board-only mode (no panels/popups in the Pyglet window)
+        if getattr(self, "board_only_mode", False):
+            # Background
+            self.renderer.draw_rect((32, 96, 36), (0, 0, self.width, self.height))
+
+            # IMPORTANT: keep geometry consistent for draw_immediate() (tokens are drawn after
+            # renderer.draw_all() in the server). If we only change board_rect temporarily here,
+            # tokens will be computed against stale space rectangles.
+            margin = 10
+            size = max(200, min(self.width - (2 * margin), self.height - (2 * margin)))
+            x = margin + (self.width - 2 * margin - size) // 2
+            y = margin + (self.height - 2 * margin - size) // 2
+            desired = (x, y, size, size)
+            if getattr(self, "board_rect", None) != desired:
+                self.board_rect = desired
+                self._calculate_spaces()
+
+            self._draw_board()
+
+            # Dice - show during roll animation or when values are set
+            if self.dice_rolling or self.dice_values != (0, 0):
+                self._draw_dice()
+
+            # Hover indicators
+            self._draw_hover_indicators()
+            return
+
         # Background
         self.renderer.draw_rect((32, 96, 36), (0, 0, self.width, self.height))
-        
+
         # Panels
         self._draw_panels()
-        
+
         # Board
         self._draw_board()
         
@@ -1698,6 +2251,30 @@ class MonopolyGame:
             # Screen dimming to cover board text
             self.renderer.draw_rect((0, 0, 0, 50), (0, 0, self.width, self.height))
             self.popup.draw(self.renderer)
+
+    def _draw_player_select_board_only(self):
+        """Render the Monopoly board full-screen (no panels/selection UI)."""
+        # Background
+        self.renderer.draw_rect((32, 96, 36), (0, 0, self.width, self.height))
+
+        # Temporarily expand the board to use the full window.
+        old_board_rect = getattr(self, "board_rect", None)
+        old_spaces = getattr(self, "spaces", None)
+
+        margin = 10
+        size = max(200, min(self.width - (2 * margin), self.height - (2 * margin)))
+        x = margin + (self.width - 2 * margin - size) // 2
+        y = margin + (self.height - 2 * margin - size) // 2
+        self.board_rect = (x, y, size, size)
+        self._calculate_spaces()
+
+        self._draw_board()
+
+        # Restore normal geometry so gameplay sizing remains unchanged.
+        if old_board_rect is not None:
+            self.board_rect = old_board_rect
+        if old_spaces is not None:
+            self.spaces = old_spaces
     
     def draw_immediate(self):
         """Draw tokens on top of board text using immediate rendering (called after batch rendering)"""
@@ -1822,10 +2399,11 @@ class MonopolyGame:
                         self.renderer.draw_rect((0, 200, 0), (house_x, house_y, house_w, house_h))
                         self.renderer.draw_rect((0, 100, 0), (house_x, house_y, house_w, house_h), width=1)
             
-            # Draw space name with text wrapping - NO ROTATION, always readable from bottom
-            # Hide names when popup is active to prevent overlap
+            # Draw space name with text wrapping - NO ROTATION, always readable from bottom.
+            # In web-UI-first (board_only_mode) we keep names visible even if a popup is active,
+            # because popups are shown on the Web UI and not drawn over the board.
             name = space_data.get("name", "")
-            if name and not self.popup.active:
+            if name and (not self.popup.active or getattr(self, "board_only_mode", False)):
                 cx, cy = sx + sw // 2, sy + sh // 2
                 
                 # Special handling for Free Parking to show pot
@@ -1840,8 +2418,8 @@ class MonopolyGame:
                     if self.free_parking_pot > 0:
                         lines.append(f"Pot: ${self.free_parking_pot}")
                     
-                    # Draw multi-line text
-                    font_size = 7
+                    # Draw multi-line text (slightly larger for readability)
+                    font_size = 8
                     line_spacing = font_size + 2
                     total_height = len(lines) * line_spacing
                     start_y = cy - total_height // 2 + line_spacing // 2
@@ -1852,7 +2430,7 @@ class MonopolyGame:
                         color = (255, 215, 0) if idx_line == len(lines) - 1 and self.free_parking_pot > 0 else (0, 0, 0)
                         self.renderer.draw_text(
                             line, cx, ly,
-                            'Arial', font_size if idx_line < len(lines) - 1 else 6, color,
+                            'Arial', font_size if idx_line < len(lines) - 1 else 7, color,
                             anchor_x='center', anchor_y='center',
                             rotation=0
                         )
@@ -1866,7 +2444,7 @@ class MonopolyGame:
                     current_line = ""
                     for word in words:
                         test_line = (current_line + " " + word).strip()
-                        if len(test_line) <= 10:  # Max chars per line
+                        if len(test_line) <= 9:  # Max chars per line (bigger font)
                             current_line = test_line
                         else:
                             if current_line:
@@ -1876,7 +2454,7 @@ class MonopolyGame:
                         lines.append(current_line)
                     
                     # Draw multi-line text (reverse order because Y increases downward in pygame coords)
-                    font_size = 7 if space_type in ["property", "railroad", "utility"] else 6
+                    font_size = 8 if space_type in ["property", "railroad", "utility"] else 7
                     line_spacing = font_size + 2
                     total_height = len(lines) * line_spacing
                     start_y = cy - total_height // 2 + line_spacing // 2
@@ -1892,11 +2470,11 @@ class MonopolyGame:
                 else:
                     # Single word - adjust size if too long
                     if len(name) > 12:
-                        font_size = 6  # Smaller for long words
+                        font_size = 7  # Smaller for long words (bumped +1)
                     elif len(name) > 10:
-                        font_size = 7
+                        font_size = 8
                     else:
-                        font_size = 8 if space_type in ["property", "railroad", "utility"] else 7
+                        font_size = 9 if space_type in ["property", "railroad", "utility"] else 8
                     
                     self.renderer.draw_text(
                         name, cx, cy,

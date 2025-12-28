@@ -1,7 +1,6 @@
 import asyncio
 import websockets
 import pygame
-import cv2
 import numpy as np
 import json
 import time
@@ -25,16 +24,10 @@ class PiThinClient:
         self.screen = pygame.display.set_mode(WINDOW_SIZE, display_flags)
         self.clock = pygame.time.Clock()
         
-        self.camera = cv2.VideoCapture(0)
-        self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        self.camera.set(cv2.CAP_PROP_FPS, 30)
-        
         self.running = True
         self.last_frame_surface = None
         self.decode_executor = ThreadPoolExecutor(max_workers=2)
         self.decode_queue: Optional[asyncio.Queue] = None
-        self.camera_executor = ThreadPoolExecutor(max_workers=1)
         
         self.frame_count = 0
         self.last_fps_time = time.time()
@@ -46,7 +39,7 @@ class PiThinClient:
         
         print(f"\n{'='*60}")
         print(f"Attempting to connect to: {self.server_url}")
-        print(f"Make sure the server is running: python game_server_full.py")
+        print(f"Make sure the server is running: python game_server_pyglet_complete.py")
         print(f"{'='*60}\n")
         
         for attempt in range(max_retries):
@@ -79,7 +72,7 @@ class PiThinClient:
         print("\n" + "="*60)
         print("❌ Failed to connect to server")
         print("\nTroubleshooting:")
-        print("1. Ensure server is running: python game_server_full.py")
+        print("1. Ensure server is running: python game_server_pyglet_complete.py")
         print(f"2. Check server IP in config.py (currently: {self.server_url})")
         print("3. Check firewall allows port 8765")
         print("4. Ping server: ping <server_ip>")
@@ -87,19 +80,6 @@ class PiThinClient:
         print("="*60 + "\n")
         return False
     
-    async def send_camera_frame(self):
-        ret, frame = self.camera.read()
-        if not ret:
-            return
-        loop = asyncio.get_running_loop()
-        frame_bytes = await loop.run_in_executor(self.camera_executor, self._encode_camera_frame, frame)
-        if not frame_bytes:
-            return
-        try:
-            await self.websocket.send(frame_bytes)
-        except:
-            pass
-
     @staticmethod
     def _decode_frame_surface(frame_bytes):
         try:
@@ -113,18 +93,6 @@ class PiThinClient:
         except Exception as e:
             print(f"Decode error: {e}")
             return None
-
-    @staticmethod
-    def _encode_camera_frame(frame):
-        try:
-            frame_small = cv2.resize(frame, (640, 480))
-            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 80]
-            result, encoded_img = cv2.imencode('.jpg', frame_small, encode_param)
-            if result:
-                return encoded_img.tobytes()
-        except Exception as e:
-            print(f"Encode error: {e}")
-        return None
     
     async def receive_frames(self):
         try:
@@ -194,25 +162,6 @@ class PiThinClient:
                     if event.key == pygame.K_ESCAPE:
                         print("ESC pressed - shutting down client...")
                         self.running = False
-                    else:
-                        try:
-                            await self.websocket.send(json.dumps({
-                                "type": "keyboard",
-                                "key": event.key,
-                                "unicode": event.unicode
-                            }))
-                        except:
-                            pass
-                elif event.type == pygame.MOUSEBUTTONDOWN or event.type == pygame.MOUSEMOTION:
-                    try:
-                        mouse_pos = pygame.mouse.get_pos()
-                        await self.websocket.send(json.dumps({
-                            "type": "mouse",
-                            "pos": mouse_pos,
-                            "buttons": pygame.mouse.get_pressed()
-                        }))
-                    except:
-                        pass
             
             await asyncio.sleep(0.01)
     
@@ -243,11 +192,6 @@ class PiThinClient:
             
             await asyncio.sleep(0)
     
-    async def camera_loop(self):
-        while self.running:
-            await self.send_camera_frame()
-            await asyncio.sleep(1.0 / 60)  # 60 FPS for fast hand tracking
-    
     async def ping_loop(self):
         while self.running:
             try:
@@ -267,7 +211,6 @@ class PiThinClient:
                 self.receive_frames(),
                 self.decode_loop(),
                 self.render_loop(),
-                self.camera_loop(),
                 self.handle_input(),
                 self.ping_loop()
             )
@@ -278,14 +221,10 @@ class PiThinClient:
     
     def cleanup(self):
         self.running = False
-        if self.camera:
-            self.camera.release()
         if self.websocket:
             asyncio.create_task(self.websocket.close())
         if self.decode_executor:
             self.decode_executor.shutdown(wait=False)
-        if self.camera_executor:
-            self.camera_executor.shutdown(wait=False)
         if self.decode_queue:
             while not self.decode_queue.empty():
                 try:

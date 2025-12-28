@@ -29,6 +29,12 @@ class PygletButton:
         
         for meta in fingertips:
             x, y = meta["pos"]
+            if meta.get("click"):
+                if (self.x <= x <= self.x + self.width and 
+                    self.y <= y <= self.y + self.height):
+                    self.hovering = False
+                    self.hover_start = 0.0
+                    return True, 1.0
             if (self.x <= x <= self.x + self.width and 
                 self.y <= y <= self.y + self.height):
                 if not self.hovering:

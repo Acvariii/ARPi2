@@ -1,0 +1,33 @@
+{
+  "name": "Eldrin the Righteous",
+  "player_color": [
+    40,
+    200,
+    120
+  ],
+  "race": "Elf",
+  "char_class": "Cleric",
+  "level": 1,
+  "alignment": "Lawful Neutral",
+  "abilities": {
+    "Strength": 15,
+    "Dexterity": 15,
+    "Constitution": 15,
+    "Intelligence": 8,
+    "Wisdom": 8,
+    "Charisma": 8
+  },
+  "max_hp": 10,
+  "current_hp": 10,
+  "armor_class": 12,
+  "skills": [
+    "Medicine",
+    "Insight",
+    "Religion"
+  ],
+  "inventory": [],
+  "equipment": {},
+  "gold": 0,
+  "experience": 0,
+  "background": ""
+}

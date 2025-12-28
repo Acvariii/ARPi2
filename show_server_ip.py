@@ -84,7 +84,7 @@ def main():
     print(f"\n3. On Raspberry Pi, test connection:")
     print(f"   python check_connection.py {primary_ip}")
     print(f"\n4. Start server:")
-    print(f"   python game_server_full.py")
+    print(f"   python game_server_pyglet_complete.py")
     print(f"\n5. On Pi, start client:")
     print(f"   python pi_thin_client.py")
     

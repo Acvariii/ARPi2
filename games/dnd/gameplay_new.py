@@ -122,7 +122,12 @@ class DnDGameSession:
         self.active_players: List[int] = []
         self.characters: Dict[int, Character] = {}
         self.character_creators: Dict[int, DnDCharacterCreator] = {}
-        self.dm_player_idx = None  # Player 8 (index 7)
+        self.dm_player_idx: Optional[int] = None
+
+        # Web-UI-driven flow flags
+        # - web_ui_only_player_select already exists and disables in-window selection.
+        # - web_ui_only_char_creation disables the in-window touch character creator.
+        self.web_ui_only_char_creation = False
         
         # Panels
         self.panels = {}
@@ -499,7 +504,11 @@ class DnDGameSession:
     def start_game(self, selected_players: List[int]):
         """Initialize game"""
         self.active_players = selected_players
-        self.dm_player_idx = 7 if 7 in selected_players else None
+
+        # DM is chosen externally (e.g., via Web UI). If the chosen DM is not in the
+        # selected players, clear it.
+        if self.dm_player_idx is not None and self.dm_player_idx not in selected_players:
+            self.dm_player_idx = None
         
         # Setup panels
         all_panels = calculate_all_panels(self.width, self.height)
@@ -511,7 +520,44 @@ class DnDGameSession:
         
         # Move to character creation
         self.state = "char_creation"
-        self._init_character_creators()
+        if not getattr(self, "web_ui_only_char_creation", False):
+            self._init_character_creators()
+
+    def set_dm_player_idx(self, player_idx: Optional[int]) -> None:
+        try:
+            if player_idx is None:
+                self.dm_player_idx = None
+                return
+            pidx = int(player_idx)
+        except Exception:
+            return
+        if 0 <= pidx <= 7:
+            self.dm_player_idx = pidx
+
+    def set_character(self, player_idx: int, character: Character) -> None:
+        try:
+            pidx = int(player_idx)
+        except Exception:
+            return
+        if not (0 <= pidx <= 7):
+            return
+        if self.dm_player_idx is not None and pidx == self.dm_player_idx:
+            # DM doesn't need a character
+            return
+        self.characters[pidx] = character
+
+    def maybe_advance_from_char_creation(self) -> None:
+        if self.state != "char_creation":
+            return
+        if not self.active_players:
+            return
+        for player_idx in self.active_players:
+            if self.dm_player_idx is not None and player_idx == self.dm_player_idx:
+                continue
+            if player_idx not in self.characters:
+                return
+        self.state = "gameplay"
+        self._setup_gameplay_ui()
     
     def _init_character_creators(self):
         """Initialize character creators for non-DM players"""
@@ -538,9 +584,15 @@ class DnDGameSession:
             current_time = time.time()
             
             if self.state == "player_select":
-                self._handle_player_select(fingertips)
+                # Web UI drives player selection; disable hover/tap selection in the game window.
+                if not getattr(self, "web_ui_only_player_select", False):
+                    self._handle_player_select(fingertips)
             elif self.state == "char_creation":
-                self._handle_char_creation(fingertips, current_time)
+                if not getattr(self, "web_ui_only_char_creation", False):
+                    self._handle_char_creation(fingertips, current_time)
+                else:
+                    # Web UI handles character creation. Just wait.
+                    self.maybe_advance_from_char_creation()
             elif self.state == "gameplay":
                 self._handle_gameplay(fingertips, current_time)
             elif self.state == "combat":
@@ -559,7 +611,7 @@ class DnDGameSession:
         
         if self.selection_ui.start_ready:
             selected = [i for i, s in enumerate(self.selection_ui.selected) if s]
-            if len(selected) >= 2 and 7 in selected:  # Need Player 8 + at least 1 other
+            if len(selected) >= 2 and self.dm_player_idx is not None and self.dm_player_idx in selected:
                 self.start_game(selected)
                 self.selection_ui.start_ready = False
     
@@ -668,7 +720,27 @@ class DnDGameSession:
         self.renderer.draw_rect((20, 20, 30), (0, 0, self.width, self.height))
         
         if self.state == "player_select":
-            self._draw_player_select()
+            if getattr(self, "web_ui_only_player_select", False):
+                self.renderer.draw_text(
+                    "Waiting for players…",
+                    self.width // 2,
+                    self.height // 2,
+                    font_size=44,
+                    color=Colors.WHITE,
+                    anchor_x='center',
+                    anchor_y='center'
+                )
+                self.renderer.draw_text(
+                    "Use the Web Controller to select slots and start",
+                    self.width // 2,
+                    self.height // 2 + 50,
+                    font_size=18,
+                    color=(200, 200, 200),
+                    anchor_x='center',
+                    anchor_y='center'
+                )
+            else:
+                self._draw_player_select()
         elif self.state == "char_creation":
             self._draw_char_creation()
         elif self.state == "gameplay":

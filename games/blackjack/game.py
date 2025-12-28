@@ -169,8 +169,128 @@ class BlackjackGame:
         # Results tracking
         self.result_timers: Dict[int, float] = {}
         self.result_duration = 2.5
+
+        # Web UI result popups (must-close)
+        self._web_round_id = 0
+        self._web_result_popups: Dict[int, Dict] = {}
+        self._web_result_dismissed_round: Dict[int, int] = {}
         
         self._calculate_geometry()
+
+    def get_status_summary(self) -> Dict:
+        """Return a small summary used by both Web UI and board-only overlay."""
+        state = str(getattr(self, "state", ""))
+        active = list(getattr(self, "active_players", []) or [])
+
+        required = len(active)
+        ready = 0
+        phase_text = ""
+
+        if state in ("player_select",):
+            phase_text = "Waiting for players to start"
+            return {"state": state, "phase_text": phase_text, "ready_count": 0, "required_count": 0}
+
+        if state in ("betting",):
+            for idx in active:
+                try:
+                    if bool(self.players[int(idx)].is_ready):
+                        ready += 1
+                except Exception:
+                    continue
+            phase_text = f"Waiting for bets: {ready}/{required} ready"
+            return {"state": state, "phase_text": phase_text, "ready_count": ready, "required_count": required}
+
+        if state in ("dealing",):
+            phase_text = "Dealing cards"
+            return {"state": state, "phase_text": phase_text, "ready_count": 0, "required_count": 0}
+
+        if state in ("playing",):
+            # Players act simultaneously; count how many are done.
+            participants = 0
+            outstanding = 0
+            for idx in active:
+                try:
+                    player = self.players[int(idx)]
+                except Exception:
+                    continue
+                if not getattr(player, "hands", None):
+                    continue
+                participants += 1
+                try:
+                    needs_action = any((not h.is_standing) and (not h.is_busted) for h in (player.hands or []))
+                except Exception:
+                    needs_action = False
+                if needs_action:
+                    outstanding += 1
+            done = max(0, participants - outstanding)
+            phase_text = f"Waiting for decisions: {done}/{participants} done" if participants else "Waiting for decisions"
+            return {
+                "state": state,
+                "phase_text": phase_text,
+                "ready_count": done,
+                "required_count": participants,
+            }
+
+        if state in ("dealer_turn",):
+            phase_text = "Dealer is playing"
+            return {"state": state, "phase_text": phase_text, "ready_count": 0, "required_count": 0}
+
+        if state in ("results",):
+            phase_text = "Results"
+            return {"state": state, "phase_text": phase_text, "ready_count": 0, "required_count": 0}
+
+        if state in ("game_over",):
+            phase_text = str(getattr(self, "game_over_message", "Game over") or "Game over")
+            return {"state": state, "phase_text": phase_text, "ready_count": 0, "required_count": 0}
+
+        phase_text = state or ""
+        return {"state": state, "phase_text": phase_text, "ready_count": 0, "required_count": 0}
+
+    def get_web_result_popup(self, player_idx: int) -> Optional[Dict]:
+        try:
+            pidx = int(player_idx)
+        except Exception:
+            return None
+        payload = (getattr(self, "_web_result_popups", {}) or {}).get(pidx)
+        if not payload:
+            return None
+        dismissed_round = (getattr(self, "_web_result_dismissed_round", {}) or {}).get(pidx)
+        if dismissed_round == payload.get("round_id"):
+            return None
+        return payload
+
+    def close_web_result(self, player_idx: int) -> None:
+        try:
+            pidx = int(player_idx)
+        except Exception:
+            return
+        payload = (getattr(self, "_web_result_popups", {}) or {}).get(pidx)
+        if not payload:
+            return
+        if not hasattr(self, "_web_result_dismissed_round"):
+            self._web_result_dismissed_round = {}
+        self._web_result_dismissed_round[pidx] = int(payload.get("round_id", -1) or -1)
+
+    def _web_results_required_players(self) -> List[int]:
+        """Players that must close the Web UI result popup before continuing."""
+        try:
+            popups = getattr(self, "_web_result_popups", {}) or {}
+            return sorted(int(k) for k in popups.keys())
+        except Exception:
+            return []
+
+    def _web_results_all_closed(self) -> bool:
+        try:
+            rid = int(getattr(self, "_web_round_id", 0) or 0)
+        except Exception:
+            rid = 0
+        if rid <= 0:
+            return True
+        required = self._web_results_required_players()
+        if not required:
+            return True
+        dismissed = getattr(self, "_web_result_dismissed_round", {}) or {}
+        return all(int(dismissed.get(p, -1) or -1) == rid for p in required)
     
     def _calculate_geometry(self):
         """Calculate table and dealer area"""
@@ -253,6 +373,41 @@ class BlackjackGame:
                 # Only one player left - they win
                 winner_idx = players_with_chips[0]
                 self._end_game(f"Player {winner_idx + 1} wins!")
+
+    def adjust_current_bet(self, player_idx: int, delta: int) -> None:
+        """Adjust the player's current bet during betting phase.
+
+        Only affects `current_bet` (chips aren't deducted until dealing starts).
+        """
+        if str(getattr(self, "state", "")) != "betting":
+            return
+        try:
+            pidx = int(player_idx)
+        except Exception:
+            return
+        if pidx < 0 or pidx > 7:
+            return
+        player = getattr(self, "players", [None] * 8)[pidx]
+        if player is None:
+            return
+        if bool(getattr(player, "is_ready", False)):
+            return
+        try:
+            cur = int(getattr(player, "current_bet", 0) or 0)
+        except Exception:
+            cur = 0
+        nxt = cur + int(delta or 0)
+        if nxt < 0:
+            nxt = 0
+        # Don't allow bets larger than chips.
+        try:
+            chips = int(getattr(player, "chips", 0) or 0)
+        except Exception:
+            chips = 0
+        if nxt > chips:
+            nxt = chips
+        player.current_bet = nxt
+        self._show_betting_for_all_players()
     
     def _set_popup_buttons(self, player_idx: int, texts: List[str], enabled: List[bool]):
         """Create popup buttons in player panel - only creates if not exist, or updates enabled state"""
@@ -298,6 +453,18 @@ class BlackjackGame:
     
     def _start_dealing(self):
         """Start card dealing animation"""
+        # New round: clear any previous web result popups so new results show again.
+        try:
+            self._web_round_id = int(getattr(self, "_web_round_id", 0) or 0) + 1
+        except Exception:
+            self._web_round_id = 1
+        for idx in list(getattr(self, "active_players", []) or []):
+            try:
+                self._web_result_popups.pop(int(idx), None)
+                self._web_result_dismissed_round.pop(int(idx), None)
+            except Exception:
+                continue
+
         self.deck = self._create_deck()
         self.dealer_hand = Hand()
         
@@ -699,22 +866,21 @@ class BlackjackGame:
                     # Dealer busted, player wins - return bet + winnings
                     winnings = hand.bet * 2  # Return original bet + equal amount
                     player.chips += winnings
-                    self._show_result(idx, "WIN!", f"Won ${hand.bet}", hand)
+                    self._show_result(idx, "WIN!", f"Dealer busted ({dealer_value}). Won ${hand.bet}", hand)
                 elif player_value > dealer_value:
                     # Player wins - return bet + winnings
                     winnings = hand.bet * 2  # Return original bet + equal amount
                     player.chips += winnings
-                    self._show_result(idx, "WIN!", f"Won ${hand.bet}", hand)
+                    self._show_result(idx, "WIN!", f"You {player_value} vs Dealer {dealer_value}. Won ${hand.bet}", hand)
                 elif player_value == dealer_value:
                     # Push - return original bet
                     player.chips += hand.bet
                     self._show_result(idx, "PUSH", f"Tie at {player_value}", hand)
                 else:
                     # Dealer wins - bet already taken
-                    self._show_result(idx, "LOSE", f"Lost ${hand.bet}", hand)
+                    self._show_result(idx, "LOSE", f"You {player_value} vs Dealer {dealer_value}. Lost ${hand.bet}", hand)
         
-        # Schedule next round to start after showing results
-        self.next_round_time = time.time() + 3.0  # 3 second delay to show results
+        # Next round is gated on Web UI result popups being closed by all players.
     
     def _start_new_round(self):
         """Start a new round of blackjack"""
@@ -734,6 +900,13 @@ class BlackjackGame:
             self._player_results = {}
         if hasattr(self, 'next_round_time'):
             delattr(self, 'next_round_time')
+
+        # Clear web result popups (this function is only called after all were closed)
+        try:
+            self._web_result_popups = {}
+            self._web_result_dismissed_round = {}
+        except Exception:
+            pass
         
         # Start betting phase
         self.state = "betting"
@@ -759,6 +932,61 @@ class BlackjackGame:
         if not hasattr(self, '_player_results'):
             self._player_results = {}
         self._player_results[player_idx] = (title, message, time.time())
+
+        # Also store a structured, must-close Web UI result popup.
+        try:
+            pidx = int(player_idx)
+        except Exception:
+            return
+
+        if not hasattr(self, "_web_result_popups"):
+            self._web_result_popups = {}
+        if not hasattr(self, "_web_round_id"):
+            self._web_round_id = 0
+
+        dealer_cards = []
+        dealer_value = None
+        try:
+            dealer_cards = [str(c) for c in (getattr(self.dealer_hand, "cards", []) or [])]
+            dealer_value = int(self.dealer_hand.value())
+        except Exception:
+            dealer_cards = []
+            dealer_value = None
+
+        hand_cards = []
+        hand_value = None
+        try:
+            hand_cards = [str(c) for c in (getattr(hand, "cards", []) or [])]
+            hand_value = int(hand.value())
+        except Exception:
+            hand_cards = []
+            hand_value = None
+
+        existing = self._web_result_popups.get(pidx)
+        if not existing or existing.get("round_id") != int(self._web_round_id or 0):
+            existing = {
+                "round_id": int(self._web_round_id or 0),
+                "dealer": {
+                    "cards": dealer_cards,
+                    "value": dealer_value,
+                    "busted": bool(getattr(self.dealer_hand, "is_busted", False)),
+                    "blackjack": bool(getattr(self.dealer_hand, "is_blackjack", lambda: False)()),
+                },
+                "hands": [],
+            }
+            self._web_result_popups[pidx] = existing
+
+        existing["hands"].append(
+            {
+                "title": str(title),
+                "message": str(message),
+                "bet": int(getattr(hand, "bet", 0) or 0),
+                "cards": hand_cards,
+                "value": hand_value,
+                "busted": bool(getattr(hand, "is_busted", False)),
+                "blackjack": bool(getattr(hand, "is_blackjack", lambda: False)()),
+            }
+        )
     
     def _hit(self, player: BlackjackPlayer):
         """Player hits (with animation)"""
@@ -850,11 +1078,13 @@ class BlackjackGame:
             return True
         
         if self.state == "player_select":
-            self.selection_ui.update_with_fingertips(fingertips, min_players=1)
-            if self.selection_ui.start_ready:
-                selected = self.selection_ui.get_selected_indices()
-                if selected:
-                    self.start_game(selected)
+            # Web UI drives player selection; disable hover/tap selection in the game window.
+            if not getattr(self, "web_ui_only_player_select", False):
+                self.selection_ui.update_with_fingertips(fingertips, min_players=1)
+                if self.selection_ui.start_ready:
+                    selected = self.selection_ui.get_selected_indices()
+                    if selected:
+                        self.start_game(selected)
             return False
         
         # Store fingertips for button updates in draw
@@ -973,12 +1203,9 @@ class BlackjackGame:
         # Check if dealing animations are complete
         if self.state == "dealing" and hasattr(self, 'animation_end_time'):
             if current_time >= self.animation_end_time:
-                # All cards dealt, transition to playing
+                # All cards dealt. Let _check_initial_blackjacks decide the next state.
+                # Do NOT override state here (prevents premature/incorrect transitions).
                 self._check_initial_blackjacks()
-                self.state = "playing"
-                self.current_player_idx = 0
-                self.buttons = {}
-                self._show_player_actions()
                 delattr(self, 'animation_end_time')
         
         # Check if dealer drawing animations are complete
@@ -995,9 +1222,9 @@ class BlackjackGame:
                 finally:
                     delattr(self, 'dealer_draw_complete_time')
         
-        # Check if results phase is over and start new round
-        if self.state == "results" and hasattr(self, 'next_round_time'):
-            if current_time >= self.next_round_time:
+        # Block next round until all players close the Web UI result popup.
+        if self.state == "results":
+            if self._web_results_all_closed():
                 self._start_new_round()
         
         # Auto-return to player selection after game over
@@ -1015,7 +1242,13 @@ class BlackjackGame:
     def draw(self):
         """Draw game"""
         if self.state == "player_select":
-            self._draw_player_select()
+            if getattr(self, "web_ui_only_player_select", False):
+                # Show the table full-screen while players are selecting on Web UI.
+                self.renderer.draw_rect((0, 80, 40), (0, 0, self.width, self.height))
+                self._draw_table()
+                self._draw_board_only_status_overlay()
+            else:
+                self._draw_player_select()
             return
         
         if self.state == "game_over":
@@ -1024,23 +1257,72 @@ class BlackjackGame:
         
         # Background
         self.renderer.draw_rect((0, 80, 40), (0, 0, self.width, self.height))
-        
+
+        # True board-only mode (no panels/popups in the Pyglet window)
+        if getattr(self, "board_only_mode", False):
+            self._draw_table()
+            self._draw_dealer()
+            # Web UI shows per-player cards; keep Pyglet clean.
+            # Still show deal animations so the table feels alive.
+            if hasattr(self, 'card_animations') and len(self.card_animations) > 0:
+                self._draw_animating_cards()
+            self._draw_board_only_status_overlay()
+            return
+
+    def _draw_board_only_status_overlay(self) -> None:
+        """Small status line for the Pyglet window in Web-UI-first mode."""
+        try:
+            s = self.get_status_summary() or {}
+        except Exception:
+            s = {}
+        text = str(s.get("phase_text") or "").strip()
+        if not text:
+            return
+        # Prefer positioning under dealer cards.
+        x = int(self.width // 2)
+        y = int(self.height - 28)
+        try:
+            dx, dy, dw, dh = getattr(self, "dealer_area", (0, 0, 0, 0))
+            if dw and dh:
+                x = int(dx + dw // 2)
+                y = int(dy - 22)
+        except Exception:
+            pass
+        if y < 16:
+            y = 16
+
+        try:
+            self.renderer.draw_text(
+                text,
+                x,
+                y,
+                'Arial',
+                18,
+                (255, 255, 255),
+                bold=True,
+                anchor_x='center',
+                anchor_y='center',
+                rotation=0,
+            )
+        except Exception:
+            return
+
         # Panels
         self._draw_panels()
-        
+
         # Table
         self._draw_table()
-        
+
         # Dealer cards
         self._draw_dealer()
-        
+
         # Player cards
         self._draw_player_cards()
-        
+
         # Draw animating cards on top
         if hasattr(self, 'card_animations') and len(self.card_animations) > 0:
             self._draw_animating_cards()
-        
+
         # Popup without dimming overlay
         if self.popup.active:
             self.popup.draw(self.renderer)
