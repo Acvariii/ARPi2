@@ -1,14 +1,14 @@
 {
-  "name": "Ivan the Champion",
+  "name": "Aelrindel Starweaver",
   "player_color": [
     40,
     120,
     200
   ],
-  "race": "Human",
+  "race": "Elf",
   "char_class": "Fighter",
   "level": 1,
-  "alignment": "Chaotic Evil",
+  "alignment": "Lawful Good",
   "abilities": {
     "Strength": 15,
     "Dexterity": 15,
@@ -19,15 +19,78 @@
   },
   "max_hp": 12,
   "current_hp": 12,
-  "armor_class": 12,
+  "armor_class": 18,
   "skills": [
     "Athletics",
     "Intimidation",
-    "Survival"
+    "Arcana",
+    "Sleight of Hand"
   ],
-  "inventory": [],
-  "equipment": {},
+  "inventory": [
+    {
+      "id": "1766916445079_7481",
+      "name": "Chain Mail",
+      "kind": "gear",
+      "slot": "chest",
+      "ac_bonus": 6
+    },
+    {
+      "id": "1766916445079_5374",
+      "name": "Longsword",
+      "kind": "misc"
+    },
+    {
+      "id": "1766916445079_8240",
+      "name": "Adventurer's Pack",
+      "kind": "misc"
+    },
+    {
+      "id": "1766916445079_3341",
+      "name": "Healing Potion",
+      "kind": "consumable",
+      "effect": {
+        "type": "heal",
+        "amount": 6
+      }
+    }
+  ],
+  "equipment": {
+    "chest": "1766916445079_7481"
+  },
   "gold": 0,
   "experience": 0,
-  "background": ""
+  "background": "You were shaped by long nights, short tempers, and longer roads.\n\nYou grew up in city alleys, and you learned to lean on honor\u2014even when it made you stubborn. When revenge pulled you onto the road, you didn\u2019t hesitate for long. A stranger\u2019s words lodged in your mind like a splinter.\n\nYour greatest flaw is impulsiveness, and you\u2019re not proud of the damage it\u2019s caused. Still, a person keeps you standing when the odds turn. You carry a map as a reminder of who you were before you became a fighter.\n\nUnique detail: Test\n\nYou don\u2019t seek glory\u2014only a reason to believe you can make things right.",
+  "background_answers": {
+    "style": "Use tricks",
+    "origin": "City alleys",
+    "family": "Large and chaotic",
+    "mentor": "No one",
+    "turning_point": "Revenge",
+    "virtue": "Honor",
+    "flaw": "Impulsiveness",
+    "fear": "Losing control",
+    "bond": "A person",
+    "reputation": "Troublemaker",
+    "secret": "A forbidden truth",
+    "magic": "I study it",
+    "faith": "Haunted",
+    "social": "A leader",
+    "travel": "To learn",
+    "weapon": "My words",
+    "keepsake": "A map",
+    "scar": "A ritual",
+    "goal": "Break a curse",
+    "companions": "Competence",
+    "conflict": "De-escalate",
+    "craft": "Herbalism",
+    "hook": "Test"
+  },
+  "feats": [
+    "Bookish"
+  ],
+  "features": [
+    "Combat Training",
+    "Steel Nerve",
+    "Calm Under Pressure"
+  ]
 }

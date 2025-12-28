@@ -151,6 +151,28 @@ class PygletRenderer:
             label.rotation = rotation
         
         self.text_cache.append(label)
+
+    def draw_text_immediate(self, text_str: str, x: int, y: int, font_name: str = 'Arial',
+                            font_size: int = 16, color: Tuple[int, int, int] = (255, 255, 255),
+                            bold: bool = False, anchor_x: str = 'left', anchor_y: str = 'top',
+                            alpha: int = 255, rotation: int = 0):
+        """Draw text immediately (not batched). Useful for overlays above all UI."""
+        y_flipped = self.flip_y(y)
+        label = text.Label(
+            text_str,
+            font_name=font_name,
+            font_size=font_size,
+            x=x,
+            y=y_flipped,
+            color=(*color, alpha),
+            anchor_x=anchor_x,
+            anchor_y=anchor_y,
+        )
+        if bold:
+            label.bold = True
+        if rotation != 0:
+            label.rotation = rotation
+        label.draw()
     
     def draw_circular_progress(self, center: Tuple[int, int], radius: int,
                               progress: float, color: Tuple[int, int, int],
@@ -195,6 +217,30 @@ class PygletRenderer:
         for i in range(0, len(gl_points), 2):
             gl.glVertex2f(gl_points[i], gl_points[i + 1])
         gl.glEnd()
+
+    def draw_polygon_immediate(self, color: Tuple[int, int, int], points: List[Tuple[int, int]],
+                               alpha: int = 255):
+        """Draw filled polygon immediately using pyglet.shapes (core-profile friendly)."""
+        if not points or len(points) < 3:
+            return
+        gl_points = []
+        for x, y in points:
+            gl_points.extend([x, self.flip_y(y)])
+        poly = shapes.Polygon(*gl_points, color=(*color, alpha))
+        poly.draw()
+
+    def draw_polyline_immediate(self, color: Tuple[int, int, int], points: List[Tuple[int, int]],
+                                width: int = 2, alpha: int = 255, closed: bool = True):
+        """Draw a polyline immediately using pyglet.shapes.Line segments."""
+        if not points or len(points) < 2:
+            return
+        pts = list(points)
+        if closed:
+            pts.append(points[0])
+        for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
+            line = shapes.Line(x1, self.flip_y(y1), x2, self.flip_y(y2), color=(*color, alpha))
+            line.width = width
+            line.draw()
     
     def draw_all(self):
         """Draw all batched shapes and text"""

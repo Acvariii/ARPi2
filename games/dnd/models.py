@@ -111,6 +111,10 @@ class Character:
         
         self.experience = 0
         self.background = ""
+        # Extended character flavor/build metadata
+        self.background_answers: Dict[str, str] = {}
+        self.feats: List[str] = []
+        self.features: List[str] = []
 
     @staticmethod
     def _new_item_id() -> str:
@@ -331,7 +335,10 @@ class Character:
             "equipment": self.equipment,
             "gold": self.gold,
             "experience": self.experience,
-            "background": self.background
+            "background": self.background,
+            "background_answers": self.background_answers,
+            "feats": self.feats,
+            "features": self.features,
         }
     
     @staticmethod
@@ -351,6 +358,12 @@ class Character:
         char.gold = data.get("gold", 0)
         char.experience = data.get("experience", 0)
         char.background = data.get("background", "")
+        ba = data.get("background_answers", {})
+        char.background_answers = ba if isinstance(ba, dict) else {}
+        feats = data.get("feats", [])
+        char.feats = list(feats) if isinstance(feats, list) else []
+        features = data.get("features", [])
+        char.features = list(features) if isinstance(features, list) else []
         try:
             char.normalize_inventory()
             char.update_derived_stats(reset_current_hp=False)

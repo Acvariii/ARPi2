@@ -38,6 +38,13 @@ export type Snapshot = {
     state: string;
     dm_player_idx?: number | null;
     background?: string | null;
+    background_files?: string[];
+    background_questions?: Array<{
+      id: string;
+      kind: 'choice' | 'text';
+      prompt: string;
+      options?: string[];
+    }>;
     in_combat?: boolean;
     races?: string[];
     classes?: string[];
@@ -57,6 +64,10 @@ export type Snapshot = {
       hp: number;
       ac: number;
       abilities?: Record<string, number>;
+      skills?: string[];
+      background?: string;
+      feats?: string[];
+      features?: string[];
       inventory?: Array<{
         id: string;
         name: string;

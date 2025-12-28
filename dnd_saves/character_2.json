@@ -1,33 +1,102 @@
 {
-  "name": "Eldrin the Righteous",
+  "name": "Inferno the Pathfinder",
   "player_color": [
     40,
     200,
     120
   ],
-  "race": "Elf",
-  "char_class": "Cleric",
+  "race": "Tiefling",
+  "char_class": "Ranger",
   "level": 1,
-  "alignment": "Lawful Neutral",
+  "alignment": "Lawful Evil",
   "abilities": {
-    "Strength": 15,
+    "Strength": 8,
     "Dexterity": 15,
-    "Constitution": 15,
-    "Intelligence": 8,
-    "Wisdom": 8,
+    "Constitution": 8,
+    "Intelligence": 15,
+    "Wisdom": 15,
     "Charisma": 8
   },
-  "max_hp": 10,
-  "current_hp": 10,
-  "armor_class": 12,
+  "max_hp": 9,
+  "current_hp": 9,
+  "armor_class": 13,
   "skills": [
-    "Medicine",
-    "Insight",
-    "Religion"
+    "Nature",
+    "Survival",
+    "Perception",
+    "Insight"
   ],
-  "inventory": [],
-  "equipment": {},
+  "inventory": [
+    {
+      "id": "1766916618160_3913",
+      "name": "Leather Armor",
+      "kind": "gear",
+      "slot": "chest",
+      "ac_bonus": 1
+    },
+    {
+      "id": "1766916618160_5126",
+      "name": "Longbow",
+      "kind": "misc"
+    },
+    {
+      "id": "1766916618160_3288",
+      "name": "Dagger",
+      "kind": "misc"
+    },
+    {
+      "id": "1766916618160_3638",
+      "name": "Trail Rations",
+      "kind": "misc"
+    },
+    {
+      "id": "1766916618160_8143",
+      "name": "Healing Potion",
+      "kind": "consumable",
+      "effect": {
+        "type": "heal",
+        "amount": 6
+      }
+    }
+  ],
+  "equipment": {
+    "chest": "1766916618160_3913",
+    "knife": "1766916618160_3288"
+  },
   "gold": 0,
   "experience": 0,
-  "background": ""
+  "background": "You grew up with one foot in trouble and the other in duty.\n\nYou grew up in wilderness camp, and you learned to lean on freedom\u2014even when it made you stubborn. When revenge pulled you onto the road, you didn\u2019t hesitate for long. A quiet moment became a vow.\n\nYour greatest flaw is greed, and you\u2019re not proud of the damage it\u2019s caused. Still, a secret keeps you standing when the odds turn. You carry a token as a reminder of who you were before you became a ranger.\n\nUnique detail: Fast af boi\n\nYou keep moving because standing still feels like losing.",
+  "background_answers": {
+    "origin": "Wilderness camp",
+    "family": "Absent/unknown",
+    "mentor": "A thief",
+    "turning_point": "Revenge",
+    "virtue": "Freedom",
+    "flaw": "Greed",
+    "fear": "Betrayal",
+    "bond": "A secret",
+    "style": "Follow instinct",
+    "reputation": "Dangerous",
+    "secret": "A crime",
+    "magic": "I distrust it",
+    "faith": "Skeptical",
+    "social": "An outsider",
+    "travel": "To hunt",
+    "weapon": "Bow",
+    "keepsake": "A token",
+    "scar": "A fire",
+    "goal": "Break a curse",
+    "companions": "Nothing",
+    "conflict": "Disappear",
+    "craft": "Tales & songs",
+    "hook": "Fast af boi"
+  },
+  "feats": [
+    "Silver Tongue"
+  ],
+  "features": [
+    "Trailcraft",
+    "Keen Aim",
+    "Calm Under Pressure"
+  ]
 }

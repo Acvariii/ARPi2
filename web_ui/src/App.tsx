@@ -36,7 +36,7 @@ export default function App(): React.ReactElement {
   const [dndRace, setDndRace] = useState<string>('');
   const [dndClass, setDndClass] = useState<string>('');
   const [dndBackground, setDndBackground] = useState<string>('');
-  const [dndBackgroundPrompt, setDndBackgroundPrompt] = useState<string>('');
+  const [dndBackgroundAnswers, setDndBackgroundAnswers] = useState<Record<string, string>>({});
 
   const [dndGiveTarget, setDndGiveTarget] = useState<number>(0);
   const [dndItemName, setDndItemName] = useState<string>('');
@@ -53,7 +53,7 @@ export default function App(): React.ReactElement {
     Charisma: 0,
   });
   const [dndMonster, setDndMonster] = useState<string>('');
-  const [dndCreateStep, setDndCreateStep] = useState<'race' | 'class' | 'abilities' | 'confirm'>('race');
+  const [dndCreateStep, setDndCreateStep] = useState<'race' | 'class' | 'abilities' | 'background' | 'confirm'>('race');
   const [dndAbilities, setDndAbilities] = useState<Record<string, number>>({
     Strength: 8,
     Dexterity: 8,
@@ -245,6 +245,22 @@ export default function App(): React.ReactElement {
     const rows = snapshot?.dnd?.players || [];
     return rows.find((r) => r.player_idx === (mySeat as number)) || null;
   }, [isSeated, mySeat, snapshot?.dnd?.players]);
+
+  const dndBackgroundQuestions = useMemo(() => {
+    const qs = snapshot?.dnd?.background_questions;
+    return Array.isArray(qs) ? qs : [];
+  }, [snapshot?.dnd?.background_questions]);
+
+  const dndBackgroundQuestionSig = useMemo(() => dndBackgroundQuestions.map((q) => q.id).join('|'), [dndBackgroundQuestions]);
+
+  useEffect(() => {
+    if (!isDnD) return;
+    setDndBackgroundAnswers({});
+  }, [dndBackgroundQuestionSig, isDnD]);
+
+  const setBgAnswer = useCallback((id: string, value: string) => {
+    setDndBackgroundAnswers((prev) => ({ ...prev, [id]: value }));
+  }, []);
 
   const DND_EQUIP_SLOTS = useMemo(() => ['helmet', 'chest', 'leggings', 'boots', 'sword', 'bow', 'staff', 'knife'], []);
   const DND_ABILITIES = useMemo(
@@ -906,9 +922,29 @@ export default function App(): React.ReactElement {
                         <Typography variant="body2" color="text.secondary">
                           {myDndRow.race} {myDndRow.char_class} · HP {myDndRow.hp} · AC {myDndRow.ac}
                         </Typography>
+                        {!!myDndRow.background && (
+                          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                            Background: {myDndRow.background}
+                          </Typography>
+                        )}
+                        {!!myDndRow.skills?.length && (
+                          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                            Skills: {myDndRow.skills.join(', ')}
+                          </Typography>
+                        )}
+                        {!!myDndRow.feats?.length && (
+                          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                            Feat: {myDndRow.feats.join(', ')}
+                          </Typography>
+                        )}
+                        {!!myDndRow.features?.length && (
+                          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                            Features: {myDndRow.features.join(' · ')}
+                          </Typography>
+                        )}
                         {!!myDndRow.inventory?.length && (
                           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                            Inventory: {myDndRow.inventory.join(', ')}
+                            Inventory: {(myDndRow.inventory || []).map((it: any) => String(it?.name || it)).join(', ')}
                           </Typography>
                         )}
                       </Paper>
@@ -1045,8 +1081,60 @@ export default function App(): React.ReactElement {
                               <Button
                                 variant="contained"
                                 disabled={dndPointBuyRemaining < 0}
-                                onClick={() => setDndCreateStep('confirm')}
+                                onClick={() => setDndCreateStep('background')}
                               >
+                                Next
+                              </Button>
+                            </Stack>
+                          </>
+                        )}
+
+                        {dndCreateStep === 'background' && (
+                          <>
+                            <Typography variant="body2" color="text.secondary">
+                              Step 4: Background questions
+                            </Typography>
+                            <Stack spacing={1} sx={{ mt: 1 }}>
+                              {(dndBackgroundQuestions || []).map((q) => {
+                                const v = dndBackgroundAnswers[q.id] ?? '';
+                                if (q.kind === 'choice') {
+                                  return (
+                                    <TextField
+                                      key={q.id}
+                                      select
+                                      label={q.prompt}
+                                      size="small"
+                                      value={v}
+                                      onChange={(e) => setBgAnswer(q.id, String(e.target.value))}
+                                    >
+                                      <MenuItem value="">(choose)</MenuItem>
+                                      {(q.options || []).map((opt) => (
+                                        <MenuItem key={opt} value={opt}>
+                                          {opt}
+                                        </MenuItem>
+                                      ))}
+                                    </TextField>
+                                  );
+                                }
+
+                                return (
+                                  <TextField
+                                    key={q.id}
+                                    label={q.prompt}
+                                    size="small"
+                                    value={v}
+                                    onChange={(e) => setBgAnswer(q.id, String(e.target.value))}
+                                    multiline
+                                    minRows={2}
+                                  />
+                                );
+                              })}
+                            </Stack>
+                            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 1 }}>
+                              <Button variant="outlined" onClick={() => setDndCreateStep('abilities')}>
+                                Back
+                              </Button>
+                              <Button variant="contained" onClick={() => setDndCreateStep('confirm')}>
                                 Next
                               </Button>
                             </Stack>
@@ -1056,7 +1144,7 @@ export default function App(): React.ReactElement {
                         {dndCreateStep === 'confirm' && (
                           <>
                             <Typography variant="body2" color="text.secondary">
-                              Step 4: Confirm &amp; save
+                              Step 5: Confirm &amp; save
                             </Typography>
                             <TextField
                               label="Name (optional)"
@@ -1076,7 +1164,7 @@ export default function App(): React.ReactElement {
                               </Typography>
                             </Paper>
                             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                              <Button variant="outlined" onClick={() => setDndCreateStep('abilities')}>
+                              <Button variant="outlined" onClick={() => setDndCreateStep('background')}>
                                 Back
                               </Button>
                               <Button
@@ -1089,6 +1177,7 @@ export default function App(): React.ReactElement {
                                     race: dndRace,
                                     char_class: dndClass,
                                     abilities: dndAbilities,
+                                    background_answers: dndBackgroundAnswers,
                                   })
                                 }
                               >
@@ -1319,36 +1408,35 @@ export default function App(): React.ReactElement {
                           </Typography>
                           <Stack spacing={1.25}>
                             <TextField
-                              label="Background"
+                              label="Local Background"
                               size="small"
+                              select
                               value={dndBackground}
                               onChange={(e) => setDndBackground(e.target.value)}
-                              placeholder="e.g., Tavern, Dungeon, Forest"
                               fullWidth
-                            />
-                            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
-                              <Button
-                                variant="contained"
-                                disabled={!dndBackground.trim()}
-                                onClick={() => send({ type: 'dnd_dm_set_background', background: dndBackground.trim() })}
-                              >
-                                Set
-                              </Button>
-                              <TextField
-                                label="Generate prompt (optional)"
-                                size="small"
-                                value={dndBackgroundPrompt}
-                                onChange={(e) => setDndBackgroundPrompt(e.target.value)}
-                                placeholder="e.g., haunted"
-                                fullWidth
-                              />
-                              <Button
-                                variant="outlined"
-                                onClick={() => send({ type: 'dnd_dm_generate_background', prompt: dndBackgroundPrompt.trim() })}
-                              >
-                                Generate
-                              </Button>
-                            </Stack>
+                              helperText={
+                                (snapshot?.dnd?.background_files || []).length
+                                  ? 'Uses files from games/dnd/backgrounds (no external APIs).'
+                                  : 'No local backgrounds found in games/dnd/backgrounds.'
+                              }
+                            >
+                              <MenuItem value="">
+                                <em>Select a background…</em>
+                              </MenuItem>
+                              {(snapshot?.dnd?.background_files || []).map((f) => (
+                                <MenuItem key={f} value={f}>
+                                  {f}
+                                </MenuItem>
+                              ))}
+                            </TextField>
+
+                            <Button
+                              variant="contained"
+                              disabled={!dndBackground.trim()}
+                              onClick={() => send({ type: 'dnd_dm_set_background_file', background_file: dndBackground.trim() })}
+                            >
+                              Set Background
+                            </Button>
                           </Stack>
                         </CardContent>
                       </Card>

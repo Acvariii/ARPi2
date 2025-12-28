@@ -25,6 +25,8 @@ import urllib.request
 from pathlib import Path
 from typing import Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor
+import math
+import re
 
 from config import WINDOW_SIZE, FPS, HOVER_TIME_THRESHOLD, Colors
 from config import PLAYER_COLORS
@@ -34,6 +36,426 @@ from games.blackjack import BlackjackGame
 from games.dnd import DnDCharacterCreation
 
 
+class CenterDiceRollDisplay:
+    """Visible centered dice roll animation (2D polygons)."""
+
+    _DICE_POLY_SIDES = {
+        4: 3,   # triangle (d4)
+        6: 4,   # square
+        8: 8,   # octagon
+        10: 10, # decagon
+        12: 12, # dodecagon
+        20: 20, # icosagon-ish
+    }
+
+    def __init__(self):
+        self._queue: List[dict] = []
+        self._active: Optional[dict] = None
+
+    def clear(self) -> None:
+        self._queue.clear()
+        self._active = None
+
+    def enqueue(self, label: str, sides: int, result: int, color: tuple[int, int, int]) -> None:
+        try:
+            s = int(sides)
+            r = int(result)
+        except Exception:
+            return
+        if s not in self._DICE_POLY_SIDES:
+            return
+        r = max(1, min(s, r))
+        self._queue.append({
+            "label": str(label or ""),
+            "sides": s,
+            "result": r,
+            "color": tuple(int(c) for c in color),
+        })
+
+    def update(self, dt: float) -> None:
+        now = float(time.time())
+        if self._active is None:
+            if not self._queue:
+                return
+            item = self._queue.pop(0)
+            item["start"] = now
+            # Total animation duration, with most time in "rolling".
+            item["duration"] = 1.8
+            item["roll_phase"] = 1.15
+            item["tick"] = 0.075
+            self._active = item
+            return
+
+        start = float(self._active.get("start", now))
+        dur = float(self._active.get("duration", 1.8))
+        if now - start >= dur:
+            self._active = None
+
+    def _regular_polygon(self, cx: float, cy: float, radius: float, n: int, angle: float) -> List[tuple[int, int]]:
+        pts: List[tuple[int, int]] = []
+        for i in range(n):
+            a = angle + (2.0 * math.pi * i / n)
+            x = cx + radius * math.cos(a)
+            y = cy + radius * math.sin(a)
+            pts.append((int(x), int(y)))
+        return pts
+
+    def draw(self, renderer: PygletRenderer) -> None:
+        active = self._active
+        if not active:
+            return
+
+        w = int(getattr(renderer, "width", WINDOW_SIZE[0]))
+        h = int(getattr(renderer, "height", WINDOW_SIZE[1]))
+        cx = int(w // 2)
+        cy = int(h // 2)
+
+        now = float(time.time())
+        start = float(active.get("start", now))
+        elapsed = max(0.0, now - start)
+        duration = float(active.get("duration", 1.8))
+        roll_phase = float(active.get("roll_phase", 1.15))
+        tick = float(active.get("tick", 0.075))
+
+        sides = int(active["sides"])
+        result = int(active["result"])
+        color = tuple(active.get("color") or (220, 220, 220))
+        label = str(active.get("label") or "")
+
+        # While rolling, flip the shown face rapidly; then settle.
+        if elapsed < roll_phase:
+            step = int(elapsed / max(0.01, tick))
+            shown = (step % sides) + 1
+        else:
+            shown = result
+
+        # Simple bounce + slow rotate.
+        t = min(1.0, elapsed / max(0.001, duration))
+        scale = 1.0 + 0.18 * math.sin(math.pi * min(1.0, t))
+        angle = (elapsed * 1.6) % (2.0 * math.pi)
+
+        base_r = int(min(w, h) * 0.12)
+        radius = max(46, int(base_r * scale))
+
+        poly_n = self._DICE_POLY_SIDES.get(sides, 6)
+        pts = self._regular_polygon(cx, cy, radius, poly_n, angle)
+        shadow_pts = [(x + 5, y + 5) for (x, y) in pts]
+
+        # Shadow + dice body (use shapes-based drawing so it works on core OpenGL).
+        try:
+            renderer.draw_polygon_immediate((0, 0, 0), shadow_pts, alpha=110)
+        except Exception:
+            pass
+
+        # Dice body
+        try:
+            renderer.draw_polygon_immediate(color, pts, alpha=235)
+        except Exception:
+            pass
+
+        # Subtle highlight to feel more "physical"
+        try:
+            hi = tuple(min(255, int(c + (255 - c) * 0.35)) for c in color)
+            inner = self._regular_polygon(cx - radius * 0.10, cy + radius * 0.10, radius * 0.72, poly_n, angle)
+            renderer.draw_polygon_immediate(hi, inner, alpha=170)
+        except Exception:
+            pass
+
+        # Outline
+        try:
+            renderer.draw_polyline_immediate((20, 20, 20), pts, width=4, alpha=220, closed=True)
+        except Exception:
+            pass
+
+        # Number + labels (immediate so it appears above everything).
+        try:
+            renderer.draw_text_immediate(
+                str(shown),
+                cx,
+                cy + 4,
+                font_size=max(44, int(radius * 0.85)),
+                color=(245, 245, 245),
+                bold=True,
+                anchor_x="center",
+                anchor_y="center",
+                alpha=255,
+            )
+            renderer.draw_text_immediate(
+                f"d{sides}",
+                cx,
+                cy + radius + 18,
+                font_size=22,
+                color=(235, 235, 235),
+                anchor_x="center",
+                anchor_y="center",
+                alpha=230,
+            )
+            if label:
+                renderer.draw_text_immediate(
+                    label,
+                    cx,
+                    cy - radius - 18,
+                    font_size=18,
+                    color=(235, 235, 235),
+                    anchor_x="center",
+                    anchor_y="center",
+                    alpha=220,
+                )
+        except Exception:
+            pass
+
+
+def _stable_rng_seed(*parts: str) -> int:
+    raw = "|".join([str(p or "") for p in parts])
+    h = hashlib.sha256(raw.encode("utf-8", errors="ignore")).hexdigest()
+    return int(h[:12], 16)
+
+
+def _dnd_background_questions() -> List[Dict]:
+    """Return a stable list of 20-30 character background questions."""
+    # Keep these short for UI; the generator will turn them into richer prose.
+    return [
+        {"id": "origin", "kind": "choice", "prompt": "Where did you grow up?", "options": ["City alleys", "Quiet village", "Frontier outpost", "Monastery", "Noble estate", "Wilderness camp"]},
+        {"id": "family", "kind": "choice", "prompt": "What was your family like?", "options": ["Loving but poor", "Strict and demanding", "Large and chaotic", "Absent/unknown", "Respectable and stable", "Feared by others"]},
+        {"id": "mentor", "kind": "choice", "prompt": "Who taught you your most important lesson?", "options": ["A veteran", "A scholar", "A priest", "A thief", "A rival", "No one"]},
+        {"id": "turning_point", "kind": "choice", "prompt": "What pushed you into adventure?", "options": ["A debt", "A prophecy", "Revenge", "Curiosity", "A lost loved one", "A call to duty"]},
+        {"id": "virtue", "kind": "choice", "prompt": "What do you value most?", "options": ["Honor", "Freedom", "Knowledge", "Compassion", "Power", "Loyalty"]},
+        {"id": "flaw", "kind": "choice", "prompt": "What trips you up most often?", "options": ["Pride", "Impulsiveness", "Suspicion", "Mercy", "Greed", "Stubbornness"]},
+        {"id": "fear", "kind": "choice", "prompt": "What scares you more than you admit?", "options": ["Being powerless", "Being forgotten", "Hurting others", "Losing control", "The dark", "Betrayal"]},
+        {"id": "bond", "kind": "choice", "prompt": "What keeps you going when things get ugly?", "options": ["A promise", "A person", "A cause", "A debt repaid", "A secret", "A dream"]},
+        {"id": "style", "kind": "choice", "prompt": "How do you approach problems?", "options": ["Plan carefully", "Charge in", "Talk first", "Use tricks", "Follow instinct", "Let others lead"]},
+        {"id": "reputation", "kind": "choice", "prompt": "What is your reputation (or rumor) back home?", "options": ["Reliable", "Troublemaker", "Odd but brilliant", "Blessed", "Dangerous", "Unknown"]},
+        {"id": "secret", "kind": "choice", "prompt": "What kind of secret do you carry?", "options": ["A crime", "A lineage", "A bargain", "A forbidden truth", "A hidden talent", "No secret"]},
+        {"id": "magic", "kind": "choice", "prompt": "How do you feel about magic?", "options": ["I study it", "I distrust it", "I respect it", "I fear it", "I use it", "I envy it"]},
+        {"id": "faith", "kind": "choice", "prompt": "What is your relationship with faith/tradition?", "options": ["Devout", "Skeptical", "Curious", "Rebellious", "Pragmatic", "Haunted"]},
+        {"id": "social", "kind": "choice", "prompt": "In a crowd, you are usually…", "options": ["A leader", "A listener", "A performer", "A watcher", "A negotiator", "An outsider"]},
+        {"id": "travel", "kind": "choice", "prompt": "Why do you travel?", "options": ["To prove myself", "To learn", "To protect", "To escape", "To hunt", "To serve"]},
+        {"id": "weapon", "kind": "choice", "prompt": "What feels most natural in your hands?", "options": ["Blade", "Bow", "Hammer", "Staff", "Daggers", "My words"]},
+        {"id": "keepsake", "kind": "choice", "prompt": "You carry a keepsake that is…", "options": ["A letter", "A token", "A map", "A charm", "A broken weapon", "A small book"]},
+        {"id": "scar", "kind": "choice", "prompt": "You gained a scar from…", "options": ["A duel", "A monster", "A fire", "A betrayal", "Hard labor", "A ritual"]},
+        {"id": "goal", "kind": "choice", "prompt": "Your next big goal is…", "options": ["Find someone", "Find something", "Earn status", "Pay a debt", "Break a curse", "Build a home"]},
+        {"id": "companions", "kind": "choice", "prompt": "What do you expect from companions?", "options": ["Honesty", "Competence", "Kindness", "Loyalty", "Respect", "Nothing"]},
+        {"id": "conflict", "kind": "choice", "prompt": "When conflict rises, you…", "options": ["De-escalate", "Intimidate", "Outwit", "End it fast", "Protect the weak", "Disappear"]},
+        {"id": "craft", "kind": "choice", "prompt": "A non-combat talent you’re proud of:", "options": ["Cooking", "Woodcraft", "Tales & songs", "Herbalism", "Cartography", "Languages"]},
+        {"id": "hook", "kind": "text", "prompt": "One unique detail about you (a quirk, vow, motto, etc.):"},
+    ]
+
+
+def _dnd_pick_additional_skills(char_class: str, answers: Dict[str, str], rng: random.Random) -> List[str]:
+    # Use the canonical skill list from D&D logic.
+    try:
+        from games.dnd.logic import SkillChecker
+        all_skills = list(getattr(SkillChecker, "SKILLS", {}).keys())
+    except Exception:
+        all_skills = [
+            "Acrobatics", "Animal Handling", "Arcana", "Athletics", "Deception", "History", "Insight", "Intimidation",
+            "Investigation", "Medicine", "Nature", "Perception", "Performance", "Persuasion", "Religion", "Sleight of Hand",
+            "Stealth", "Survival",
+        ]
+
+    try:
+        from games.dnd.models import CLASS_SKILLS as _CLASS_SKILLS
+        base = list((_CLASS_SKILLS or {}).get(str(char_class), []) or [])
+    except Exception:
+        base = []
+    pool = [s for s in all_skills if s not in set(base)]
+
+    # Bias by answers.
+    bias: List[str] = []
+    a = {k: str(v or "") for k, v in (answers or {}).items()}
+    origin = a.get("origin", "")
+    if "City" in origin:
+        bias += ["Stealth", "Sleight of Hand", "Deception", "Investigation"]
+    if "Wilderness" in origin or "Frontier" in origin:
+        bias += ["Survival", "Nature", "Perception", "Animal Handling"]
+    if "Monastery" in origin:
+        bias += ["Insight", "Medicine", "Religion"]
+    if "Noble" in origin:
+        bias += ["Persuasion", "History", "Performance"]
+
+    style = a.get("style", "")
+    if "Plan" in style:
+        bias += ["Investigation", "History"]
+    if "Talk" in style or "negotiator" in a.get("social", ""):
+        bias += ["Persuasion", "Insight", "Deception"]
+    if "tricks" in style or "watcher" in a.get("social", ""):
+        bias += ["Stealth", "Sleight of Hand", "Perception"]
+
+    faith = a.get("faith", "")
+    if faith in ("Devout", "Haunted"):
+        bias += ["Religion", "Insight", "Medicine"]
+    if a.get("magic", "") in ("I study it", "I use it", "I envy it"):
+        bias += ["Arcana", "Investigation", "History"]
+
+    # Pick 2 distinct.
+    picks: List[str] = []
+    for _ in range(8):
+        if len(picks) >= 2:
+            break
+        candidate_pool = [s for s in bias if s in pool and s not in picks]
+        if candidate_pool:
+            picks.append(rng.choice(candidate_pool))
+        elif pool:
+            picks.append(rng.choice([s for s in pool if s not in picks]))
+    return picks[:2]
+
+
+def _dnd_starting_loadout(char_class: str) -> tuple[List[Dict], Dict[str, str]]:
+    """Return (items, equipment_map) where items are Character.add_item()-ready dicts."""
+    cc = str(char_class or "").strip()
+
+    def gear(name: str, slot: str, ac_bonus: int = 0) -> Dict:
+        it: Dict = {"name": name, "kind": "gear", "slot": slot, "ac_bonus": int(ac_bonus)}
+        return it
+
+    def misc(name: str) -> Dict:
+        return {"name": name, "kind": "misc"}
+
+    def heal_potion(amount: int = 6) -> Dict:
+        return {"name": "Healing Potion", "kind": "consumable", "effect": {"type": "heal", "amount": int(amount)}}
+
+    items: List[Dict] = []
+    equip: Dict[str, str] = {}
+
+    if cc == "Fighter":
+        items += [gear("Chain Mail", "chest", ac_bonus=6), misc("Longsword"), misc("Adventurer's Pack"), heal_potion(6)]
+        equip["chest"] = "__auto:Chain Mail"
+        equip["sword"] = "__auto:Longsword"
+    elif cc == "Rogue":
+        items += [gear("Leather Armor", "chest", ac_bonus=1), misc("Dagger"), misc("Thieves' Tools"), misc("Shortbow"), heal_potion(6)]
+        equip["chest"] = "__auto:Leather Armor"
+        equip["knife"] = "__auto:Dagger"
+        equip["bow"] = "__auto:Shortbow"
+    elif cc == "Wizard":
+        items += [gear("Padded Robes", "chest", ac_bonus=0), misc("Staff"), misc("Spellbook"), misc("Component Pouch"), heal_potion(6)]
+        equip["chest"] = "__auto:Padded Robes"
+        equip["staff"] = "__auto:Staff"
+    elif cc == "Cleric":
+        items += [gear("Chain Mail", "chest", ac_bonus=6), misc("Warhammer"), misc("Holy Symbol"), misc("Healer's Kit"), heal_potion(8)]
+        equip["chest"] = "__auto:Chain Mail"
+        equip["sword"] = "__auto:Warhammer"
+    elif cc == "Ranger":
+        items += [gear("Leather Armor", "chest", ac_bonus=1), misc("Longbow"), misc("Dagger"), misc("Trail Rations"), heal_potion(6)]
+        equip["chest"] = "__auto:Leather Armor"
+        equip["bow"] = "__auto:Longbow"
+        equip["knife"] = "__auto:Dagger"
+    elif cc == "Paladin":
+        items += [gear("Chain Mail", "chest", ac_bonus=6), misc("Longsword"), misc("Oath Token"), misc("Traveler's Pack"), heal_potion(8)]
+        equip["chest"] = "__auto:Chain Mail"
+        equip["sword"] = "__auto:Longsword"
+    else:
+        items += [gear("Leather Armor", "chest", ac_bonus=1), misc("Dagger"), misc("Adventurer's Pack"), heal_potion(6)]
+        equip["chest"] = "__auto:Leather Armor"
+        equip["knife"] = "__auto:Dagger"
+
+    return items, equip
+
+
+def _dnd_generate_background_text(name: str, race: str, char_class: str, answers: Dict[str, str], seed_hint: str) -> tuple[str, List[str], List[str]]:
+    """Return (background_text, feats, features)."""
+    a = {k: str(v or "").strip() for k, v in (answers or {}).items()}
+    seed = _stable_rng_seed(name, race, char_class, seed_hint, json.dumps(a, sort_keys=True))
+    rng = random.Random(seed)
+
+    origin = a.get("origin") or rng.choice(["a quiet village", "city alleys", "a frontier outpost", "the wilderness"])
+    turning = a.get("turning_point") or rng.choice(["a debt", "a prophecy", "revenge", "curiosity"])
+    virtue = a.get("virtue") or rng.choice(["honor", "freedom", "knowledge", "compassion"])
+    flaw = a.get("flaw") or rng.choice(["pride", "impulsiveness", "suspicion", "stubbornness"])
+    bond = a.get("bond") or rng.choice(["a promise", "a person", "a cause", "a dream"])
+    keepsake = a.get("keepsake") or rng.choice(["a letter", "a token", "a map", "a charm"])
+    hook = a.get("hook")
+    if hook:
+        hook = re.sub(r"\s+", " ", hook).strip()
+        hook = hook[:140]
+
+    opener_pool = [
+        "You learned early that the world rarely offers clean choices.",
+        "You grew up with one foot in trouble and the other in duty.",
+        "You were shaped by long nights, short tempers, and longer roads.",
+        "You found comfort in routines—until adventure broke them.",
+        "You learned to read people before you learned to read books.",
+    ]
+    twist_pool = [
+        "A single night changed everything.",
+        "A quiet moment became a vow.",
+        "A mistake became a lesson you refuse to forget.",
+        "A stranger’s words lodged in your mind like a splinter.",
+        "An old debt still casts a long shadow.",
+    ]
+    closer_pool = [
+        "You don’t seek glory—only a reason to believe you can make things right.",
+        "You keep moving because standing still feels like losing.",
+        "You measure your life in promises kept, not battles won.",
+        "You’ve decided your story won’t be written by fear.",
+    ]
+
+    opener = rng.choice(opener_pool)
+    twist = rng.choice(twist_pool)
+    closer = rng.choice(closer_pool)
+
+    bg = (
+        f"{opener}\n\n"
+        f"You grew up in {origin.lower()}, and you learned to lean on {virtue.lower()}—even when it made you stubborn. "
+        f"When {turning.lower()} pulled you onto the road, you didn’t hesitate for long. {twist}"
+        f"\n\nYour greatest flaw is {flaw.lower()}, and you’re not proud of the damage it’s caused. "
+        f"Still, {bond.lower()} keeps you standing when the odds turn. You carry {keepsake.lower()} as a reminder of who you were before you became a {char_class.lower()}."
+    )
+    if hook:
+        bg += f"\n\nUnique detail: {hook}"
+    bg += f"\n\n{closer}"
+
+    # Feats/features: original names to avoid copying SRD text.
+    class_features = {
+        "Fighter": ["Combat Training", "Steel Nerve"],
+        "Wizard": ["Arcane Study", "Ritual Habit"],
+        "Rogue": ["Quick Hands", "Shadow Sense"],
+        "Cleric": ["Sacred Channel", "Vow of Mercy"],
+        "Ranger": ["Trailcraft", "Keen Aim"],
+        "Paladin": ["Oathbound", "Radiant Presence"],
+    }
+    trait_pool = [
+        "Silver Tongue",
+        "Battle Instinct",
+        "Keen Observer",
+        "Iron Stomach",
+        "Steady Hands",
+        "Unshakable Focus",
+        "Lucky Breaks",
+        "Streetwise",
+        "Wilderness Blood",
+        "Bookish",
+    ]
+    # Bias feats by some answers
+    bias: List[str] = []
+    if "City" in str(a.get("origin", "")):
+        bias += ["Streetwise", "Steady Hands", "Silver Tongue"]
+    if "Wilderness" in str(a.get("origin", "")) or "Frontier" in str(a.get("origin", "")):
+        bias += ["Wilderness Blood", "Keen Observer", "Battle Instinct"]
+    if str(a.get("magic", "")) in ("I study it", "I use it"):
+        bias += ["Bookish", "Unshakable Focus"]
+
+    feats = []
+    feat_pool = bias + trait_pool
+    while feat_pool and len(feats) < 1:
+        f = rng.choice(feat_pool)
+        if f not in feats:
+            feats.append(f)
+        feat_pool = [x for x in feat_pool if x != f]
+
+    features = list(class_features.get(str(char_class), ["Adventurer" ]))[:]
+    # Add one extra feature influenced by answers
+    extra = rng.choice([
+        "Resourceful",
+        "Calm Under Pressure",
+        "Hard to Read",
+        "People Person",
+        "Tinkerer's Touch",
+        "Uncanny Luck",
+    ])
+    if extra not in features:
+        features.append(extra)
+
+    return bg, feats, features
 class PygletGameServer:
     """OpenGL-accelerated game server using Pyglet with complete UI"""
     
@@ -63,6 +485,11 @@ class PygletGameServer:
         self.dnd_dm_seat: Optional[int] = None
         self.dnd_background: Optional[str] = None
 
+        # D&D dice roll overlays (centered visible dice animation)
+        self._dnd_dice_display = CenterDiceRollDisplay()
+        self._dnd_dice_lock = threading.Lock()
+        self._dnd_dice_pending: List[tuple[int, int, int]] = []  # (seat, sides, result)
+
         # D&D background (AI-generated, in-memory)
         self._dnd_bg_prompt_cache: str = ""
         self._dnd_bg_sprite = None
@@ -77,6 +504,10 @@ class PygletGameServer:
         self._dnd_bg_last_log_key: Optional[tuple] = None
         self._dnd_bg_last_log_state: str = ""
         self._dnd_bg_last_log_time: float = 0.0
+
+        # D&D local background files (games/dnd/backgrounds)
+        self._dnd_bg_files_cache: List[str] = []
+        self._dnd_bg_files_cache_time: float = 0.0
 
         # Optional local (on-device) background generation
         self._dnd_local_model_id: str = str((__import__("os").environ.get("DND_BG_LOCAL_MODEL") or "").strip())
@@ -98,6 +529,40 @@ class PygletGameServer:
         p = (prompt or "").strip().encode("utf-8")
         h = hashlib.sha256(p).digest()
         return int.from_bytes(h[:8], "little", signed=False)
+
+    def _dnd_backgrounds_dir(self) -> Path:
+        return (Path(__file__).parent / "games" / "dnd" / "backgrounds").resolve()
+
+    def _list_dnd_background_files(self) -> List[str]:
+        """Return available local background image filenames (no paths)."""
+        try:
+            now = float(time.time())
+        except Exception:
+            now = 0.0
+        # Cache briefly to avoid filesystem churn during UI polling.
+        if now and (now - float(self._dnd_bg_files_cache_time or 0.0)) < 1.0:
+            return list(self._dnd_bg_files_cache or [])
+
+        bg_dir = self._dnd_backgrounds_dir()
+        out: List[str] = []
+        try:
+            if bg_dir.exists() and bg_dir.is_dir():
+                exts = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+                for p in bg_dir.iterdir():
+                    try:
+                        if not p.is_file():
+                            continue
+                        if p.suffix.lower() not in exts:
+                            continue
+                        out.append(p.name)
+                    except Exception:
+                        continue
+        except Exception:
+            out = []
+        out.sort(key=lambda s: s.lower())
+        self._dnd_bg_files_cache = list(out)
+        self._dnd_bg_files_cache_time = now
+        return list(out)
 
     def _pollinations_image_url(self, base: str, prompt: str, w: int, h: int, seed: int, model: str) -> str:
         """Build a Pollinations image URL.
@@ -314,9 +779,9 @@ class PygletGameServer:
     def _dnd_bg_status(self) -> tuple[str, str]:
         """Return (state, detail) for background generation."""
         try:
-            prompt = str(getattr(self, "dnd_background", "") or "").strip()
+            bg = str(getattr(self, "dnd_background", "") or "").strip()
         except Exception:
-            prompt = ""
+            bg = ""
 
         with self._dnd_bg_lock:
             desired = self._dnd_bg_desired_key
@@ -325,12 +790,24 @@ class PygletGameServer:
             last_err = self._dnd_bg_last_error
             last_err_time = float(self._dnd_bg_last_error_time or 0.0)
 
-        if not prompt:
-            return "idle", "no prompt"
+        if not bg:
+            return "idle", "no background"
+
+        # Local file mode: no external calls.
+        try:
+            if bg in set(self._list_dnd_background_files() or []):
+                want = f"file:{bg}"
+                if self._dnd_bg_sprite is not None and str(self._dnd_bg_prompt_cache or "") == want:
+                    return "ready", ""
+                if pending is not None:
+                    return "decoding", ""
+                return "loading", "local file"
+        except Exception:
+            pass
 
         # Ready if we have a sprite that matches the prompt.
         try:
-            if self._dnd_bg_sprite is not None and str(self._dnd_bg_prompt_cache or "") == prompt:
+            if self._dnd_bg_sprite is not None and str(self._dnd_bg_prompt_cache or "") == bg:
                 return "ready", ""
         except Exception:
             pass
@@ -379,6 +856,35 @@ class PygletGameServer:
             print(message)
         except Exception:
             pass
+
+    def _queue_dnd_dice_roll(self, seat: int, sides: int, result: int) -> None:
+        try:
+            s = int(seat)
+            sd = int(sides)
+            r = int(result)
+        except Exception:
+            return
+        with self._dnd_dice_lock:
+            self._dnd_dice_pending.append((s, sd, r))
+
+    def _pump_dnd_dice_pending(self) -> None:
+        """Drain queued dice roll events and add them to the animated display.
+
+        This runs on the Pyglet/update thread to avoid cross-thread mutation during draw.
+        """
+        with self._dnd_dice_lock:
+            pending = list(self._dnd_dice_pending)
+            self._dnd_dice_pending.clear()
+        if not pending:
+            return
+
+        for seat, sides, result in pending:
+            try:
+                name = "DM" if (isinstance(self.dnd_dm_seat, int) and seat == self.dnd_dm_seat) else self._player_display_name(seat)
+                color = tuple(PLAYER_COLORS[int(seat) % len(PLAYER_COLORS)])
+                self._dnd_dice_display.enqueue(name, int(sides), int(result), color=color)
+            except Exception:
+                continue
 
     def _local_model_ready(self) -> bool:
         if not self._dnd_local_enabled:
@@ -801,9 +1307,7 @@ class PygletGameServer:
 
     def _ensure_dnd_background_sprite(self, draw_w: int, draw_h: int):
         """Ensure a cached sprite exists for the current prompt and aspect ratio."""
-        prompt = str(getattr(self, "dnd_background", "") or "").strip()
-        if not prompt:
-            prompt = "fantasy scene"
+        bg = str(getattr(self, "dnd_background", "") or "").strip()
 
         # Apply completed downloads (sprite creation must happen on main thread).
         try:
@@ -811,9 +1315,55 @@ class PygletGameServer:
         except Exception:
             pass
 
+        if not bg:
+            return
+
+        # If the background matches a local file, load from disk and do NOT call external APIs.
+        try:
+            files = set(self._list_dnd_background_files() or [])
+        except Exception:
+            files = set()
+        if bg in files:
+            aspect_key = (int(draw_w // 64), int(draw_h // 64))
+            want = f"file:{bg}"
+            if want == self._dnd_bg_prompt_cache and aspect_key == self._dnd_bg_aspect_key and self._dnd_bg_sprite is not None:
+                try:
+                    self._set_sprite_smoothing(self._dnd_bg_sprite)
+                    self._layout_dnd_bg_sprite(draw_w, draw_h)
+                except Exception:
+                    pass
+                return
+
+            try:
+                bg_dir = self._dnd_backgrounds_dir()
+                path = (bg_dir / bg).resolve()
+                # Safety: ensure the resolved path stays inside the backgrounds dir.
+                if bg_dir not in path.parents and path != bg_dir:
+                    raise RuntimeError("Invalid background path")
+
+                img = pyglet.image.load(str(path))
+                self._dnd_bg_sprite = pyglet.sprite.Sprite(img, x=0, y=0)
+                self._set_sprite_smoothing(self._dnd_bg_sprite)
+                self._dnd_bg_img_size = (int(getattr(img, "width", 0) or 0), int(getattr(img, "height", 0) or 0))
+                self._dnd_bg_prompt_cache = want
+                self._dnd_bg_aspect_key = aspect_key
+                # Cancel any pending/inflight external work for this frame.
+                with self._dnd_bg_lock:
+                    self._dnd_bg_pending = None
+                    self._dnd_bg_inflight_key = None
+                    self._dnd_bg_desired_key = None
+                self._layout_dnd_bg_sprite(draw_w, draw_h)
+                return
+            except Exception as e:
+                with self._dnd_bg_lock:
+                    self._dnd_bg_last_error = str(e)
+                    self._dnd_bg_last_error_time = float(time.time())
+                self._dnd_bg_maybe_log("error", None, f"[DND BG] ERROR loading local background '{bg}': {e}")
+                return
+
         # Regenerate only when prompt changes or the aspect ratio bucket changes.
         aspect_key = (int(draw_w // 64), int(draw_h // 64))
-        if prompt == self._dnd_bg_prompt_cache and aspect_key == self._dnd_bg_aspect_key and self._dnd_bg_sprite is not None:
+        if bg == self._dnd_bg_prompt_cache and aspect_key == self._dnd_bg_aspect_key and self._dnd_bg_sprite is not None:
             # Update scale in case resolution changed.
             try:
                 self._set_sprite_smoothing(self._dnd_bg_sprite)
@@ -822,8 +1372,8 @@ class PygletGameServer:
                 pass
             return
 
-        seed = self._dnd_prompt_seed(prompt)
-        desired_id = (prompt, aspect_key, int(seed), "pollinations")
+        seed = self._dnd_prompt_seed(bg)
+        desired_id = (bg, aspect_key, int(seed), "pollinations")
         with self._dnd_bg_lock:
             self._dnd_bg_desired_key = desired_id
 
@@ -838,7 +1388,7 @@ class PygletGameServer:
             return
 
         try:
-            self._start_dnd_bg_fetch_if_needed(desired_id, prompt, int(seed), int(draw_w), int(draw_h))
+            self._start_dnd_bg_fetch_if_needed(desired_id, bg, int(seed), int(draw_w), int(draw_h))
         except Exception:
             return
 
@@ -1988,6 +2538,10 @@ class PygletGameServer:
                         "hp": int(getattr(char, "current_hp", 0) or 0) if char is not None else 0,
                         "ac": int(getattr(char, "armor_class", 0) or 0) if char is not None else 0,
                         "abilities": dict(getattr(char, "abilities", {}) or {}) if char is not None else {},
+                        "skills": list(getattr(char, "skills", []) or []) if char is not None else [],
+                        "background": str(getattr(char, "background", "") or "") if char is not None else "",
+                        "feats": list(getattr(char, "feats", []) or []) if char is not None else [],
+                        "features": list(getattr(char, "features", []) or []) if char is not None else [],
                         "inventory": list(getattr(char, "inventory", []) or []) if char is not None else [],
                         "equipment": dict(getattr(char, "equipment", {}) or {}) if char is not None else {},
                     })
@@ -2010,6 +2564,8 @@ class PygletGameServer:
                     "state": dnd_state,
                     "dm_player_idx": dm_seat,
                     "background": self.dnd_background,
+                    "background_files": self._list_dnd_background_files(),
+                    "background_questions": _dnd_background_questions(),
                     "in_combat": bool(getattr(dg, "in_combat", False)) if dg is not None else False,
                     "races": list(RACES) if isinstance(RACES, list) else [],
                     "classes": list(CLASSES) if isinstance(CLASSES, list) else [],
@@ -2491,6 +3047,16 @@ class PygletGameServer:
                 if not name:
                     name = generate_character_name(race, char_class)
 
+                # Background questionnaire answers (optional)
+                raw_answers = data.get("background_answers")
+                bg_answers: Dict[str, str] = {}
+                if isinstance(raw_answers, dict):
+                    for k, v in raw_answers.items():
+                        kid = str(k or "").strip()
+                        if not kid:
+                            continue
+                        bg_answers[kid] = str(v or "").strip()
+
                 char = Character(name=name, player_color=tuple(PLAYER_COLORS[seat % len(PLAYER_COLORS)]))
                 char.race = race
                 char.char_class = char_class
@@ -2500,12 +3066,82 @@ class PygletGameServer:
                     char.alignment = ""
                 char.abilities = abilities
                 try:
-                    char.skills = list(CLASS_SKILLS.get(char_class, []))
+                    base_skills = list(CLASS_SKILLS.get(char_class, []))
                 except Exception:
-                    char.skills = []
+                    base_skills = []
+                # Keep the class baseline (up to 2), then add 2 background-influenced skills.
                 try:
-                    char.calculate_hp()
-                    char.calculate_ac()
+                    seed_hint = f"seat:{seat}|cid:{client_id}"
+                    rng = random.Random(_stable_rng_seed(name, race, char_class, seed_hint))
+                    extra_skills = _dnd_pick_additional_skills(char_class, bg_answers, rng)
+                except Exception:
+                    extra_skills = []
+                merged_skills: List[str] = []
+                for s in (base_skills[:2] + list(extra_skills or [])):
+                    s = str(s or "").strip()
+                    if not s:
+                        continue
+                    if s not in merged_skills:
+                        merged_skills.append(s)
+                char.skills = merged_skills
+
+                # Starting items / equipment based on class
+                try:
+                    loadout_items, equip_map = _dnd_starting_loadout(char_class)
+                except Exception:
+                    loadout_items, equip_map = ([], {})
+                try:
+                    for it in list(loadout_items or []):
+                        char.add_item(it)
+                except Exception:
+                    pass
+                try:
+                    # Resolve "__auto:Name" placeholders to actual item IDs
+                    name_to_id: Dict[str, str] = {}
+                    for it in list(getattr(char, "inventory", []) or []):
+                        if not isinstance(it, dict):
+                            continue
+                        nm = str(it.get("name") or "").strip()
+                        iid = str(it.get("id") or "").strip()
+                        if nm and iid and nm not in name_to_id:
+                            name_to_id[nm] = iid
+                    char.equipment = dict(getattr(char, "equipment", {}) or {})
+                    for slot, ref in (equip_map or {}).items():
+                        sslot = str(slot or "").strip()
+                        if not sslot:
+                            continue
+                        r = str(ref or "").strip()
+                        if r.startswith("__auto:"):
+                            nm = r.replace("__auto:", "", 1).strip()
+                            iid = name_to_id.get(nm)
+                            if iid:
+                                char.equipment[sslot] = iid
+                        else:
+                            # If a raw item id was provided
+                            if r:
+                                char.equipment[sslot] = r
+                except Exception:
+                    pass
+
+                # Background narrative + feats + features
+                try:
+                    bg_text, feats, features = _dnd_generate_background_text(name, race, char_class, bg_answers, seed_hint=f"seat:{seat}")
+                    char.background = bg_text
+                    char.background_answers = bg_answers
+                    char.feats = list(feats or [])
+                    char.features = list(features or [])
+                except Exception:
+                    try:
+                        char.background_answers = bg_answers
+                    except Exception:
+                        pass
+                try:
+                    # Derived stats should reflect equipped gear.
+                    if hasattr(char, "update_derived_stats"):
+                        char.update_derived_stats(reset_current_hp=True)
+                    else:
+                        char.calculate_hp()
+                        char.calculate_ac()
                 except Exception:
                     pass
 
@@ -2536,6 +3172,10 @@ class PygletGameServer:
                     return
                 result = random.randint(1, sides)
                 self._log_history(f"{self._player_display_name(seat)} rolled d{sides}: {result}")
+                try:
+                    self._queue_dnd_dice_roll(seat, sides, result)
+                except Exception:
+                    pass
                 return
 
             if msg_type == "dnd_dm_set_background":
@@ -2557,6 +3197,33 @@ class PygletGameServer:
                 except Exception:
                     pass
                 self._log_history(f"DM set background: {bg}")
+                return
+
+            if msg_type == "dnd_dm_set_background_file":
+                if seat is None or not (isinstance(self.dnd_dm_seat, int) and seat == self.dnd_dm_seat):
+                    return
+                bg_file = str(data.get("background_file") or "").strip()
+                if not bg_file:
+                    return
+                try:
+                    allowed = set(self._list_dnd_background_files() or [])
+                except Exception:
+                    allowed = set()
+                if bg_file not in allowed:
+                    return
+                self.dnd_background = bg_file
+                try:
+                    self._dnd_bg_prompt_cache = ""
+                    self._dnd_bg_sprite = None
+                    self._dnd_bg_img_size = (0, 0)
+                    self._dnd_bg_aspect_key = (0, 0)
+                    with self._dnd_bg_lock:
+                        self._dnd_bg_pending = None
+                        self._dnd_bg_inflight_key = None
+                        self._dnd_bg_desired_key = None
+                except Exception:
+                    pass
+                self._log_history(f"DM set local background: {bg_file}")
                 return
 
             if msg_type == "dnd_dm_generate_background":
@@ -3138,6 +3805,12 @@ class PygletGameServer:
                         self.renderer.draw_rect((180, 60, 60), (bar_x, bar_y, int(bar_w * pct), bar_h), alpha=230)
 
                         y += card_h + gap
+
+                # Dice roll animations (per seat)
+                try:
+                    self._dnd_dice_display.draw(self.renderer)
+                except Exception:
+                    pass
             except Exception:
                 pass
         
@@ -3222,6 +3895,13 @@ class PygletGameServer:
             # Ensure mask draws immediately
             self.renderer.draw_all()
 
+        # Dice overlay should appear above all UI layers.
+        if self.state == "dnd_creation":
+            try:
+                self._dnd_dice_display.draw(self.renderer)
+            except Exception:
+                pass
+
         # Draw cursors AFTER everything else (and after the mask) so they're visible
         self._draw_cursors()
         
@@ -3304,6 +3984,12 @@ class PygletGameServer:
                         pass
                 self.dnd_dm_seat = None
                 self.dnd_background = None
+                try:
+                    with self._dnd_dice_lock:
+                        self._dnd_dice_pending.clear()
+                    self._dnd_dice_display.clear()
+                except Exception:
+                    pass
             except Exception:
                 pass
             return
@@ -3324,6 +4010,11 @@ class PygletGameServer:
             self.blackjack_game.update(dt)
         elif self.state == "dnd_creation":
             self.dnd_creation.update(dt)
+            try:
+                self._pump_dnd_dice_pending()
+                self._dnd_dice_display.update(dt)
+            except Exception:
+                pass
     
     def _handle_menu_input(self, fingertip_meta: List[Dict]):
         """Handle menu input"""
