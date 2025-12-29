@@ -34,6 +34,7 @@ from games.uno import UnoGame
 from games.exploding_kittens import ExplodingKittensGame
 from games.texas_holdem import TexasHoldemGame
 from games.cluedo import CluedoGame
+from games.risk import RiskGame
 from games.dnd import DnDCharacterCreation
 
 from server.dnd_dice import CenterDiceRollDisplay
@@ -159,7 +160,8 @@ class PygletGameServer:
             if p is None:
                 return
 
-            src = self._audio_load(track, streaming=True)
+            # Looping is more reliable with non-streaming sources (seekable).
+            src = self._audio_load(track, streaming=False)
             if src is None:
                 return
 
@@ -173,6 +175,12 @@ class PygletGameServer:
                     p.queue(src)
                 except Exception:
                     return
+
+            # Belt-and-braces loop hint.
+            try:
+                p.eos_action = pyglet.media.Player.EOS_LOOP
+            except Exception:
+                pass
 
             try:
                 p.play()
@@ -256,8 +264,8 @@ class PygletGameServer:
         if bool(getattr(self, "_music_muted", False)):
             return
 
-        # Prefer streaming sources for long-running BG tracks.
-        src = self._audio_load(want, streaming=True)
+        # Prefer non-streaming sources for looping reliability.
+        src = self._audio_load(want, streaming=False)
         if src is None:
             return
 
@@ -281,6 +289,12 @@ class PygletGameServer:
             except Exception:
                 return
 
+        # Belt-and-braces: set loop action even when SourceGroup is used.
+        try:
+            p.eos_action = pyglet.media.Player.EOS_LOOP
+        except Exception:
+            pass
+
         try:
             p.play()
         except Exception:
@@ -302,6 +316,8 @@ class PygletGameServer:
             return "TexasHoldemBG.mp3"
         if st == "cluedo":
             return "CluedoBG.mp3"
+        if st == "risk":
+            return "RiskBG.mp3"
         return None
 
     def _eligible_music_vote_client_ids(self) -> List[str]:
@@ -678,6 +694,7 @@ class PygletGameServer:
         self.exploding_kittens_game = ExplodingKittensGame(self.window.width, self.window.height, self.renderer)
         self.texas_holdem_game = TexasHoldemGame(self.window.width, self.window.height, self.renderer)
         self.cluedo_game = CluedoGame(self.window.width, self.window.height, self.renderer)
+        self.risk_game = RiskGame(self.window.width, self.window.height, self.renderer)
 
         # Provide seat->name to games that can render player names on the board.
         try:
@@ -704,6 +721,12 @@ class PygletGameServer:
         except Exception:
             pass
 
+        try:
+            if hasattr(self.risk_game, "set_name_provider"):
+                self.risk_game.set_name_provider(self._player_display_name)
+        except Exception:
+            pass
+
         # Player selection is handled via Web UI (button-driven), so hide in-window selection UIs.
         setattr(self.monopoly_game, "web_ui_only_player_select", True)
         setattr(self.blackjack_game, "web_ui_only_player_select", True)
@@ -711,6 +734,7 @@ class PygletGameServer:
         setattr(self.exploding_kittens_game, "web_ui_only_player_select", True)
         setattr(self.texas_holdem_game, "web_ui_only_player_select", True)
         setattr(self.cluedo_game, "web_ui_only_player_select", True)
+        setattr(self.risk_game, "web_ui_only_player_select", True)
         # Board-only rendering in the Pyglet window (no panels). Web UI shows actions/info.
         setattr(self.monopoly_game, "board_only_mode", True)
         setattr(self.blackjack_game, "board_only_mode", True)
@@ -718,6 +742,7 @@ class PygletGameServer:
         setattr(self.exploding_kittens_game, "board_only_mode", True)
         setattr(self.texas_holdem_game, "board_only_mode", True)
         setattr(self.cluedo_game, "board_only_mode", True)
+        setattr(self.risk_game, "board_only_mode", True)
         if hasattr(self.dnd_creation, "game"):
             setattr(self.dnd_creation.game, "web_ui_only_player_select", True)
             setattr(self.dnd_creation.game, "web_ui_only_char_creation", True)
@@ -1051,6 +1076,10 @@ class PygletGameServer:
             self.state = "cluedo"
             self.cluedo_game.state = "player_select"
             self.cluedo_game.selection_ui.reset()
+        elif key == "risk":
+            self.state = "risk"
+            self.risk_game.state = "player_select"
+            self.risk_game.selection_ui.reset()
         elif key in ("d&d", "dnd"):
             self.state = "dnd_creation"
             self.dnd_dm_seat = None
@@ -1117,6 +1146,8 @@ class PygletGameServer:
             return self.texas_holdem_game
         if self.state == "cluedo":
             return self.cluedo_game
+        if self.state == "risk":
+            return self.risk_game
         if self.state == "dnd_creation":
             return getattr(self.dnd_creation, "game", None) or self.dnd_creation
         return None
@@ -1150,6 +1181,8 @@ class PygletGameServer:
         elif self.state == "texas_holdem":
             start_enabled = sum(1 for s in slots if s["selected"]) >= 2
         elif self.state == "cluedo":
+            start_enabled = sum(1 for s in slots if s["selected"]) >= 2
+        elif self.state == "risk":
             start_enabled = sum(1 for s in slots if s["selected"]) >= 2
         elif self.state == "dnd_creation":
             sel_count = sum(1 for s in slots if s["selected"])
@@ -1855,6 +1888,15 @@ class PygletGameServer:
             except Exception:
                 pass
 
+        if self.state == "risk":
+            try:
+                rg = self.risk_game
+                st = rg.get_public_state(player_idx) if hasattr(rg, "get_public_state") else None
+                if isinstance(st, dict):
+                    snap["risk"] = st
+            except Exception:
+                pass
+
         if self.state == "dnd_creation":
             try:
                 dg = getattr(self.dnd_creation, "game", None)
@@ -2355,6 +2397,8 @@ class PygletGameServer:
             elif self.state == "texas_holdem" and len(selected_indices) >= 2:
                 game.start_game(selected_indices)
             elif self.state == "cluedo" and len(selected_indices) >= 2:
+                game.start_game(selected_indices)
+            elif self.state == "risk" and len(selected_indices) >= 2:
                 game.start_game(selected_indices)
             elif self.state == "dnd_creation":
                 dm = self.dnd_dm_seat
@@ -2894,6 +2938,9 @@ class PygletGameServer:
                         except Exception:
                             pass
                     game.handle_click(pidx, btn_id)
+            elif self.state == "risk":
+                if hasattr(game, "handle_click"):
+                    game.handle_click(pidx, btn_id)
             return
 
     async def handle_ui_client(self, websocket):
@@ -2947,6 +2994,7 @@ class PygletGameServer:
             ("Exploding Kittens", "exploding_kittens"),
             ("Texas Hold'em", "texas_holdem"),
             ("Cluedo", "cluedo"),
+            ("Risk", "risk"),
             ("D&D", "d&d"),
         ]
         buttons = []
@@ -3009,6 +3057,7 @@ class PygletGameServer:
             getattr(self, "exploding_kittens_game", None),
             getattr(self, "texas_holdem_game", None),
             getattr(self, "cluedo_game", None),
+            getattr(self, "risk_game", None),
             getattr(self, "dnd_creation", None),
         ):
             if g is None:
@@ -3038,6 +3087,8 @@ class PygletGameServer:
             self.texas_holdem_game.draw()
         elif self.state == "cluedo":
             self.cluedo_game.draw()
+        elif self.state == "risk":
+            self.risk_game.draw()
         elif self.state == "dnd_creation":
             # Web UI drives D&D fully; keep the server window clean/fullscreen,
             # but reflect the chosen background + encounter.

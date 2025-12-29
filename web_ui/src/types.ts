@@ -252,6 +252,25 @@ export type Snapshot = {
     private_event?: string | null;
     private_event_age_ms?: number;
   };
+  risk?: {
+    state?: string;
+    active_players?: number[];
+    eliminated_players?: number[];
+    current_turn_seat?: number | null;
+    phase?: string;
+    reinforcements_left?: number;
+    selected_from?: number | null;
+    selected_to?: number | null;
+    winner?: number | null;
+    last_event?: string | null;
+    territories?: Array<{
+      tid: number;
+      name: string;
+      continent: string;
+      owner: number | null;
+      troops: number;
+    }>;
+  };
   cursors?: CursorSnapshot[];
 };
 
