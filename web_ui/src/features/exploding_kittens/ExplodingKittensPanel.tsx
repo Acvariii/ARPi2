@@ -140,6 +140,7 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
   };
 
   const eliminatedSet = new Set((ek.eliminated_players || []).map((n) => Number(n)));
+  const iAmEliminated = mySeat !== null && eliminatedSet.has(mySeat);
 
   return (
     <>
@@ -162,6 +163,18 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
           {!!ek.nope_active && (
             <Typography variant="body2" color="text.secondary" align="center">
               NOPE window active ({ek.nope_count ?? 0})
+            </Typography>
+          )}
+
+          {!!ek.last_event && (
+            <Typography variant="body2" sx={{ fontWeight: 700 }} align="center">
+              {ek.last_event}
+            </Typography>
+          )}
+
+          {iAmEliminated && (
+            <Typography variant="body2" color="error" sx={{ fontWeight: 800 }} align="center">
+              You exploded. You’re out.
             </Typography>
           )}
         </Stack>

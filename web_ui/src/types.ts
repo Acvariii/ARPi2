@@ -198,6 +198,8 @@ export type Snapshot = {
     pending_draws?: number;
     deck_count?: number;
     discard_top?: string | null;
+    last_event?: string | null;
+    last_event_age_ms?: number;
     // keys are stringified in JSON
     hand_counts?: Record<string, number>;
     your_hand?: Array<{ idx: number; text: string; playable: boolean }>;

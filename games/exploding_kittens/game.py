@@ -114,7 +114,9 @@ class ExplodingKittensGame:
         self.hands = {s: [] for s in seats}
         self.discard_pile = []
 
-        self.draw_pile = self._build_deck(player_count=len(seats))
+        # Standard EK dealing: deal all players from a deck WITHOUT EKs,
+        # then add EKs (players-1) and shuffle.
+        self.draw_pile = self._build_deck(player_count=len(seats), include_ek=False)
         random.shuffle(self.draw_pile)
 
         # Deal: 1 Defuse + 7 random cards.
@@ -126,6 +128,10 @@ class ExplodingKittensGame:
                 if c is None:
                     break
                 self.hands[s].append(c)
+
+        for _ in range(max(1, int(len(seats)) - 1)):
+            self.draw_pile.append(EKCard("EK"))
+        random.shuffle(self.draw_pile)
 
         self._note_event("Exploding Kittens: start")
         self.state = "playing"
@@ -193,6 +199,8 @@ class ExplodingKittensGame:
             "pending_draws": int(self.pending_draws),
             "deck_count": int(len(self.draw_pile)),
             "discard_top": self.discard_pile[-1].short() if self.discard_pile else None,
+            "last_event": self._last_event if (self._last_event and float(self._last_event_age or 999.0) < 6.0) else None,
+            "last_event_age_ms": int(float(self._last_event_age or 999.0) * 1000),
             "hand_counts": counts,
             "your_hand": [
                 {"idx": int(i), "text": c.short(), "playable": bool(_card_playable(c))}
@@ -222,6 +230,22 @@ class ExplodingKittensGame:
                 if not self._has_card(seat, "NOPE"):
                     return
                 self._remove_one(seat, "NOPE")
+                self.discard_pile.append(EKCard("NOPE"))
+                self._nope_count += 1
+                self._note_event(f"{self._seat_label(seat)} played NOPE")
+                self._rebuild_buttons()
+            elif btn_id.startswith("ek_play:"):
+                # UX convenience: allow clicking the NOPE card itself.
+                try:
+                    idx = int(btn_id.split(":", 1)[1])
+                except Exception:
+                    return
+                hand = self.hands.get(seat, [])
+                if idx < 0 or idx >= len(hand):
+                    return
+                if hand[idx].kind != "NOPE":
+                    return
+                hand.pop(idx)
                 self.discard_pile.append(EKCard("NOPE"))
                 self._nope_count += 1
                 self._note_event(f"{self._seat_label(seat)} played NOPE")
@@ -277,13 +301,14 @@ class ExplodingKittensGame:
 
     # --- Internals: rules ---
 
-    def _build_deck(self, player_count: int) -> List[EKCard]:
+    def _build_deck(self, player_count: int, include_ek: bool = True) -> List[EKCard]:
         # Base-ish deck composition (simplified).
         out: List[EKCard] = []
 
-        # Exploding kittens: players-1
-        for _ in range(max(1, int(player_count) - 1)):
-            out.append(EKCard("EK"))
+        # Exploding kittens: players-1 (added after dealing)
+        if include_ek:
+            for _ in range(max(1, int(player_count) - 1)):
+                out.append(EKCard("EK"))
 
         # Extra defuses in deck to keep game playable.
         for _ in range(2):
@@ -320,11 +345,18 @@ class ExplodingKittensGame:
 
         c = self._draw_card(raw=False)
         if c is None:
+            # Extremely rare with discard refill; avoid soft-locks.
+            self._note_event("Deck empty")
+            if self.winner is None and len(self.active_players) == 1:
+                self.winner = int(self.active_players[0])
+                self._note_event(f"Winner: {self._seat_label(self.winner)}")
+                self._rebuild_buttons()
+                return
             self.pending_draws = 0
             self._advance_turn_if_done()
+            self._rebuild_buttons()
             return
 
-        self.hands.setdefault(seat, []).append(c)
         self._queue_draw_anim(seat)
         self._note_event(f"{self._seat_label(seat)} drew")
 
@@ -339,6 +371,9 @@ class ExplodingKittensGame:
             else:
                 self._explode(seat)
                 return
+        else:
+            # Normal card drawn into hand.
+            self.hands.setdefault(seat, []).append(c)
 
         self.pending_draws -= 1
         self._advance_turn_if_done()
@@ -347,8 +382,28 @@ class ExplodingKittensGame:
     def _draw_card(self, raw: bool) -> Optional[EKCard]:
         # raw=True draws without triggering special resolution (used for dealing).
         if not self.draw_pile:
+            self._refill_draw_pile_from_discard()
+        if not self.draw_pile:
             return None
         return self.draw_pile.pop()
+
+    def _refill_draw_pile_from_discard(self) -> None:
+        """When the draw pile is empty, recycle discard (keeping the top card).
+
+        Exploding Kittens decks typically don't run out in normal play, but this
+        prevents deadlocks in a simplified implementation.
+        """
+        try:
+            disc = list(self.discard_pile or [])
+        except Exception:
+            disc = []
+        if len(disc) <= 1:
+            return
+        top = disc[-1]
+        refill = disc[:-1]
+        random.shuffle(refill)
+        self.draw_pile.extend(refill)
+        self.discard_pile = [top]
 
     def _reinsert_random(self, card: EKCard) -> None:
         if not self.draw_pile:
@@ -364,7 +419,7 @@ class ExplodingKittensGame:
         if seat not in self.eliminated_players:
             self.eliminated_players.append(int(seat))
 
-        self._note_event(f"{self._seat_label(seat)} exploded!")
+        self._note_event(f"{self._seat_label(seat)} player exploded")
 
         # If only one remains, winner.
         if len(self.active_players) == 1:
