@@ -19,9 +19,6 @@ import http.server
 import socketserver
 import functools
 import hashlib
-import io
-import urllib.parse
-import urllib.request
 from pathlib import Path
 from typing import Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor
@@ -33,429 +30,25 @@ from config import PLAYER_COLORS
 from core.renderer import PygletRenderer
 from games.monopoly import MonopolyGame
 from games.blackjack import BlackjackGame
+from games.uno import UnoGame
+from games.exploding_kittens import ExplodingKittensGame
 from games.dnd import DnDCharacterCreation
 
-
-class CenterDiceRollDisplay:
-    """Visible centered dice roll animation (2D polygons)."""
-
-    _DICE_POLY_SIDES = {
-        4: 3,   # triangle (d4)
-        6: 4,   # square
-        8: 8,   # octagon
-        10: 10, # decagon
-        12: 12, # dodecagon
-        20: 20, # icosagon-ish
-    }
-
-    def __init__(self):
-        self._queue: List[dict] = []
-        self._active: Optional[dict] = None
-
-    def clear(self) -> None:
-        self._queue.clear()
-        self._active = None
-
-    def enqueue(self, label: str, sides: int, result: int, color: tuple[int, int, int]) -> None:
-        try:
-            s = int(sides)
-            r = int(result)
-        except Exception:
-            return
-        if s not in self._DICE_POLY_SIDES:
-            return
-        r = max(1, min(s, r))
-        self._queue.append({
-            "label": str(label or ""),
-            "sides": s,
-            "result": r,
-            "color": tuple(int(c) for c in color),
-        })
-
-    def update(self, dt: float) -> None:
-        now = float(time.time())
-        if self._active is None:
-            if not self._queue:
-                return
-            item = self._queue.pop(0)
-            item["start"] = now
-            # Total animation duration, with most time in "rolling".
-            item["duration"] = 1.8
-            item["roll_phase"] = 1.15
-            item["tick"] = 0.075
-            self._active = item
-            return
-
-        start = float(self._active.get("start", now))
-        dur = float(self._active.get("duration", 1.8))
-        if now - start >= dur:
-            self._active = None
-
-    def _regular_polygon(self, cx: float, cy: float, radius: float, n: int, angle: float) -> List[tuple[int, int]]:
-        pts: List[tuple[int, int]] = []
-        for i in range(n):
-            a = angle + (2.0 * math.pi * i / n)
-            x = cx + radius * math.cos(a)
-            y = cy + radius * math.sin(a)
-            pts.append((int(x), int(y)))
-        return pts
-
-    def draw(self, renderer: PygletRenderer) -> None:
-        active = self._active
-        if not active:
-            return
-
-        w = int(getattr(renderer, "width", WINDOW_SIZE[0]))
-        h = int(getattr(renderer, "height", WINDOW_SIZE[1]))
-        cx = int(w // 2)
-        cy = int(h // 2)
-
-        now = float(time.time())
-        start = float(active.get("start", now))
-        elapsed = max(0.0, now - start)
-        duration = float(active.get("duration", 1.8))
-        roll_phase = float(active.get("roll_phase", 1.15))
-        tick = float(active.get("tick", 0.075))
-
-        sides = int(active["sides"])
-        result = int(active["result"])
-        color = tuple(active.get("color") or (220, 220, 220))
-        label = str(active.get("label") or "")
-
-        # While rolling, flip the shown face rapidly; then settle.
-        if elapsed < roll_phase:
-            step = int(elapsed / max(0.01, tick))
-            shown = (step % sides) + 1
-        else:
-            shown = result
-
-        # Simple bounce + slow rotate.
-        t = min(1.0, elapsed / max(0.001, duration))
-        scale = 1.0 + 0.18 * math.sin(math.pi * min(1.0, t))
-        angle = (elapsed * 1.6) % (2.0 * math.pi)
-
-        base_r = int(min(w, h) * 0.12)
-        radius = max(46, int(base_r * scale))
-
-        poly_n = self._DICE_POLY_SIDES.get(sides, 6)
-        pts = self._regular_polygon(cx, cy, radius, poly_n, angle)
-        shadow_pts = [(x + 5, y + 5) for (x, y) in pts]
-
-        # Shadow + dice body (use shapes-based drawing so it works on core OpenGL).
-        try:
-            renderer.draw_polygon_immediate((0, 0, 0), shadow_pts, alpha=110)
-        except Exception:
-            pass
-
-        # Dice body
-        try:
-            renderer.draw_polygon_immediate(color, pts, alpha=235)
-        except Exception:
-            pass
-
-        # Subtle highlight to feel more "physical"
-        try:
-            hi = tuple(min(255, int(c + (255 - c) * 0.35)) for c in color)
-            inner = self._regular_polygon(cx - radius * 0.10, cy + radius * 0.10, radius * 0.72, poly_n, angle)
-            renderer.draw_polygon_immediate(hi, inner, alpha=170)
-        except Exception:
-            pass
-
-        # Outline
-        try:
-            renderer.draw_polyline_immediate((20, 20, 20), pts, width=4, alpha=220, closed=True)
-        except Exception:
-            pass
-
-        # Number + labels (immediate so it appears above everything).
-        try:
-            renderer.draw_text_immediate(
-                str(shown),
-                cx,
-                cy + 4,
-                font_size=max(44, int(radius * 0.85)),
-                color=(245, 245, 245),
-                bold=True,
-                anchor_x="center",
-                anchor_y="center",
-                alpha=255,
-            )
-            renderer.draw_text_immediate(
-                f"d{sides}",
-                cx,
-                cy + radius + 18,
-                font_size=22,
-                color=(235, 235, 235),
-                anchor_x="center",
-                anchor_y="center",
-                alpha=230,
-            )
-            if label:
-                renderer.draw_text_immediate(
-                    label,
-                    cx,
-                    cy - radius - 18,
-                    font_size=18,
-                    color=(235, 235, 235),
-                    anchor_x="center",
-                    anchor_y="center",
-                    alpha=220,
-                )
-        except Exception:
-            pass
+from server.dnd_dice import CenterDiceRollDisplay
+from server.dnd_character_creation import (
+    _dnd_background_questions,
+    _dnd_generate_background_text,
+    _dnd_pick_additional_skills,
+    _dnd_starting_loadout,
+)
 
 
-def _stable_rng_seed(*parts: str) -> int:
-    raw = "|".join([str(p or "") for p in parts])
-    h = hashlib.sha256(raw.encode("utf-8", errors="ignore")).hexdigest()
-    return int(h[:12], 16)
+def _stable_rng_seed(*parts: object) -> int:
+    """Return a stable 64-bit seed for random.Random from arbitrary inputs."""
+    s = "|".join(str(p) for p in parts if p is not None)
+    h = hashlib.sha256(s.encode("utf-8", errors="ignore")).digest()
+    return int.from_bytes(h[:8], "little", signed=False)
 
-
-def _dnd_background_questions() -> List[Dict]:
-    """Return a stable list of 20-30 character background questions."""
-    # Keep these short for UI; the generator will turn them into richer prose.
-    return [
-        {"id": "origin", "kind": "choice", "prompt": "Where did you grow up?", "options": ["City alleys", "Quiet village", "Frontier outpost", "Monastery", "Noble estate", "Wilderness camp"]},
-        {"id": "family", "kind": "choice", "prompt": "What was your family like?", "options": ["Loving but poor", "Strict and demanding", "Large and chaotic", "Absent/unknown", "Respectable and stable", "Feared by others"]},
-        {"id": "mentor", "kind": "choice", "prompt": "Who taught you your most important lesson?", "options": ["A veteran", "A scholar", "A priest", "A thief", "A rival", "No one"]},
-        {"id": "turning_point", "kind": "choice", "prompt": "What pushed you into adventure?", "options": ["A debt", "A prophecy", "Revenge", "Curiosity", "A lost loved one", "A call to duty"]},
-        {"id": "virtue", "kind": "choice", "prompt": "What do you value most?", "options": ["Honor", "Freedom", "Knowledge", "Compassion", "Power", "Loyalty"]},
-        {"id": "flaw", "kind": "choice", "prompt": "What trips you up most often?", "options": ["Pride", "Impulsiveness", "Suspicion", "Mercy", "Greed", "Stubbornness"]},
-        {"id": "fear", "kind": "choice", "prompt": "What scares you more than you admit?", "options": ["Being powerless", "Being forgotten", "Hurting others", "Losing control", "The dark", "Betrayal"]},
-        {"id": "bond", "kind": "choice", "prompt": "What keeps you going when things get ugly?", "options": ["A promise", "A person", "A cause", "A debt repaid", "A secret", "A dream"]},
-        {"id": "style", "kind": "choice", "prompt": "How do you approach problems?", "options": ["Plan carefully", "Charge in", "Talk first", "Use tricks", "Follow instinct", "Let others lead"]},
-        {"id": "reputation", "kind": "choice", "prompt": "What is your reputation (or rumor) back home?", "options": ["Reliable", "Troublemaker", "Odd but brilliant", "Blessed", "Dangerous", "Unknown"]},
-        {"id": "secret", "kind": "choice", "prompt": "What kind of secret do you carry?", "options": ["A crime", "A lineage", "A bargain", "A forbidden truth", "A hidden talent", "No secret"]},
-        {"id": "magic", "kind": "choice", "prompt": "How do you feel about magic?", "options": ["I study it", "I distrust it", "I respect it", "I fear it", "I use it", "I envy it"]},
-        {"id": "faith", "kind": "choice", "prompt": "What is your relationship with faith/tradition?", "options": ["Devout", "Skeptical", "Curious", "Rebellious", "Pragmatic", "Haunted"]},
-        {"id": "social", "kind": "choice", "prompt": "In a crowd, you are usually…", "options": ["A leader", "A listener", "A performer", "A watcher", "A negotiator", "An outsider"]},
-        {"id": "travel", "kind": "choice", "prompt": "Why do you travel?", "options": ["To prove myself", "To learn", "To protect", "To escape", "To hunt", "To serve"]},
-        {"id": "weapon", "kind": "choice", "prompt": "What feels most natural in your hands?", "options": ["Blade", "Bow", "Hammer", "Staff", "Daggers", "My words"]},
-        {"id": "keepsake", "kind": "choice", "prompt": "You carry a keepsake that is…", "options": ["A letter", "A token", "A map", "A charm", "A broken weapon", "A small book"]},
-        {"id": "scar", "kind": "choice", "prompt": "You gained a scar from…", "options": ["A duel", "A monster", "A fire", "A betrayal", "Hard labor", "A ritual"]},
-        {"id": "goal", "kind": "choice", "prompt": "Your next big goal is…", "options": ["Find someone", "Find something", "Earn status", "Pay a debt", "Break a curse", "Build a home"]},
-        {"id": "companions", "kind": "choice", "prompt": "What do you expect from companions?", "options": ["Honesty", "Competence", "Kindness", "Loyalty", "Respect", "Nothing"]},
-        {"id": "conflict", "kind": "choice", "prompt": "When conflict rises, you…", "options": ["De-escalate", "Intimidate", "Outwit", "End it fast", "Protect the weak", "Disappear"]},
-        {"id": "craft", "kind": "choice", "prompt": "A non-combat talent you’re proud of:", "options": ["Cooking", "Woodcraft", "Tales & songs", "Herbalism", "Cartography", "Languages"]},
-        {"id": "hook", "kind": "text", "prompt": "One unique detail about you (a quirk, vow, motto, etc.):"},
-    ]
-
-
-def _dnd_pick_additional_skills(char_class: str, answers: Dict[str, str], rng: random.Random) -> List[str]:
-    # Use the canonical skill list from D&D logic.
-    try:
-        from games.dnd.logic import SkillChecker
-        all_skills = list(getattr(SkillChecker, "SKILLS", {}).keys())
-    except Exception:
-        all_skills = [
-            "Acrobatics", "Animal Handling", "Arcana", "Athletics", "Deception", "History", "Insight", "Intimidation",
-            "Investigation", "Medicine", "Nature", "Perception", "Performance", "Persuasion", "Religion", "Sleight of Hand",
-            "Stealth", "Survival",
-        ]
-
-    try:
-        from games.dnd.models import CLASS_SKILLS as _CLASS_SKILLS
-        base = list((_CLASS_SKILLS or {}).get(str(char_class), []) or [])
-    except Exception:
-        base = []
-    pool = [s for s in all_skills if s not in set(base)]
-
-    # Bias by answers.
-    bias: List[str] = []
-    a = {k: str(v or "") for k, v in (answers or {}).items()}
-    origin = a.get("origin", "")
-    if "City" in origin:
-        bias += ["Stealth", "Sleight of Hand", "Deception", "Investigation"]
-    if "Wilderness" in origin or "Frontier" in origin:
-        bias += ["Survival", "Nature", "Perception", "Animal Handling"]
-    if "Monastery" in origin:
-        bias += ["Insight", "Medicine", "Religion"]
-    if "Noble" in origin:
-        bias += ["Persuasion", "History", "Performance"]
-
-    style = a.get("style", "")
-    if "Plan" in style:
-        bias += ["Investigation", "History"]
-    if "Talk" in style or "negotiator" in a.get("social", ""):
-        bias += ["Persuasion", "Insight", "Deception"]
-    if "tricks" in style or "watcher" in a.get("social", ""):
-        bias += ["Stealth", "Sleight of Hand", "Perception"]
-
-    faith = a.get("faith", "")
-    if faith in ("Devout", "Haunted"):
-        bias += ["Religion", "Insight", "Medicine"]
-    if a.get("magic", "") in ("I study it", "I use it", "I envy it"):
-        bias += ["Arcana", "Investigation", "History"]
-
-    # Pick 2 distinct.
-    picks: List[str] = []
-    for _ in range(8):
-        if len(picks) >= 2:
-            break
-        candidate_pool = [s for s in bias if s in pool and s not in picks]
-        if candidate_pool:
-            picks.append(rng.choice(candidate_pool))
-        elif pool:
-            picks.append(rng.choice([s for s in pool if s not in picks]))
-    return picks[:2]
-
-
-def _dnd_starting_loadout(char_class: str) -> tuple[List[Dict], Dict[str, str]]:
-    """Return (items, equipment_map) where items are Character.add_item()-ready dicts."""
-    cc = str(char_class or "").strip()
-
-    def gear(name: str, slot: str, ac_bonus: int = 0) -> Dict:
-        it: Dict = {"name": name, "kind": "gear", "slot": slot, "ac_bonus": int(ac_bonus)}
-        return it
-
-    def misc(name: str) -> Dict:
-        return {"name": name, "kind": "misc"}
-
-    def heal_potion(amount: int = 6) -> Dict:
-        return {"name": "Healing Potion", "kind": "consumable", "effect": {"type": "heal", "amount": int(amount)}}
-
-    items: List[Dict] = []
-    equip: Dict[str, str] = {}
-
-    if cc == "Fighter":
-        items += [gear("Chain Mail", "chest", ac_bonus=6), misc("Longsword"), misc("Adventurer's Pack"), heal_potion(6)]
-        equip["chest"] = "__auto:Chain Mail"
-        equip["sword"] = "__auto:Longsword"
-    elif cc == "Rogue":
-        items += [gear("Leather Armor", "chest", ac_bonus=1), misc("Dagger"), misc("Thieves' Tools"), misc("Shortbow"), heal_potion(6)]
-        equip["chest"] = "__auto:Leather Armor"
-        equip["knife"] = "__auto:Dagger"
-        equip["bow"] = "__auto:Shortbow"
-    elif cc == "Wizard":
-        items += [gear("Padded Robes", "chest", ac_bonus=0), misc("Staff"), misc("Spellbook"), misc("Component Pouch"), heal_potion(6)]
-        equip["chest"] = "__auto:Padded Robes"
-        equip["staff"] = "__auto:Staff"
-    elif cc == "Cleric":
-        items += [gear("Chain Mail", "chest", ac_bonus=6), misc("Warhammer"), misc("Holy Symbol"), misc("Healer's Kit"), heal_potion(8)]
-        equip["chest"] = "__auto:Chain Mail"
-        equip["sword"] = "__auto:Warhammer"
-    elif cc == "Ranger":
-        items += [gear("Leather Armor", "chest", ac_bonus=1), misc("Longbow"), misc("Dagger"), misc("Trail Rations"), heal_potion(6)]
-        equip["chest"] = "__auto:Leather Armor"
-        equip["bow"] = "__auto:Longbow"
-        equip["knife"] = "__auto:Dagger"
-    elif cc == "Paladin":
-        items += [gear("Chain Mail", "chest", ac_bonus=6), misc("Longsword"), misc("Oath Token"), misc("Traveler's Pack"), heal_potion(8)]
-        equip["chest"] = "__auto:Chain Mail"
-        equip["sword"] = "__auto:Longsword"
-    else:
-        items += [gear("Leather Armor", "chest", ac_bonus=1), misc("Dagger"), misc("Adventurer's Pack"), heal_potion(6)]
-        equip["chest"] = "__auto:Leather Armor"
-        equip["knife"] = "__auto:Dagger"
-
-    return items, equip
-
-
-def _dnd_generate_background_text(name: str, race: str, char_class: str, answers: Dict[str, str], seed_hint: str) -> tuple[str, List[str], List[str]]:
-    """Return (background_text, feats, features)."""
-    a = {k: str(v or "").strip() for k, v in (answers or {}).items()}
-    seed = _stable_rng_seed(name, race, char_class, seed_hint, json.dumps(a, sort_keys=True))
-    rng = random.Random(seed)
-
-    origin = a.get("origin") or rng.choice(["a quiet village", "city alleys", "a frontier outpost", "the wilderness"])
-    turning = a.get("turning_point") or rng.choice(["a debt", "a prophecy", "revenge", "curiosity"])
-    virtue = a.get("virtue") or rng.choice(["honor", "freedom", "knowledge", "compassion"])
-    flaw = a.get("flaw") or rng.choice(["pride", "impulsiveness", "suspicion", "stubbornness"])
-    bond = a.get("bond") or rng.choice(["a promise", "a person", "a cause", "a dream"])
-    keepsake = a.get("keepsake") or rng.choice(["a letter", "a token", "a map", "a charm"])
-    hook = a.get("hook")
-    if hook:
-        hook = re.sub(r"\s+", " ", hook).strip()
-        hook = hook[:140]
-
-    opener_pool = [
-        "You learned early that the world rarely offers clean choices.",
-        "You grew up with one foot in trouble and the other in duty.",
-        "You were shaped by long nights, short tempers, and longer roads.",
-        "You found comfort in routines—until adventure broke them.",
-        "You learned to read people before you learned to read books.",
-    ]
-    twist_pool = [
-        "A single night changed everything.",
-        "A quiet moment became a vow.",
-        "A mistake became a lesson you refuse to forget.",
-        "A stranger’s words lodged in your mind like a splinter.",
-        "An old debt still casts a long shadow.",
-    ]
-    closer_pool = [
-        "You don’t seek glory—only a reason to believe you can make things right.",
-        "You keep moving because standing still feels like losing.",
-        "You measure your life in promises kept, not battles won.",
-        "You’ve decided your story won’t be written by fear.",
-    ]
-
-    opener = rng.choice(opener_pool)
-    twist = rng.choice(twist_pool)
-    closer = rng.choice(closer_pool)
-
-    bg = (
-        f"{opener}\n\n"
-        f"You grew up in {origin.lower()}, and you learned to lean on {virtue.lower()}—even when it made you stubborn. "
-        f"When {turning.lower()} pulled you onto the road, you didn’t hesitate for long. {twist}"
-        f"\n\nYour greatest flaw is {flaw.lower()}, and you’re not proud of the damage it’s caused. "
-        f"Still, {bond.lower()} keeps you standing when the odds turn. You carry {keepsake.lower()} as a reminder of who you were before you became a {char_class.lower()}."
-    )
-    if hook:
-        bg += f"\n\nUnique detail: {hook}"
-    bg += f"\n\n{closer}"
-
-    # Feats/features: original names to avoid copying SRD text.
-    class_features = {
-        "Fighter": ["Combat Training", "Steel Nerve"],
-        "Wizard": ["Arcane Study", "Ritual Habit"],
-        "Rogue": ["Quick Hands", "Shadow Sense"],
-        "Cleric": ["Sacred Channel", "Vow of Mercy"],
-        "Ranger": ["Trailcraft", "Keen Aim"],
-        "Paladin": ["Oathbound", "Radiant Presence"],
-    }
-    trait_pool = [
-        "Silver Tongue",
-        "Battle Instinct",
-        "Keen Observer",
-        "Iron Stomach",
-        "Steady Hands",
-        "Unshakable Focus",
-        "Lucky Breaks",
-        "Streetwise",
-        "Wilderness Blood",
-        "Bookish",
-    ]
-    # Bias feats by some answers
-    bias: List[str] = []
-    if "City" in str(a.get("origin", "")):
-        bias += ["Streetwise", "Steady Hands", "Silver Tongue"]
-    if "Wilderness" in str(a.get("origin", "")) or "Frontier" in str(a.get("origin", "")):
-        bias += ["Wilderness Blood", "Keen Observer", "Battle Instinct"]
-    if str(a.get("magic", "")) in ("I study it", "I use it"):
-        bias += ["Bookish", "Unshakable Focus"]
-
-    feats = []
-    feat_pool = bias + trait_pool
-    while feat_pool and len(feats) < 1:
-        f = rng.choice(feat_pool)
-        if f not in feats:
-            feats.append(f)
-        feat_pool = [x for x in feat_pool if x != f]
-
-    features = list(class_features.get(str(char_class), ["Adventurer" ]))[:]
-    # Add one extra feature influenced by answers
-    extra = rng.choice([
-        "Resourceful",
-        "Calm Under Pressure",
-        "Hard to Read",
-        "People Person",
-        "Tinkerer's Touch",
-        "Uncanny Luck",
-    ])
-    if extra not in features:
-        features.append(extra)
-
-    return bg, feats, features
 class PygletGameServer:
     """OpenGL-accelerated game server using Pyglet with complete UI"""
     
@@ -490,45 +83,23 @@ class PygletGameServer:
         self._dnd_dice_lock = threading.Lock()
         self._dnd_dice_pending: List[tuple[int, int, int]] = []  # (seat, sides, result)
 
-        # D&D background (AI-generated, in-memory)
-        self._dnd_bg_prompt_cache: str = ""
+        # D&D background (local file selection only; no external APIs)
+        self._dnd_bg_prompt_cache: str = ""  # stores "file:<name>" when loaded
         self._dnd_bg_sprite = None
         self._dnd_bg_img_size: tuple[int, int] = (0, 0)
         self._dnd_bg_aspect_key: tuple[int, int] = (0, 0)
-        self._dnd_bg_lock = threading.Lock()
-        self._dnd_bg_pending: Optional[tuple[tuple, bytes, str, int, int]] = None  # (desired_id, bytes, ext, iw, ih)
-        self._dnd_bg_inflight_key: Optional[tuple] = None  # desired_id
-        self._dnd_bg_desired_key: Optional[tuple] = None  # desired_id
         self._dnd_bg_last_error: str = ""
         self._dnd_bg_last_error_time: float = 0.0
-        self._dnd_bg_last_log_key: Optional[tuple] = None
-        self._dnd_bg_last_log_state: str = ""
-        self._dnd_bg_last_log_time: float = 0.0
 
         # D&D local background files (games/dnd/backgrounds)
         self._dnd_bg_files_cache: List[str] = []
         self._dnd_bg_files_cache_time: float = 0.0
-
-        # Optional local (on-device) background generation
-        self._dnd_local_model_id: str = str((__import__("os").environ.get("DND_BG_LOCAL_MODEL") or "").strip())
-        self._dnd_local_enabled: bool = str((__import__("os").environ.get("DND_BG_LOCAL_ENABLED") or "").strip()).lower() in ("1", "true", "yes")
-        self._dnd_local_device: str = str((__import__("os").environ.get("DND_BG_LOCAL_DEVICE") or "cuda").strip())
-        self._dnd_local_steps: int = int((__import__("os").environ.get("DND_BG_LOCAL_STEPS") or "24").strip() or 24)
-        self._dnd_local_guidance: float = float((__import__("os").environ.get("DND_BG_LOCAL_GUIDANCE") or "3.5").strip() or 3.5)
-        self._dnd_local_max_long: int = int((__import__("os").environ.get("DND_BG_LOCAL_MAX_LONG") or "1536").strip() or 1536)
-        self._dnd_local_pipe = None
-        self._dnd_local_pipe_lock = threading.Lock()
 
         # Lobby gating
         self.min_connected_players = 2
 
         # Finish initializing networking/window/rendering.
         self._finish_init()
-
-    def _dnd_prompt_seed(self, prompt: str) -> int:
-        p = (prompt or "").strip().encode("utf-8")
-        h = hashlib.sha256(p).digest()
-        return int.from_bytes(h[:8], "little", signed=False)
 
     def _dnd_backgrounds_dir(self) -> Path:
         return (Path(__file__).parent / "games" / "dnd" / "backgrounds").resolve()
@@ -563,43 +134,6 @@ class PygletGameServer:
         self._dnd_bg_files_cache = list(out)
         self._dnd_bg_files_cache_time = now
         return list(out)
-
-    def _pollinations_image_url(self, base: str, prompt: str, w: int, h: int, seed: int, model: str) -> str:
-        """Build a Pollinations image URL.
-
-        Notes:
-        - Uses the public endpoint (no key required in most cases).
-        - If POLLINATIONS_API_KEY env var is set, we pass it as a query param for higher limits.
-        """
-        safe_prompt = urllib.parse.quote((prompt or "").strip() or "fantasy scene", safe="")
-        key = str((__import__("os").environ.get("POLLINATIONS_API_KEY") or "").strip())
-
-        qs = {
-            "model": model,
-            "width": str(int(w)),
-            "height": str(int(h)),
-            "seed": str(int(seed) & 0x7FFFFFFF),
-            "safe": "true",
-            "enhance": "true",
-            "nologo": "true",
-        }
-        if key:
-            qs["key"] = key
-
-        if base.endswith("/image"):
-            # gen.pollinations.ai/image/<prompt>
-            return f"{base}/{safe_prompt}?{urllib.parse.urlencode(qs)}"
-        # image.pollinations.ai/prompt/<prompt>
-        return f"{base}/prompt/{safe_prompt}?{urllib.parse.urlencode(qs)}"
-
-    def _fetch_image_bytes(self, url: str, timeout_s: float = 30.0) -> tuple[bytes, str]:
-        req = urllib.request.Request(url, headers={"User-Agent": "ARPi2/1.0"})
-        with urllib.request.urlopen(req, timeout=float(timeout_s)) as resp:
-            content_type = str(getattr(resp, "headers", {}).get("Content-Type", "") or "")
-            data = resp.read()
-
-        ext = "png" if "png" in content_type.lower() else "jpg"
-        return data, ext
 
     def _set_sprite_smoothing(self, sprite_obj) -> None:
         """Force linear texture filtering to reduce pixelation when scaling."""
@@ -652,211 +186,6 @@ class PygletGameServer:
             except Exception:
                 pass
 
-    def _http_json(self, url: str, payload: dict, timeout_s: float) -> dict:
-        body = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            url,
-            data=body,
-            headers={
-                "User-Agent": "ARPi2/1.0",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=float(timeout_s)) as resp:
-            raw = resp.read()
-        try:
-            return json.loads(raw.decode("utf-8"))
-        except Exception:
-            return {}
-
-    def _sse_wait_complete(self, url: str, timeout_s: float) -> Optional[object]:
-        """Read a Gradio SSE stream until 'event: complete' and return parsed JSON from the following data line."""
-        req = urllib.request.Request(url, headers={"User-Agent": "ARPi2/1.0", "Accept": "text/event-stream"})
-        started = time.time()
-        data_buf: Optional[str] = None
-        saw_complete = False
-        try:
-            with urllib.request.urlopen(req, timeout=float(timeout_s)) as resp:
-                while True:
-                    if (time.time() - started) > float(timeout_s):
-                        raise TimeoutError("SSE timeout")
-                    line = resp.readline()
-                    if not line:
-                        break
-                    try:
-                        s = line.decode("utf-8", errors="ignore").strip("\r\n")
-                    except Exception:
-                        continue
-                    if not s:
-                        # event boundary
-                        if saw_complete and data_buf is not None:
-                            try:
-                                return json.loads(data_buf)
-                            except Exception:
-                                return None
-                        continue
-                    if s.startswith("event:"):
-                        ev = s.split(":", 1)[1].strip()
-                        saw_complete = (ev == "complete")
-                        continue
-                    if s.startswith("data:"):
-                        data_buf = s.split(":", 1)[1].strip()
-                        continue
-        except Exception:
-            return None
-        return None
-
-    def _gradio_extract_image_url(self, base: str, payload: object) -> Optional[str]:
-        """Try to extract an image URL from a Gradio result payload."""
-        if payload is None:
-            return None
-
-        # Payload is usually a list. Look for a dict with url/path.
-        candidates: list[dict] = []
-        try:
-            if isinstance(payload, dict) and "data" in payload:
-                payload = payload.get("data")
-            if isinstance(payload, list):
-                # Flatten one level
-                for item in payload:
-                    if isinstance(item, dict):
-                        candidates.append(item)
-                    elif isinstance(item, list):
-                        for sub in item:
-                            if isinstance(sub, dict):
-                                candidates.append(sub)
-        except Exception:
-            candidates = []
-
-        for d in candidates:
-            try:
-                u = d.get("url")
-                if isinstance(u, str) and u.startswith("http"):
-                    return u
-            except Exception:
-                pass
-
-        # Fall back to serving by path.
-        for d in candidates:
-            try:
-                p = d.get("path")
-                if not isinstance(p, str) or not p:
-                    continue
-                qp = urllib.parse.quote(p, safe="")
-                # Try common Gradio file routes.
-                return f"{base}/gradio_api/file={qp}"
-            except Exception:
-                continue
-
-        return None
-
-    def _gradio_call_infer_image(self, base: str, api_name: str, data: list, timeout_s: float) -> Optional[tuple[bytes, str]]:
-        """Call a Gradio /call/<api_name> endpoint and return (bytes, ext) for the generated image."""
-        call_url = f"{base}/gradio_api/call/{api_name}"
-        start = self._http_json(call_url, {"data": data}, timeout_s=timeout_s)
-        event_id = str(start.get("event_id") or "").strip()
-        if not event_id:
-            return None
-        result = self._sse_wait_complete(f"{base}/gradio_api/call/{api_name}/{event_id}", timeout_s=timeout_s)
-        img_url = self._gradio_extract_image_url(base, result)
-        if not img_url:
-            return None
-        # The gradio_api/file= URL returns bytes.
-        try:
-            return self._fetch_image_bytes(img_url, timeout_s=timeout_s)
-        except Exception:
-            # Some spaces use /file= instead.
-            try:
-                if "/gradio_api/file=" in img_url:
-                    alt = img_url.replace("/gradio_api/file=", "/file=")
-                    return self._fetch_image_bytes(alt, timeout_s=timeout_s)
-            except Exception:
-                return None
-        return None
-
-    def _dnd_bg_status(self) -> tuple[str, str]:
-        """Return (state, detail) for background generation."""
-        try:
-            bg = str(getattr(self, "dnd_background", "") or "").strip()
-        except Exception:
-            bg = ""
-
-        with self._dnd_bg_lock:
-            desired = self._dnd_bg_desired_key
-            inflight = self._dnd_bg_inflight_key
-            pending = self._dnd_bg_pending
-            last_err = self._dnd_bg_last_error
-            last_err_time = float(self._dnd_bg_last_error_time or 0.0)
-
-        if not bg:
-            return "idle", "no background"
-
-        # Local file mode: no external calls.
-        try:
-            if bg in set(self._list_dnd_background_files() or []):
-                want = f"file:{bg}"
-                if self._dnd_bg_sprite is not None and str(self._dnd_bg_prompt_cache or "") == want:
-                    return "ready", ""
-                if pending is not None:
-                    return "decoding", ""
-                return "loading", "local file"
-        except Exception:
-            pass
-
-        # Ready if we have a sprite that matches the prompt.
-        try:
-            if self._dnd_bg_sprite is not None and str(self._dnd_bg_prompt_cache or "") == bg:
-                return "ready", ""
-        except Exception:
-            pass
-
-        # Pending decode/apply on main thread.
-        if pending is not None:
-            return "decoding", ""
-
-        # In-flight network fetch.
-        if inflight is not None:
-            return "fetching", ""
-
-        # Recently errored; in cooldown.
-        cooldown_s = 15.0
-        age = float(time.time()) - last_err_time if last_err_time > 0 else 1e9
-        if last_err and age < cooldown_s:
-            retry_in = max(0, int(cooldown_s - age))
-            return "error", f"{last_err} (retry in {retry_in}s)"
-
-        # Otherwise we should be about to start a fetch.
-        if desired is not None:
-            return "queued", ""
-        return "idle", ""
-
-    def _dnd_bg_maybe_log(self, state: str, key: Optional[tuple], message: str):
-        """Throttled console logging for background generation."""
-        try:
-            now = float(time.time())
-        except Exception:
-            now = 0.0
-
-        # Log if state/key changed, or if it's been a while.
-        should_log = False
-        if key != self._dnd_bg_last_log_key or state != self._dnd_bg_last_log_state:
-            should_log = True
-        elif now - float(self._dnd_bg_last_log_time or 0.0) > 10.0:
-            should_log = True
-
-        if not should_log:
-            return
-
-        self._dnd_bg_last_log_key = key
-        self._dnd_bg_last_log_state = state
-        self._dnd_bg_last_log_time = now
-        try:
-            print(message)
-        except Exception:
-            pass
-
     def _queue_dnd_dice_roll(self, seat: int, sides: int, result: int) -> None:
         try:
             s = int(seat)
@@ -885,435 +214,9 @@ class PygletGameServer:
                 self._dnd_dice_display.enqueue(name, int(sides), int(result), color=color)
             except Exception:
                 continue
-
-    def _local_model_ready(self) -> bool:
-        if not self._dnd_local_enabled:
-            return False
-        return bool(self._dnd_local_model_id)
-
-    def _get_local_diffusers_pipe(self):
-        """Lazy-load and cache a Diffusers text-to-image pipeline."""
-        if self._dnd_local_pipe is not None:
-            return self._dnd_local_pipe
-        with self._dnd_local_pipe_lock:
-            if self._dnd_local_pipe is not None:
-                return self._dnd_local_pipe
-
-            model_id = str(self._dnd_local_model_id or "").strip()
-            if not model_id:
-                raise RuntimeError("DND_BG_LOCAL_MODEL is not set")
-
-            # Import lazily so the server can run without these deps unless enabled.
-            import torch  # type: ignore
-            from diffusers import AutoPipelineForText2Image  # type: ignore
-
-            dtype = torch.float16
-            try:
-                pipe = AutoPipelineForText2Image.from_pretrained(
-                    model_id,
-                    torch_dtype=dtype,
-                    use_safetensors=True,
-                )
-            except Exception:
-                # Some models require variant or other settings; fall back.
-                pipe = AutoPipelineForText2Image.from_pretrained(model_id)
-
-            device = str(self._dnd_local_device or "cuda")
-            try:
-                pipe = pipe.to(device)
-            except Exception:
-                # If CUDA isn't available, fall back to CPU.
-                pipe = pipe.to("cpu")
-
-            # Enable attention slicing to reduce VRAM spikes.
-            try:
-                pipe.enable_attention_slicing()
-            except Exception:
-                pass
-            try:
-                pipe.enable_vae_slicing()
-            except Exception:
-                pass
-
-            self._dnd_local_pipe = pipe
-            return pipe
-
-    def _local_generate_image_bytes(self, prompt: str, iw: int, ih: int, seed: int, timeout_s: float) -> tuple[bytes, str]:
-        """Generate an image locally using a pre-trained Diffusers model.
-
-        Returns (bytes, ext). No disk writes.
-        """
-        started = time.time()
-        prompt = str(prompt or "").strip() or "fantasy scene"
-        iw = int(max(512, iw))
-        ih = int(max(512, ih))
-        # Diffusion models generally want multiples of 8.
-        iw = int(iw // 8 * 8)
-        ih = int(ih // 8 * 8)
-
-        pipe = self._get_local_diffusers_pipe()
-
-        import torch  # type: ignore
-        from PIL import Image  # type: ignore
-
-        device = getattr(pipe, "device", None)
-        gen_device = "cpu"
-        try:
-            if device is not None and hasattr(device, "type"):
-                gen_device = device.type
-        except Exception:
-            gen_device = "cpu"
-
-        generator = torch.Generator(device=gen_device).manual_seed(int(seed) & 0x7FFFFFFF)
-        steps = max(8, int(self._dnd_local_steps))
-        guidance = float(self._dnd_local_guidance)
-
-        # Keep an eye on timeout; we can't hard-cancel generation, but we can at least avoid hanging forever.
-        if float(time.time() - started) > float(timeout_s):
-            raise TimeoutError("Local generation timed out before start")
-
-        out = pipe(
-            prompt=prompt,
-            width=iw,
-            height=ih,
-            num_inference_steps=steps,
-            guidance_scale=guidance,
-            generator=generator,
-        )
-
-        images = getattr(out, "images", None)
-        if not images:
-            raise RuntimeError("Local model returned no images")
-        img = images[0]
-        if not isinstance(img, Image.Image):
-            raise RuntimeError("Local model output was not a PIL image")
-
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=90, optimize=True)
-        return buf.getvalue(), "jpg"
-
-    def _start_dnd_bg_fetch_if_needed(self, desired_id: tuple, prompt: str, seed: int, aspect_w: int, aspect_h: int):
-        """Start background generation if not already in-flight.
-
-        Tries multiple endpoints and models in parallel, first success wins.
-        Also tries high resolution first, then falls back to smaller sizes.
-        """
-        with self._dnd_bg_lock:
-            if self._dnd_bg_inflight_key == desired_id:
-                return
-            self._dnd_bg_inflight_key = desired_id
-
-        prompt_short = (prompt or "")[:120]
-        self._dnd_bg_maybe_log(
-            "fetching",
-            desired_id,
-            f"[DND BG] Generating (multi-endpoint) seed={seed} prompt='{prompt_short}'",
-        )
-
-        # Provider list: keyless public endpoints. Each entry is a dict with a callable runner.
-        providers: list[dict] = [
-            {
-                "name": "hf-flux-schnell",
-                "kind": "gradio-call",
-                "base": "https://black-forest-labs-flux-1-schnell.hf.space",
-                "api": "infer",
-                "max_long": 1024,
-            },
-            {
-                "name": "hf-flux-dev",
-                "kind": "gradio-call",
-                "base": "https://black-forest-labs-flux-1-dev.hf.space",
-                "api": "infer",
-                "max_long": 1024,
-            },
-            # Pollinations as an additional option (may be down/blocked).
-            {
-                "name": "pollinations-image",
-                "kind": "pollinations",
-                "base": "https://image.pollinations.ai",
-                "model": "flux",
-                "max_long": 2048,
-            },
-            {
-                "name": "pollinations-gen",
-                "kind": "pollinations",
-                "base": "https://gen.pollinations.ai/image",
-                "model": "flux",
-                "max_long": 2048,
-            },
-        ]
-
-        # Only include local generation if explicitly enabled.
-        try:
-            if self._local_model_ready():
-                providers.insert(
-                    0,
-                    {
-                        "name": "local-diffusers",
-                        "kind": "local-diffusers",
-                        "max_long": int(self._dnd_local_max_long or 1536),
-                    },
-                )
-        except Exception:
-            pass
-
-        # Compute target resolutions: best first, then fall back.
-        # Use the framebuffer aspect but cap the long side to keep latency reasonable.
-        def sized(long_side: int) -> tuple[int, int]:
-            long_side = int(max(512, long_side))
-            if aspect_w >= aspect_h:
-                iw = long_side
-                ih = max(512, int(long_side * float(aspect_h) / float(max(1, aspect_w))))
-            else:
-                ih = long_side
-                iw = max(512, int(long_side * float(aspect_w) / float(max(1, aspect_h))))
-            # Keep dimensions even for some decoders.
-            iw = int(iw // 2 * 2)
-            ih = int(ih // 2 * 2)
-            return iw, ih
-
-        # "Best" here means close to screen size, but capped.
-        best_long = int(min(2048, max(aspect_w, aspect_h)))
-        size_plan = [
-            sized(best_long),
-            sized(min(1536, best_long)),
-            sized(min(1024, best_long)),
-        ]
-
-        def worker():
-            try:
-                last_exc: Optional[Exception] = None
-                winner = threading.Event()
-                winner_lock = threading.Lock()
-
-                def attempt(url: str, iw: int, ih: int, model: str, timeout_s: float):
-                    nonlocal last_exc
-                    if winner.is_set():
-                        return
-                    try:
-                        data, ext = self._fetch_image_bytes(url, timeout_s=timeout_s)
-                        if winner.is_set():
-                            return
-                        with winner_lock:
-                            if winner.is_set():
-                                return
-                            # Ensure we're still targeting the same prompt.
-                            with self._dnd_bg_lock:
-                                if self._dnd_bg_desired_key != desired_id:
-                                    return
-                                self._dnd_bg_pending = (desired_id, data, ext, int(iw), int(ih))
-                                if self._dnd_bg_inflight_key == desired_id:
-                                    self._dnd_bg_inflight_key = None
-                            winner.set()
-                            self._dnd_bg_maybe_log(
-                                "downloaded",
-                                desired_id,
-                                f"[DND BG] Downloaded {len(data)} bytes ({ext}) at {iw}x{ih} via {model}.",
-                            )
-                    except Exception as e:
-                        last_exc = e
-
-                def attempt_provider(provider: dict, iw: int, ih: int, timeout_s: float):
-                    nonlocal last_exc
-                    if winner.is_set():
-                        return
-                    try:
-                        kind = str(provider.get("kind") or "")
-                        name = str(provider.get("name") or "provider")
-                        base = str(provider.get("base") or "").rstrip("/")
-
-                        if kind == "pollinations":
-                            model = str(provider.get("model") or "flux")
-                            url = self._pollinations_image_url(base, prompt, iw, ih, seed, model=model)
-                            attempt(url, iw, ih, f"{name}:{model}", timeout_s)
-                            return
-
-                        if kind == "local-diffusers":
-                            if not self._local_model_ready():
-                                raise RuntimeError("Local model disabled or DND_BG_LOCAL_MODEL not set")
-                            img_bytes, ext = self._local_generate_image_bytes(prompt, iw, ih, seed, timeout_s=timeout_s)
-
-                            if winner.is_set():
-                                return
-                            with winner_lock:
-                                if winner.is_set():
-                                    return
-                                with self._dnd_bg_lock:
-                                    if self._dnd_bg_desired_key != desired_id:
-                                        return
-                                    self._dnd_bg_pending = (desired_id, img_bytes, ext, int(iw), int(ih))
-                                    if self._dnd_bg_inflight_key == desired_id:
-                                        self._dnd_bg_inflight_key = None
-                                winner.set()
-                                self._dnd_bg_maybe_log(
-                                    "downloaded",
-                                    desired_id,
-                                    f"[DND BG] Generated {len(img_bytes)} bytes ({ext}) at {iw}x{ih} via local model.",
-                                )
-                            return
-
-                        if kind == "gradio-call":
-                            api_name = str(provider.get("api") or "infer")
-                            # Data format for these FLUX spaces:
-                            # [prompt, seed, randomize_seed, width, height, steps, (optionally guidance)]
-                            # We supply seed and set randomize_seed=False.
-                            steps = 28 if max(iw, ih) >= 1024 else 24
-                            # FLUX schnell expects: [prompt, seed, randomize, width, height, steps]
-                            # FLUX dev often expects: [prompt, seed, randomize, width, height, guidance, steps]
-                            if "flux-dev" in name:
-                                data = [prompt, int(seed) & 0x7FFFFFFF, False, int(iw), int(ih), 3.5, int(steps)]
-                            else:
-                                data = [prompt, int(seed) & 0x7FFFFFFF, False, int(iw), int(ih), int(steps)]
-                            res = self._gradio_call_infer_image(base, api_name, data, timeout_s=timeout_s)
-                            if res is None:
-                                raise RuntimeError(f"{name} returned no image")
-                            img_bytes, ext = res
-
-                            if winner.is_set():
-                                return
-                            with winner_lock:
-                                if winner.is_set():
-                                    return
-                                with self._dnd_bg_lock:
-                                    if self._dnd_bg_desired_key != desired_id:
-                                        return
-                                    self._dnd_bg_pending = (desired_id, img_bytes, ext, int(iw), int(ih))
-                                    if self._dnd_bg_inflight_key == desired_id:
-                                        self._dnd_bg_inflight_key = None
-                                winner.set()
-                                self._dnd_bg_maybe_log(
-                                    "downloaded",
-                                    desired_id,
-                                    f"[DND BG] Downloaded {len(img_bytes)} bytes ({ext}) at {iw}x{ih} via {name}.",
-                                )
-                            return
-
-                        raise RuntimeError(f"Unknown provider kind: {kind}")
-                    except Exception as e:
-                        last_exc = e
-
-                # Try size tiers; for each size, race endpoints/models.
-                for (iw, ih) in size_plan:
-                    if winner.is_set():
-                        break
-
-                    timeout_s = 30.0 if max(iw, ih) >= 1536 else 22.0
-
-                    threads: list[threading.Thread] = []
-                    for provider in providers:
-                        # Clamp size per provider
-                        try:
-                            max_long = int(provider.get("max_long") or 1024)
-                        except Exception:
-                            max_long = 1024
-                        ciw, cih = int(iw), int(ih)
-                        if max(ciw, cih) > max_long:
-                            scale = float(max_long) / float(max(ciw, cih))
-                            ciw = int(max(512, int(ciw * scale)) // 2 * 2)
-                            cih = int(max(512, int(cih * scale)) // 2 * 2)
-
-                        t = threading.Thread(target=attempt_provider, args=(provider, ciw, cih, timeout_s), daemon=True)
-                        threads.append(t)
-                        t.start()
-
-                    # Wait for a winner or all attempts for this tier to complete.
-                    # Give it a bit of slack beyond per-request timeout.
-                    tier_deadline = time.time() + timeout_s + 8.0
-                    while time.time() < tier_deadline:
-                        if winner.is_set():
-                            break
-                        alive = any(t.is_alive() for t in threads)
-                        if not alive:
-                            break
-                        time.sleep(0.1)
-
-                    # If no winner in this tier, move on (threads are daemonic; they may finish later).
-                    if winner.is_set():
-                        break
-
-                if winner.is_set():
-                    return
-
-                # All failed.
-                raise last_exc or RuntimeError("All background endpoints failed")
-            except Exception as e:
-                with self._dnd_bg_lock:
-                    if self._dnd_bg_inflight_key == desired_id:
-                        self._dnd_bg_inflight_key = None
-                    self._dnd_bg_last_error = str(e)
-                    self._dnd_bg_last_error_time = float(time.time())
-                self._dnd_bg_maybe_log(
-                    "error",
-                    desired_id,
-                    f"[DND BG] ERROR fetching background (all endpoints): {e}",
-                )
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _pump_dnd_bg_pending(self, draw_w: int, draw_h: int):
-        pending = None
-        with self._dnd_bg_lock:
-            if self._dnd_bg_pending is not None:
-                pending = self._dnd_bg_pending
-                self._dnd_bg_pending = None
-
-        if pending is None:
-            return
-
-        desired_id, data, ext, iw, ih = pending
-        try:
-            # Decode using pyglet without touching disk.
-            buf = io.BytesIO(data)
-            img = pyglet.image.load(f"bg.{ext}", file=buf)
-            self._dnd_bg_sprite = pyglet.sprite.Sprite(img, x=0, y=0)
-
-            # Smooth scaling (helps when a 1024px image is scaled to 1080p).
-            try:
-                self._set_sprite_smoothing(self._dnd_bg_sprite)
-            except Exception:
-                pass
-
-            if iw > 0 and ih > 0:
-                self._dnd_bg_img_size = (iw, ih)
-
-            # Center and preserve aspect ratio.
-            try:
-                self._layout_dnd_bg_sprite(draw_w, draw_h)
-            except Exception:
-                pass
-
-            # Cache identity for skip logic.
-            try:
-                self._dnd_bg_prompt_cache = str(desired_id[0])
-            except Exception:
-                self._dnd_bg_prompt_cache = ""
-            self._dnd_bg_aspect_key = (int(draw_w // 64), int(draw_h // 64))
-
-            self._dnd_bg_maybe_log(
-                "ready",
-                desired_id,
-                f"[DND BG] Applied background sprite ({iw}x{ih}).",
-            )
-        except Exception as e:
-            with self._dnd_bg_lock:
-                self._dnd_bg_last_error = str(e)
-                self._dnd_bg_last_error_time = float(time.time())
-
-            self._dnd_bg_maybe_log(
-                "error",
-                desired_id,
-                f"[DND BG] ERROR decoding/applying background: {e}",
-            )
-
     def _ensure_dnd_background_sprite(self, draw_w: int, draw_h: int):
-        """Ensure a cached sprite exists for the current prompt and aspect ratio."""
+        """Ensure a cached sprite exists for the selected local background file."""
         bg = str(getattr(self, "dnd_background", "") or "").strip()
-
-        # Apply completed downloads (sprite creation must happen on main thread).
-        try:
-            self._pump_dnd_bg_pending(draw_w, draw_h)
-        except Exception:
-            pass
 
         if not bg:
             return
@@ -1347,51 +250,18 @@ class PygletGameServer:
                 self._dnd_bg_img_size = (int(getattr(img, "width", 0) or 0), int(getattr(img, "height", 0) or 0))
                 self._dnd_bg_prompt_cache = want
                 self._dnd_bg_aspect_key = aspect_key
-                # Cancel any pending/inflight external work for this frame.
-                with self._dnd_bg_lock:
-                    self._dnd_bg_pending = None
-                    self._dnd_bg_inflight_key = None
-                    self._dnd_bg_desired_key = None
                 self._layout_dnd_bg_sprite(draw_w, draw_h)
                 return
             except Exception as e:
-                with self._dnd_bg_lock:
-                    self._dnd_bg_last_error = str(e)
-                    self._dnd_bg_last_error_time = float(time.time())
-                self._dnd_bg_maybe_log("error", None, f"[DND BG] ERROR loading local background '{bg}': {e}")
+                self._dnd_bg_last_error = str(e)
+                self._dnd_bg_last_error_time = float(time.time())
+                try:
+                    print(f"[DND BG] ERROR loading local background '{bg}': {e}")
+                except Exception:
+                    pass
                 return
 
-        # Regenerate only when prompt changes or the aspect ratio bucket changes.
-        aspect_key = (int(draw_w // 64), int(draw_h // 64))
-        if bg == self._dnd_bg_prompt_cache and aspect_key == self._dnd_bg_aspect_key and self._dnd_bg_sprite is not None:
-            # Update scale in case resolution changed.
-            try:
-                self._set_sprite_smoothing(self._dnd_bg_sprite)
-                self._layout_dnd_bg_sprite(draw_w, draw_h)
-            except Exception:
-                pass
-            return
-
-        seed = self._dnd_prompt_seed(bg)
-        desired_id = (bg, aspect_key, int(seed), "pollinations")
-        with self._dnd_bg_lock:
-            self._dnd_bg_desired_key = desired_id
-
-        # Avoid hammering the service if it just errored (rate limits are common).
-        cooldown_s = 15.0
-        try:
-            last_err_age = float(time.time()) - float(self._dnd_bg_last_error_time or 0.0)
-        except Exception:
-            last_err_age = 1e9
-
-        if last_err_age < cooldown_s:
-            return
-
-        try:
-            self._start_dnd_bg_fetch_if_needed(desired_id, bg, int(seed), int(draw_w), int(draw_h))
-        except Exception:
-            return
-
+        # Unknown background value (not in local file list). Ignore.
         return
 
     def _finish_init(self):
@@ -1516,13 +386,32 @@ class PygletGameServer:
         self.dnd_creation = DnDCharacterCreation(self.window.width, self.window.height, self.renderer)
         self.monopoly_game = MonopolyGame(self.window.width, self.window.height, self.renderer)
         self.blackjack_game = BlackjackGame(self.window.width, self.window.height, self.renderer)
+        self.uno_game = UnoGame(self.window.width, self.window.height, self.renderer)
+        self.exploding_kittens_game = ExplodingKittensGame(self.window.width, self.window.height, self.renderer)
+
+        # Provide seat->name to games that can render player names on the board.
+        try:
+            if hasattr(self.uno_game, "set_name_provider"):
+                self.uno_game.set_name_provider(self._player_display_name)
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self.exploding_kittens_game, "set_name_provider"):
+                self.exploding_kittens_game.set_name_provider(self._player_display_name)
+        except Exception:
+            pass
 
         # Player selection is handled via Web UI (button-driven), so hide in-window selection UIs.
         setattr(self.monopoly_game, "web_ui_only_player_select", True)
         setattr(self.blackjack_game, "web_ui_only_player_select", True)
+        setattr(self.uno_game, "web_ui_only_player_select", True)
+        setattr(self.exploding_kittens_game, "web_ui_only_player_select", True)
         # Board-only rendering in the Pyglet window (no panels). Web UI shows actions/info.
         setattr(self.monopoly_game, "board_only_mode", True)
         setattr(self.blackjack_game, "board_only_mode", True)
+        setattr(self.uno_game, "board_only_mode", True)
+        setattr(self.exploding_kittens_game, "board_only_mode", True)
         if hasattr(self.dnd_creation, "game"):
             setattr(self.dnd_creation.game, "web_ui_only_player_select", True)
             setattr(self.dnd_creation.game, "web_ui_only_char_creation", True)
@@ -1834,6 +723,14 @@ class PygletGameServer:
             self.state = "blackjack"
             self.blackjack_game.state = "player_select"
             self.blackjack_game.selection_ui.reset()
+        elif key == "uno":
+            self.state = "uno"
+            self.uno_game.state = "player_select"
+            self.uno_game.selection_ui.reset()
+        elif key == "exploding_kittens":
+            self.state = "exploding_kittens"
+            self.exploding_kittens_game.state = "player_select"
+            self.exploding_kittens_game.selection_ui.reset()
         elif key in ("d&d", "dnd"):
             self.state = "dnd_creation"
             self.dnd_dm_seat = None
@@ -1892,6 +789,10 @@ class PygletGameServer:
             return self.monopoly_game
         if self.state == "blackjack":
             return self.blackjack_game
+        if self.state == "uno":
+            return self.uno_game
+        if self.state == "exploding_kittens":
+            return self.exploding_kittens_game
         if self.state == "dnd_creation":
             return getattr(self.dnd_creation, "game", None) or self.dnd_creation
         return None
@@ -1918,6 +819,10 @@ class PygletGameServer:
             start_enabled = sum(1 for s in slots if s["selected"]) >= 2
         elif self.state == "blackjack":
             start_enabled = sum(1 for s in slots if s["selected"]) >= 1
+        elif self.state == "uno":
+            start_enabled = sum(1 for s in slots if s["selected"]) >= 2
+        elif self.state == "exploding_kittens":
+            start_enabled = sum(1 for s in slots if s["selected"]) >= 2
         elif self.state == "dnd_creation":
             sel_count = sum(1 for s in slots if s["selected"])
             start_enabled = sel_count >= 2 and isinstance(dm_seat, int) and any(
@@ -2474,6 +1379,109 @@ class PygletGameServer:
             except Exception:
                 pass
 
+        if self.state == "uno":
+            try:
+                ug = self.uno_game
+                snap["uno"] = {
+                    "state": str(getattr(ug, "state", "")),
+                    "active_players": list(getattr(ug, "active_players", []) or []),
+                    "current_turn_seat": getattr(ug, "current_turn_seat", None),
+                    "direction": int(getattr(ug, "direction", 1) or 1),
+                    "current_color": getattr(ug, "current_color", None),
+                    "top_card": None,
+                    "hand_counts": {},
+                    "your_hand": [],
+                    "winner": getattr(ug, "winner", None),
+                    "awaiting_color": False,
+                    "next_round_ready": {},
+                    "next_round_ready_count": 0,
+                    "next_round_total": 0,
+                }
+
+                try:
+                    st = ug.get_public_state(player_idx) if hasattr(ug, "get_public_state") else None
+                except Exception:
+                    st = None
+                if isinstance(st, dict):
+                    for k in (
+                        "state",
+                        "active_players",
+                        "current_turn_seat",
+                        "direction",
+                        "current_color",
+                        "top_card",
+                        "hand_counts",
+                        "your_hand",
+                        "winner",
+                        "awaiting_color",
+                        "next_round_ready",
+                        "next_round_ready_count",
+                        "next_round_total",
+                    ):
+                        if k in st:
+                            snap["uno"][k] = st.get(k)
+
+                # Ensure consistent types
+                try:
+                    if isinstance(snap["uno"].get("hand_counts"), dict):
+                        snap["uno"]["hand_counts"] = {str(k): int(v or 0) for k, v in snap["uno"]["hand_counts"].items()}
+                except Exception:
+                    snap["uno"]["hand_counts"] = {}
+            except Exception:
+                pass
+
+        if self.state == "exploding_kittens":
+            try:
+                ekg = self.exploding_kittens_game
+                snap["exploding_kittens"] = {
+                    "state": str(getattr(ekg, "state", "")),
+                    "active_players": list(getattr(ekg, "active_players", []) or []),
+                    "eliminated_players": list(getattr(ekg, "eliminated_players", []) or []),
+                    "current_turn_seat": getattr(ekg, "current_turn_seat", None),
+                    "pending_draws": int(getattr(ekg, "pending_draws", 1) or 1),
+                    "deck_count": int(len(getattr(ekg, "draw_pile", []) or [])),
+                    "discard_top": None,
+                    "hand_counts": {},
+                    "your_hand": [],
+                    "awaiting_favor_target": False,
+                    "nope_active": False,
+                    "nope_count": 0,
+                    "winner": getattr(ekg, "winner", None),
+                }
+
+                try:
+                    st = ekg.get_public_state(player_idx) if hasattr(ekg, "get_public_state") else None
+                except Exception:
+                    st = None
+                if isinstance(st, dict):
+                    for k in (
+                        "state",
+                        "active_players",
+                        "eliminated_players",
+                        "current_turn_seat",
+                        "pending_draws",
+                        "deck_count",
+                        "discard_top",
+                        "hand_counts",
+                        "your_hand",
+                        "awaiting_favor_target",
+                        "nope_active",
+                        "nope_count",
+                        "winner",
+                    ):
+                        if k in st:
+                            snap["exploding_kittens"][k] = st.get(k)
+
+                try:
+                    if isinstance(snap["exploding_kittens"].get("hand_counts"), dict):
+                        snap["exploding_kittens"]["hand_counts"] = {
+                            str(k): int(v or 0) for k, v in snap["exploding_kittens"]["hand_counts"].items()
+                        }
+                except Exception:
+                    snap["exploding_kittens"]["hand_counts"] = {}
+            except Exception:
+                pass
+
         if self.state == "dnd_creation":
             try:
                 dg = getattr(self.dnd_creation, "game", None)
@@ -2712,7 +1720,7 @@ class PygletGameServer:
             if not self._lobby_all_ready():
                 return
             key = data.get("key")
-            if key not in ("monopoly", "blackjack", "d&d", "dnd"):
+            if key not in ("monopoly", "blackjack", "uno", "exploding_kittens", "d&d", "dnd"):
                 return
             # Only ready+seated clients may vote.
             seat = self.ui_client_player.get(client_id, -1)
@@ -2944,6 +1952,10 @@ class PygletGameServer:
             if self.state == "monopoly" and len(selected_indices) >= 2:
                 game.start_game(selected_indices)
             elif self.state == "blackjack" and len(selected_indices) >= 1:
+                game.start_game(selected_indices)
+            elif self.state == "uno" and len(selected_indices) >= 2:
+                game.start_game(selected_indices)
+            elif self.state == "exploding_kittens" and len(selected_indices) >= 2:
                 game.start_game(selected_indices)
             elif self.state == "dnd_creation":
                 dm = self.dnd_dm_seat
@@ -3178,27 +2190,6 @@ class PygletGameServer:
                     pass
                 return
 
-            if msg_type == "dnd_dm_set_background":
-                if seat is None or not (isinstance(self.dnd_dm_seat, int) and seat == self.dnd_dm_seat):
-                    return
-                bg = str(data.get("background") or "").strip()
-                if not bg:
-                    return
-                self.dnd_background = bg
-                try:
-                    self._dnd_bg_prompt_cache = ""
-                    self._dnd_bg_sprite = None
-                    self._dnd_bg_img_size = (0, 0)
-                    self._dnd_bg_aspect_key = (0, 0)
-                    with self._dnd_bg_lock:
-                        self._dnd_bg_pending = None
-                        self._dnd_bg_inflight_key = None
-                        self._dnd_bg_desired_key = None
-                except Exception:
-                    pass
-                self._log_history(f"DM set background: {bg}")
-                return
-
             if msg_type == "dnd_dm_set_background_file":
                 if seat is None or not (isinstance(self.dnd_dm_seat, int) and seat == self.dnd_dm_seat):
                     return
@@ -3217,64 +2208,9 @@ class PygletGameServer:
                     self._dnd_bg_sprite = None
                     self._dnd_bg_img_size = (0, 0)
                     self._dnd_bg_aspect_key = (0, 0)
-                    with self._dnd_bg_lock:
-                        self._dnd_bg_pending = None
-                        self._dnd_bg_inflight_key = None
-                        self._dnd_bg_desired_key = None
                 except Exception:
                     pass
                 self._log_history(f"DM set local background: {bg_file}")
-                return
-
-            if msg_type == "dnd_dm_generate_background":
-                if seat is None or not (isinstance(self.dnd_dm_seat, int) and seat == self.dnd_dm_seat):
-                    return
-                prompt = str(data.get("prompt") or "").strip()
-                flavors = [
-                    "misty",
-                    "storm-lit",
-                    "moonlit",
-                    "ancient",
-                    "crumbling",
-                    "enchanted",
-                    "shadowy",
-                    "bloodstained",
-                    "quiet",
-                    "windswept",
-                ]
-                places = [
-                    "tavern",
-                    "forest",
-                    "dungeon corridor",
-                    "ruined temple",
-                    "cavern",
-                    "city alley",
-                    "crypt",
-                    "mountain pass",
-                    "wizard tower",
-                ]
-                try:
-                    flavor = random.choice(flavors)
-                    place = random.choice(places)
-                except Exception:
-                    flavor = "mysterious"
-                    place = "scene"
-                bg = f"{flavor} {place}"
-                if prompt:
-                    bg = f"{prompt} · {bg}"
-                self.dnd_background = bg
-                try:
-                    self._dnd_bg_prompt_cache = ""
-                    self._dnd_bg_sprite = None
-                    self._dnd_bg_img_size = (0, 0)
-                    self._dnd_bg_aspect_key = (0, 0)
-                    with self._dnd_bg_lock:
-                        self._dnd_bg_pending = None
-                        self._dnd_bg_inflight_key = None
-                        self._dnd_bg_desired_key = None
-                except Exception:
-                    pass
-                self._log_history(f"DM generated background: {bg}")
                 return
 
             if msg_type == "dnd_dm_give_item":
@@ -3542,6 +2478,12 @@ class PygletGameServer:
                     game._handle_click(pidx, btn_id)
             elif self.state == "blackjack":
                 game._handle_popup_click(pidx, btn_id)
+            elif self.state == "uno":
+                if hasattr(game, "handle_click"):
+                    game.handle_click(pidx, btn_id)
+            elif self.state == "exploding_kittens":
+                if hasattr(game, "handle_click"):
+                    game.handle_click(pidx, btn_id)
             return
 
     async def handle_ui_client(self, websocket):
@@ -3577,15 +2519,21 @@ class PygletGameServer:
     
     def _create_game_buttons(self):
         """Create game selection buttons"""
-        games = ["Monopoly", "Blackjack", "D&D"]
+        games = [
+            ("Monopoly", "monopoly"),
+            ("Blackjack", "blackjack"),
+            ("Uno", "uno"),
+            ("Exploding Kittens", "exploding_kittens"),
+            ("D&D", "d&d"),
+        ]
         buttons = []
-        for i, game in enumerate(games):
+        for i, (label, key) in enumerate(games):
             btn_rect = (
                 WINDOW_SIZE[0] // 2 - 150,
                 WINDOW_SIZE[1] // 2 - 180 + i * 120,
                 300, 90
             )
-            buttons.append({"text": game, "rect": btn_rect, "key": game.lower()})
+            buttons.append({"text": label, "rect": btn_rect, "key": key})
         return buttons
     
     def on_draw(self):
@@ -3631,7 +2579,13 @@ class PygletGameServer:
 
         # Keep active games in sync with the draw size.
         # Many layouts use game.width/game.height; update them dynamically.
-        for g in (getattr(self, "monopoly_game", None), getattr(self, "blackjack_game", None), getattr(self, "dnd_creation", None)):
+        for g in (
+            getattr(self, "monopoly_game", None),
+            getattr(self, "blackjack_game", None),
+            getattr(self, "uno_game", None),
+            getattr(self, "exploding_kittens_game", None),
+            getattr(self, "dnd_creation", None),
+        ):
             if g is None:
                 continue
             try:
@@ -3651,6 +2605,10 @@ class PygletGameServer:
             self.monopoly_game.draw()
         elif self.state == "blackjack":
             self.blackjack_game.draw()
+        elif self.state == "uno":
+            self.uno_game.draw()
+        elif self.state == "exploding_kittens":
+            self.exploding_kittens_game.draw()
         elif self.state == "dnd_creation":
             # Web UI drives D&D fully; keep the server window clean/fullscreen,
             # but reflect the chosen background + encounter.
@@ -3964,6 +2922,16 @@ class PygletGameServer:
             except Exception:
                 pass
             try:
+                self.uno_game.state = "player_select"
+                self.uno_game.selection_ui.reset()
+            except Exception:
+                pass
+            try:
+                self.exploding_kittens_game.state = "player_select"
+                self.exploding_kittens_game.selection_ui.reset()
+            except Exception:
+                pass
+            try:
                 sess = getattr(self.dnd_creation, "game", None)
                 if sess is not None:
                     sess.state = "player_select"
@@ -4008,6 +2976,10 @@ class PygletGameServer:
             self.monopoly_game.update(dt)
         elif self.state == "blackjack":
             self.blackjack_game.update(dt)
+        elif self.state == "uno":
+            self.uno_game.update(dt)
+        elif self.state == "exploding_kittens":
+            self.exploding_kittens_game.update(dt)
         elif self.state == "dnd_creation":
             self.dnd_creation.update(dt)
             try:

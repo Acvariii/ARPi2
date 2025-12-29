@@ -174,6 +174,38 @@ export type Snapshot = {
     // property index -> owner player index (stringified keys to match JSON)
     ownership?: Record<string, number>;
   };
+  uno?: {
+    state?: string;
+    active_players?: number[];
+    current_turn_seat?: number | null;
+    direction?: number;
+    current_color?: string | null;
+    top_card?: string | null;
+    // keys are stringified in JSON
+    hand_counts?: Record<string, number>;
+    your_hand?: Array<{ idx: number; text: string; playable: boolean }>;
+    winner?: number | null;
+    awaiting_color?: boolean;
+    next_round_ready?: Record<string, boolean>;
+    next_round_ready_count?: number;
+    next_round_total?: number;
+  };
+  exploding_kittens?: {
+    state?: string;
+    active_players?: number[];
+    eliminated_players?: number[];
+    current_turn_seat?: number | null;
+    pending_draws?: number;
+    deck_count?: number;
+    discard_top?: string | null;
+    // keys are stringified in JSON
+    hand_counts?: Record<string, number>;
+    your_hand?: Array<{ idx: number; text: string; playable: boolean }>;
+    awaiting_favor_target?: boolean;
+    nope_active?: boolean;
+    nope_count?: number;
+    winner?: number | null;
+  };
   cursors?: CursorSnapshot[];
 };
 
