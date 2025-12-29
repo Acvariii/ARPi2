@@ -32,6 +32,7 @@ from games.monopoly import MonopolyGame
 from games.blackjack import BlackjackGame
 from games.uno import UnoGame
 from games.exploding_kittens import ExplodingKittensGame
+from games.texas_holdem import TexasHoldemGame
 from games.dnd import DnDCharacterCreation
 
 from server.dnd_dice import CenterDiceRollDisplay
@@ -252,6 +253,8 @@ class PygletGameServer:
             return "UnoBG.mp3"
         if st == "monopoly":
             return "MonopolyBG.mp3"
+        if st == "texas_holdem":
+            return "TexasHoldemBG.mp3"
         return None
 
     def _eligible_music_vote_client_ids(self) -> List[str]:
@@ -626,6 +629,7 @@ class PygletGameServer:
         self.blackjack_game = BlackjackGame(self.window.width, self.window.height, self.renderer)
         self.uno_game = UnoGame(self.window.width, self.window.height, self.renderer)
         self.exploding_kittens_game = ExplodingKittensGame(self.window.width, self.window.height, self.renderer)
+        self.texas_holdem_game = TexasHoldemGame(self.window.width, self.window.height, self.renderer)
 
         # Provide seat->name to games that can render player names on the board.
         try:
@@ -640,16 +644,24 @@ class PygletGameServer:
         except Exception:
             pass
 
+        try:
+            if hasattr(self.texas_holdem_game, "set_name_provider"):
+                self.texas_holdem_game.set_name_provider(self._player_display_name)
+        except Exception:
+            pass
+
         # Player selection is handled via Web UI (button-driven), so hide in-window selection UIs.
         setattr(self.monopoly_game, "web_ui_only_player_select", True)
         setattr(self.blackjack_game, "web_ui_only_player_select", True)
         setattr(self.uno_game, "web_ui_only_player_select", True)
         setattr(self.exploding_kittens_game, "web_ui_only_player_select", True)
+        setattr(self.texas_holdem_game, "web_ui_only_player_select", True)
         # Board-only rendering in the Pyglet window (no panels). Web UI shows actions/info.
         setattr(self.monopoly_game, "board_only_mode", True)
         setattr(self.blackjack_game, "board_only_mode", True)
         setattr(self.uno_game, "board_only_mode", True)
         setattr(self.exploding_kittens_game, "board_only_mode", True)
+        setattr(self.texas_holdem_game, "board_only_mode", True)
         if hasattr(self.dnd_creation, "game"):
             setattr(self.dnd_creation.game, "web_ui_only_player_select", True)
             setattr(self.dnd_creation.game, "web_ui_only_char_creation", True)
@@ -975,6 +987,10 @@ class PygletGameServer:
             self.state = "exploding_kittens"
             self.exploding_kittens_game.state = "player_select"
             self.exploding_kittens_game.selection_ui.reset()
+        elif key == "texas_holdem":
+            self.state = "texas_holdem"
+            self.texas_holdem_game.state = "player_select"
+            self.texas_holdem_game.selection_ui.reset()
         elif key in ("d&d", "dnd"):
             self.state = "dnd_creation"
             self.dnd_dm_seat = None
@@ -1037,6 +1053,8 @@ class PygletGameServer:
             return self.uno_game
         if self.state == "exploding_kittens":
             return self.exploding_kittens_game
+        if self.state == "texas_holdem":
+            return self.texas_holdem_game
         if self.state == "dnd_creation":
             return getattr(self.dnd_creation, "game", None) or self.dnd_creation
         return None
@@ -1066,6 +1084,8 @@ class PygletGameServer:
         elif self.state == "uno":
             start_enabled = sum(1 for s in slots if s["selected"]) >= 2
         elif self.state == "exploding_kittens":
+            start_enabled = sum(1 for s in slots if s["selected"]) >= 2
+        elif self.state == "texas_holdem":
             start_enabled = sum(1 for s in slots if s["selected"]) >= 2
         elif self.state == "dnd_creation":
             sel_count = sum(1 for s in slots if s["selected"])
@@ -1753,6 +1773,15 @@ class PygletGameServer:
             except Exception:
                 pass
 
+        if self.state == "texas_holdem":
+            try:
+                tg = self.texas_holdem_game
+                st = tg.get_public_state(player_idx) if hasattr(tg, "get_public_state") else None
+                if isinstance(st, dict):
+                    snap["texas_holdem"] = st
+            except Exception:
+                pass
+
         if self.state == "dnd_creation":
             try:
                 dg = getattr(self.dnd_creation, "game", None)
@@ -2003,7 +2032,7 @@ class PygletGameServer:
             if not self._lobby_all_ready():
                 return
             key = data.get("key")
-            if key not in ("monopoly", "blackjack", "uno", "exploding_kittens", "d&d", "dnd"):
+            if key not in ("monopoly", "blackjack", "uno", "exploding_kittens", "texas_holdem", "d&d", "dnd"):
                 return
             # Only ready+seated clients may vote.
             seat = self.ui_client_player.get(client_id, -1)
@@ -2239,6 +2268,8 @@ class PygletGameServer:
             elif self.state == "uno" and len(selected_indices) >= 2:
                 game.start_game(selected_indices)
             elif self.state == "exploding_kittens" and len(selected_indices) >= 2:
+                game.start_game(selected_indices)
+            elif self.state == "texas_holdem" and len(selected_indices) >= 2:
                 game.start_game(selected_indices)
             elif self.state == "dnd_creation":
                 dm = self.dnd_dm_seat
@@ -2767,6 +2798,9 @@ class PygletGameServer:
             elif self.state == "exploding_kittens":
                 if hasattr(game, "handle_click"):
                     game.handle_click(pidx, btn_id)
+            elif self.state == "texas_holdem":
+                if hasattr(game, "handle_click"):
+                    game.handle_click(pidx, btn_id)
             return
 
     async def handle_ui_client(self, websocket):
@@ -2818,6 +2852,7 @@ class PygletGameServer:
             ("Blackjack", "blackjack"),
             ("Uno", "uno"),
             ("Exploding Kittens", "exploding_kittens"),
+            ("Texas Hold'em", "texas_holdem"),
             ("D&D", "d&d"),
         ]
         buttons = []
@@ -2878,6 +2913,7 @@ class PygletGameServer:
             getattr(self, "blackjack_game", None),
             getattr(self, "uno_game", None),
             getattr(self, "exploding_kittens_game", None),
+            getattr(self, "texas_holdem_game", None),
             getattr(self, "dnd_creation", None),
         ):
             if g is None:
@@ -2903,6 +2939,8 @@ class PygletGameServer:
             self.uno_game.draw()
         elif self.state == "exploding_kittens":
             self.exploding_kittens_game.draw()
+        elif self.state == "texas_holdem":
+            self.texas_holdem_game.draw()
         elif self.state == "dnd_creation":
             # Web UI drives D&D fully; keep the server window clean/fullscreen,
             # but reflect the chosen background + encounter.
@@ -3228,6 +3266,11 @@ class PygletGameServer:
             except Exception:
                 pass
             try:
+                self.texas_holdem_game.state = "player_select"
+                self.texas_holdem_game.selection_ui.reset()
+            except Exception:
+                pass
+            try:
                 sess = getattr(self.dnd_creation, "game", None)
                 if sess is not None:
                     sess.state = "player_select"
@@ -3276,6 +3319,8 @@ class PygletGameServer:
             self.uno_game.update(dt)
         elif self.state == "exploding_kittens":
             self.exploding_kittens_game.update(dt)
+        elif self.state == "texas_holdem":
+            self.texas_holdem_game.update(dt)
         elif self.state == "dnd_creation":
             self.dnd_creation.update(dt)
             try:
@@ -3360,7 +3405,7 @@ class PygletGameServer:
             ready = bool(entry.get("ready", False))
             connected = bool(entry.get("connected", True))
 
-            label = f"{seat + 1}. {name}"
+            label = f"{name}"
             tags = []
             tags.append("Ready" if ready else "Not ready")
             if not connected:
@@ -3369,17 +3414,17 @@ class PygletGameServer:
 
             y = start_y + i * row_h
             col = PLAYER_COLORS[seat % len(PLAYER_COLORS)]
-            # Color dot to the left of the centered text
-            dot_x = center_x - 240
+            # Color dot and centered label
+            dot_x = center_x - 190
             self.renderer.draw_circle(col, (dot_x, y), 8)
             self.renderer.draw_circle(Colors.WHITE, (dot_x, y), 8, width=2)
 
             self.renderer.draw_text(
                 label,
-                center_x - 220, y,
+                center_x, y,
                 font_name='Arial', font_size=18,
                 color=col,
-                anchor_x='left', anchor_y='center'
+                anchor_x='center', anchor_y='center'
             )
 
         # If no one is seated yet, show a centered hint.
@@ -3410,13 +3455,16 @@ class PygletGameServer:
         # Web UI is button-driven; if players are connected but not sending pointer data,
         # still show a small per-player dot inside the playable area so you can see who is connected.
         if self.ui_clients:
-            h_panel = int(WINDOW_SIZE[1] * 0.10)
-            v_panel = int(WINDOW_SIZE[0] * 0.12)
-            base_x = v_panel + 26
-            base_y = h_panel + 26
+            # Put these dots in the bottom-left corner so they don't clutter the top-left
+            # of every game's board view.
+            base_x = 26
+            base_y = int(WINDOW_SIZE[1] - 26)
             players = sorted(set(self.ui_client_player.values()))
             for i, pidx in enumerate(players):
-                pos = (base_x, base_y + i * 24)
+                pos_y = base_y - i * 24
+                if pos_y < 18:
+                    break
+                pos = (base_x, pos_y)
                 color = PLAYER_COLORS[pidx % len(PLAYER_COLORS)]
                 self.renderer.draw_circle_immediate(color, pos, 9)
                 self.renderer.draw_circle_immediate(Colors.WHITE, pos, 9, width=2)

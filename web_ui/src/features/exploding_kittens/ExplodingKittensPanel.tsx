@@ -31,64 +31,42 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
   const cardStyle = {
     width: 74,
     aspectRatio: '5 / 7',
-    borderRadius: 2,
+    borderRadius: 1.25,
     overflow: 'hidden',
     userSelect: 'none' as const,
   };
 
-  const faceFromText = (text: string): { bg: string; fg: string; center: string; corner: string; ovalBorder: string } => {
-    const t = String(text || '').trim().toUpperCase();
+  const ekCardFace = (text: string): { emoji: string; title: string; corner: string; accent: string; isBack?: boolean } => {
+    const t = String(text || '').trim();
+    const u = t.toUpperCase();
 
-    // Treat a few control tiles like a deck-back.
-    if (t === 'DRAW' || t === 'NOPE' || t.startsWith('FAVOR')) {
-      return {
-        bg: theme.palette.primary.main,
-        fg: theme.palette.common.white,
-        center: t,
-        corner: t === 'DRAW' ? 'D' : t === 'NOPE' ? 'N' : 'F',
-        ovalBorder: theme.palette.common.white,
-      };
+    // Control tiles (not actual hand cards)
+    if (u === 'DRAW') {
+      return { emoji: '🂠', title: 'Draw', corner: 'DRAW', accent: theme.palette.primary.main, isBack: true };
+    }
+    if (u === 'NOPE') {
+      return { emoji: '🚫', title: 'Nope', corner: 'NOPE', accent: theme.palette.grey[900] };
+    }
+    if (u.startsWith('FAVOR')) {
+      return { emoji: '🎁', title: t, corner: 'FAV', accent: theme.palette.primary.dark };
     }
 
     // EK card kinds: EK, DEF, ATK, SKIP, SHUF, FUT, FAV, NOPE
-    if (t === 'EK') {
-      return { bg: theme.palette.error.dark, fg: theme.palette.common.white, center: 'EK', corner: 'EK', ovalBorder: theme.palette.common.white };
-    }
-    if (t === 'DEF') {
-      return { bg: theme.palette.success.dark, fg: theme.palette.common.white, center: 'DEFUSE', corner: 'DEF', ovalBorder: theme.palette.common.white };
-    }
-    if (t === 'ATK') {
-      return { bg: theme.palette.warning.dark, fg: theme.palette.common.black, center: 'ATTACK', corner: 'ATK', ovalBorder: theme.palette.common.black };
-    }
-    if (t === 'SKIP') {
-      return { bg: theme.palette.info.dark, fg: theme.palette.common.white, center: 'SKIP', corner: 'SKIP', ovalBorder: theme.palette.common.white };
-    }
-    if (t === 'SHUF') {
-      return { bg: theme.palette.secondary.dark, fg: theme.palette.common.white, center: 'SHUFFLE', corner: 'SHUF', ovalBorder: theme.palette.common.white };
-    }
-    if (t === 'FUT') {
-      return { bg: theme.palette.grey[800], fg: theme.palette.common.white, center: 'FUTURE', corner: 'FUT', ovalBorder: theme.palette.common.white };
-    }
-    if (t === 'FAV') {
-      return { bg: theme.palette.primary.dark, fg: theme.palette.common.white, center: 'FAVOR', corner: 'FAV', ovalBorder: theme.palette.common.white };
-    }
-    if (t === 'NOPE') {
-      return { bg: theme.palette.grey[900], fg: theme.palette.common.white, center: 'NOPE', corner: 'NOPE', ovalBorder: theme.palette.common.white };
-    }
+    if (u === 'EK') return { emoji: '💣😼', title: 'Explode', corner: 'EK', accent: theme.palette.error.main };
+    if (u === 'DEF') return { emoji: '🧯', title: 'Defuse', corner: 'DEF', accent: theme.palette.success.main };
+    if (u === 'ATK') return { emoji: '⚔️', title: 'Attack', corner: 'ATK', accent: theme.palette.warning.main };
+    if (u === 'SKIP') return { emoji: '⏭️', title: 'Skip', corner: 'SKIP', accent: theme.palette.info.main };
+    if (u === 'SHUF') return { emoji: '🔀', title: 'Shuffle', corner: 'SHUF', accent: theme.palette.secondary.main };
+    if (u === 'FUT') return { emoji: '🔮', title: 'Future', corner: 'FUT', accent: theme.palette.grey[700] };
+    if (u === 'FAV') return { emoji: '🎁', title: 'Favor', corner: 'FAV', accent: theme.palette.primary.main };
 
-    return {
-      bg: theme.palette.background.paper,
-      fg: theme.palette.text.primary,
-      center: t || '—',
-      corner: t || '—',
-      ovalBorder: theme.palette.divider,
-    };
+    return { emoji: '😺', title: t || '—', corner: u || '—', accent: theme.palette.divider };
   };
 
   const renderCardTile = (opts: { key: string | number; text: string; onClick?: () => void; enabled?: boolean }) => {
     const enabled = opts.enabled ?? true;
     const clickable = !!opts.onClick && enabled && !snapshot.popup?.active;
-    const face = faceFromText(opts.text);
+    const face = ekCardFace(opts.text);
 
     return (
       <Paper
@@ -100,41 +78,54 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
           cursor: clickable ? 'pointer' : 'default',
           opacity: clickable ? 1 : 0.45,
           borderColor: clickable ? theme.palette.text.primary : 'divider',
-          bgcolor: face.bg,
-          color: face.fg,
+          bgcolor: face.isBack ? theme.palette.primary.main : theme.palette.background.paper,
+          color: theme.palette.text.primary,
           position: 'relative',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
         }}
       >
+        {/* Accent border */}
+        <Box
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            border: `2px solid ${face.accent}`,
+            borderRadius: 1.25,
+            pointerEvents: 'none',
+            opacity: 0.9,
+          }}
+        />
+
+        {/* Corners */}
         <Box sx={{ position: 'absolute', top: 6, left: 7, lineHeight: 1 }}>
-          <Typography variant="caption" sx={{ fontWeight: 800, color: face.fg }}>
+          <Typography variant="caption" sx={{ fontWeight: 900, color: face.isBack ? theme.palette.common.white : theme.palette.text.primary }}>
             {face.corner}
           </Typography>
         </Box>
         <Box sx={{ position: 'absolute', bottom: 6, right: 7, lineHeight: 1, transform: 'rotate(180deg)' }}>
-          <Typography variant="caption" sx={{ fontWeight: 800, color: face.fg }}>
+          <Typography variant="caption" sx={{ fontWeight: 900, color: face.isBack ? theme.palette.common.white : theme.palette.text.primary }}>
             {face.corner}
           </Typography>
         </Box>
 
-        <Box
-          sx={{
-            width: '76%',
-            height: '58%',
-            borderRadius: '999px',
-            border: `2px solid ${face.ovalBorder}`,
-            bgcolor: 'rgba(0,0,0,0.15)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Typography variant="subtitle2" sx={{ fontWeight: 900, letterSpacing: 0.3, color: face.fg, textAlign: 'center' }}>
-            {face.center}
+        <Stack spacing={0.5} alignItems="center" sx={{ px: 1, textAlign: 'center' }}>
+          <Typography variant="h5" sx={{ lineHeight: 1 }}>
+            {face.emoji}
           </Typography>
-        </Box>
+          <Typography
+            variant="caption"
+            sx={{
+              fontWeight: 900,
+              letterSpacing: 0.3,
+              color: face.isBack ? theme.palette.common.white : theme.palette.text.secondary,
+              lineHeight: 1.1,
+            }}
+          >
+            {face.title}
+          </Typography>
+        </Stack>
       </Paper>
     );
   };
@@ -180,6 +171,102 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
         </Stack>
       </Paper>
 
+      <Typography variant="subtitle1" gutterBottom align="center">
+        Your Hand
+      </Typography>
+
+      {(ek.your_hand || []).length ? (
+        <Paper
+          variant="outlined"
+          sx={{
+            p: 1.25,
+            mb: 2,
+            borderColor: typeof mySeat === 'number' && mySeat >= 0 ? playerColors[mySeat % playerColors.length] : undefined,
+          }}
+        >
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(74px, 74px))',
+              gap: 1,
+              alignItems: 'start',
+              justifyContent: 'center',
+            }}
+          >
+            {(ek.your_hand || []).map((c) =>
+              renderCardTile({
+                key: c.idx,
+                text: c.text,
+                enabled: !!c.playable,
+                onClick: c.playable ? () => sendClick(`ek_play:${c.idx}`) : undefined,
+              })
+            )}
+          </Box>
+        </Paper>
+      ) : (
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }} align="center">
+          No cards (yet).
+        </Typography>
+      )}
+
+      {(!snapshot.popup?.active && (!!ctrlFavorTargets.length || !!ctrlNope || !!ctrlDraw || !!ek.awaiting_favor_target)) && (
+        <>
+          <Typography variant="subtitle1" gutterBottom align="center">
+            Actions
+          </Typography>
+          <Paper
+            variant="outlined"
+            sx={{
+              p: 1.25,
+              mb: 2,
+              borderColor: typeof mySeat === 'number' && mySeat >= 0 ? playerColors[mySeat % playerColors.length] : undefined,
+            }}
+          >
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(74px, 74px))',
+                gap: 1,
+                alignItems: 'start',
+                justifyContent: 'center',
+              }}
+            >
+              {!!ctrlFavorTargets.length &&
+                ctrlFavorTargets.map((b) =>
+                  renderCardTile({
+                    key: b.id,
+                    text: `FAVOR ${seatLabel(Number(String(b.id).split(':')[1] || -1))}`,
+                    enabled: !!b.enabled,
+                    onClick: () => sendClick(b.id),
+                  })
+                )}
+
+              {ctrlNope &&
+                renderCardTile({
+                  key: ctrlNope.id,
+                  text: 'NOPE',
+                  enabled: !!ctrlNope.enabled,
+                  onClick: () => sendClick(ctrlNope.id),
+                })}
+
+              {ctrlDraw &&
+                renderCardTile({
+                  key: ctrlDraw.id,
+                  text: 'DRAW',
+                  enabled: !!ctrlDraw.enabled,
+                  onClick: () => sendClick(ctrlDraw.id),
+                })}
+            </Box>
+
+            {!!ek.awaiting_favor_target && (
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block', textAlign: 'center' }}>
+                Choose a player to Favor.
+              </Typography>
+            )}
+          </Paper>
+        </>
+      )}
+
       {!!ek.active_players?.length && (
         <Box sx={{ mb: 2 }}>
           <Typography variant="subtitle1" gutterBottom align="center">
@@ -213,77 +300,6 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
             })}
           </Stack>
         </Box>
-      )}
-
-      <Typography variant="subtitle1" gutterBottom align="center">
-        Your Hand
-      </Typography>
-
-      {(ek.your_hand || []).length ? (
-        <Paper
-          variant="outlined"
-          sx={{
-            p: 1.25,
-            mb: 2,
-            borderColor: typeof mySeat === 'number' && mySeat >= 0 ? playerColors[mySeat % playerColors.length] : undefined,
-          }}
-        >
-          <Box
-            sx={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(74px, 74px))',
-              gap: 1,
-              alignItems: 'start',
-              justifyContent: 'center',
-            }}
-          >
-            {/* Prioritize any modal-ish controls (favor targets / nope / draw) before hand */}
-            {!!ctrlFavorTargets.length &&
-              ctrlFavorTargets.map((b) =>
-                renderCardTile({
-                  key: b.id,
-                  text: `FAVOR ${seatLabel(Number(String(b.id).split(':')[1] || -1))}`,
-                  enabled: !!b.enabled,
-                  onClick: () => sendClick(b.id),
-                })
-              )}
-
-            {ctrlNope &&
-              renderCardTile({
-                key: ctrlNope.id,
-                text: 'NOPE',
-                enabled: !!ctrlNope.enabled,
-                onClick: () => sendClick(ctrlNope.id),
-              })}
-
-            {ctrlDraw &&
-              renderCardTile({
-                key: ctrlDraw.id,
-                text: 'DRAW',
-                enabled: !!ctrlDraw.enabled,
-                onClick: () => sendClick(ctrlDraw.id),
-              })}
-
-            {(ek.your_hand || []).map((c) =>
-              renderCardTile({
-                key: c.idx,
-                text: c.text,
-                enabled: !!c.playable,
-                onClick: c.playable ? () => sendClick(`ek_play:${c.idx}`) : undefined,
-              })
-            )}
-          </Box>
-
-          {!!ek.awaiting_favor_target && (
-            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block', textAlign: 'center' }}>
-              Choose a player to Favor.
-            </Typography>
-          )}
-        </Paper>
-      ) : (
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }} align="center">
-          No cards (yet).
-        </Typography>
       )}
     </>
   );

@@ -153,6 +153,135 @@ export default function UnoPanel({ snapshot, seatLabel, send, playerColors }: Pr
         </Stack>
       </Paper>
 
+      <Typography variant="subtitle1" gutterBottom align="center">
+        Your Hand
+      </Typography>
+      {(uno.your_hand || []).length ? (
+        <Paper
+          variant="outlined"
+          sx={{
+            p: 1.25,
+            mb: 2,
+            borderColor:
+              typeof mySeat === 'number' && mySeat >= 0 ? playerColors[mySeat % playerColors.length] : undefined,
+          }}
+        >
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(74px, 74px))',
+              gap: 1,
+              alignItems: 'start',
+              justifyContent: 'center',
+            }}
+          >
+            {(uno.your_hand || []).map((c) =>
+              renderCardTile({
+                key: c.idx,
+                text: c.text,
+                enabled: !!c.playable,
+                onClick: () => sendClick(`play:${c.idx}`),
+              })
+            )}
+          </Box>
+        </Paper>
+      ) : (
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }} align="center">
+          No cards (yet).
+        </Typography>
+      )}
+
+      {(!snapshot.popup?.active && (!!ctrlColors.length || !!ctrlDraw || !!ctrlEnd || !!ctrlPlayAgain || !!ctrlForceStart)) && (
+        <>
+          <Typography variant="subtitle1" gutterBottom align="center">
+            Actions
+          </Typography>
+          <Paper
+            variant="outlined"
+            sx={{
+              p: 1.25,
+              mb: 2,
+              borderColor:
+                typeof mySeat === 'number' && mySeat >= 0 ? playerColors[mySeat % playerColors.length] : undefined,
+            }}
+          >
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(74px, 74px))',
+                gap: 1,
+                alignItems: 'start',
+                justifyContent: 'center',
+              }}
+            >
+              {!!ctrlColors.length &&
+                ctrlColors.map((b) =>
+                  renderCardTile({
+                    key: b.id,
+                    text: (b.id.split(':')[1] || 'WILD').toUpperCase(),
+                    enabled: !!b.enabled,
+                    onClick: () => sendClick(b.id),
+                  })
+                )}
+
+              {!ctrlColors.length && (
+                <>
+                  {typeof uno.winner === 'number' && (
+                    <>
+                      {ctrlPlayAgain &&
+                        renderCardTile({
+                          key: ctrlPlayAgain.id,
+                          text: 'PLAY',
+                          enabled: !!ctrlPlayAgain.enabled,
+                          onClick: () => sendClick(ctrlPlayAgain.id),
+                          asBack: true,
+                        })}
+                      {ctrlForceStart &&
+                        renderCardTile({
+                          key: ctrlForceStart.id,
+                          text: 'FORCE',
+                          enabled: !!ctrlForceStart.enabled,
+                          onClick: () => sendClick(ctrlForceStart.id),
+                          asBack: true,
+                        })}
+                    </>
+                  )}
+
+                  {ctrlDraw &&
+                    renderCardTile({
+                      key: ctrlDraw.id,
+                      text: 'DRAW',
+                      enabled: !!ctrlDraw.enabled,
+                      onClick: () => sendClick(ctrlDraw.id),
+                      asBack: true,
+                    })}
+                  {ctrlEnd &&
+                    renderCardTile({
+                      key: ctrlEnd.id,
+                      text: 'END',
+                      enabled: !!ctrlEnd.enabled,
+                      onClick: () => sendClick(ctrlEnd.id),
+                      asBack: true,
+                    })}
+                </>
+              )}
+            </Box>
+
+            {!!uno.awaiting_color && (
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block', textAlign: 'center' }}>
+                Choose a color to continue.
+              </Typography>
+            )}
+
+            {typeof uno.winner === 'number' && (
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block', textAlign: 'center' }}>
+                Next round ready: {uno.next_round_ready_count ?? 0}/{uno.next_round_total ?? (uno.active_players?.length ?? 0)}
+              </Typography>
+            )}
+          </Paper>
+        </>
+      )}
+
       {!!uno.active_players?.length && (
         <Box sx={{ mb: 2 }}>
           <Typography variant="subtitle1" gutterBottom align="center">
@@ -182,108 +311,6 @@ export default function UnoPanel({ snapshot, seatLabel, send, playerColors }: Pr
             ))}
           </Stack>
         </Box>
-      )}
-
-      <Typography variant="subtitle1" gutterBottom align="center">
-        Your Hand
-      </Typography>
-      {(uno.your_hand || []).length ? (
-        <Paper
-          variant="outlined"
-          sx={{
-            p: 1.25,
-            mb: 2,
-            borderColor:
-              typeof mySeat === 'number' && mySeat >= 0 ? playerColors[mySeat % playerColors.length] : undefined,
-          }}
-        >
-          <Box
-            sx={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(74px, 74px))',
-              gap: 1,
-              alignItems: 'start',
-              justifyContent: 'center',
-            }}
-          >
-            {/* If awaiting a wild color, show color choice as physical cards */}
-            {!!ctrlColors.length &&
-              ctrlColors.map((b) =>
-                renderCardTile({
-                  key: b.id,
-                  text: (b.id.split(':')[1] || 'WILD').toUpperCase(),
-                  enabled: !!b.enabled,
-                  onClick: () => sendClick(b.id),
-                })
-              )}
-
-            {!ctrlColors.length && (
-              <>
-                {typeof uno.winner === 'number' && (
-                  <>
-                    {ctrlPlayAgain &&
-                      renderCardTile({
-                        key: ctrlPlayAgain.id,
-                        text: 'PLAY',
-                        enabled: !!ctrlPlayAgain.enabled,
-                        onClick: () => sendClick(ctrlPlayAgain.id),
-                        asBack: true,
-                      })}
-                    {ctrlForceStart &&
-                      renderCardTile({
-                        key: ctrlForceStart.id,
-                        text: 'FORCE',
-                        enabled: !!ctrlForceStart.enabled,
-                        onClick: () => sendClick(ctrlForceStart.id),
-                        asBack: true,
-                      })}
-                  </>
-                )}
-
-                {ctrlDraw &&
-                  renderCardTile({
-                    key: ctrlDraw.id,
-                    text: 'DRAW',
-                    enabled: !!ctrlDraw.enabled,
-                    onClick: () => sendClick(ctrlDraw.id),
-                    asBack: true,
-                  })}
-                {ctrlEnd &&
-                  renderCardTile({
-                    key: ctrlEnd.id,
-                    text: 'END',
-                    enabled: !!ctrlEnd.enabled,
-                    onClick: () => sendClick(ctrlEnd.id),
-                    asBack: true,
-                  })}
-
-                {(uno.your_hand || []).map((c) =>
-                  renderCardTile({
-                    key: c.idx,
-                    text: c.text,
-                    enabled: !!c.playable,
-                    onClick: () => sendClick(`play:${c.idx}`),
-                  })
-                )}
-              </>
-            )}
-          </Box>
-          {!!uno.awaiting_color && (
-            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block', textAlign: 'center' }}>
-              Choose a color to continue.
-            </Typography>
-          )}
-
-          {typeof uno.winner === 'number' && (
-            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block', textAlign: 'center' }}>
-              Next round ready: {uno.next_round_ready_count ?? 0}/{uno.next_round_total ?? (uno.active_players?.length ?? 0)}
-            </Typography>
-          )}
-        </Paper>
-      ) : (
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }} align="center">
-          No cards (yet).
-        </Typography>
       )}
     </>
   );

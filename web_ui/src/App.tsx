@@ -15,6 +15,7 @@ import {
   Toolbar,
   Typography,
 } from '@mui/material';
+import PlayingCard from './components/PlayingCard';
 import type { Snapshot, SnapshotMessage } from './types';
 import PopupDialog from './features/popup/PopupDialog';
 import DndCharacterSetup from './features/dnd/DndCharacterSetup';
@@ -24,6 +25,7 @@ import BlackjackPanel from './features/blackjack/BlackjackPanel';
 import MonopolyPanel from './features/monopoly/MonopolyPanel';
 import UnoPanel from './features/uno/UnoPanel';
 import ExplodingKittensPanel from './features/exploding_kittens/ExplodingKittensPanel';
+import TexasHoldemPanel from './features/texas_holdem/TexasHoldemPanel';
 
 type ConnStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -109,6 +111,15 @@ export default function App(): React.ReactElement {
 
   const mySeat = snapshot?.your_player_slot;
   const isSeated = typeof mySeat === 'number' && mySeat >= 0;
+
+  const myGameVote =
+    isSeated ? (snapshot?.lobby?.players || []).find((p) => p.seat === (mySeat as number))?.vote ?? null : null;
+
+  const normalizeVoteKey = (k?: string | null) => {
+    const v = String(k || '').trim().toLowerCase();
+    if (v === 'd&d' || v === 'dnd') return 'dnd';
+    return v;
+  };
   const [showConnect, setShowConnect] = useState<boolean>(true);
   const [isReady, setIsReady] = useState<boolean>(false);
 
@@ -279,73 +290,15 @@ export default function App(): React.ReactElement {
     return map[name] || '👾';
   }, []);
 
-  const parseCard = useCallback((card: string) => {
-    const t = (card || '').trim();
-    if (!t) return { rank: '', suit: '', isRed: false };
-    const suit = t.slice(-1);
-    const rank = t.slice(0, -1);
-    const isRed = suit === '♥' || suit === '♦';
-    return { rank, suit, isRed };
-  }, []);
-
-  const PlayingCardView = useCallback(
-    ({ card }: { card: string }) => {
-      const c = parseCard(card);
-      return (
-        <Box
-          sx={{
-            width: 46,
-            height: 64,
-            border: 1,
-            borderColor: 'divider',
-            borderRadius: 1,
-            bgcolor: 'background.paper',
-            position: 'relative',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            userSelect: 'none',
-          }}
-        >
-          <Typography
-            variant="caption"
-            sx={{
-              position: 'absolute',
-              top: 4,
-              left: 6,
-              fontWeight: 800,
-              color: c.isRed ? 'error.main' : 'text.primary',
-              lineHeight: 1,
-            }}
-          >
-            {c.rank}
-            {c.suit}
-          </Typography>
-          <Typography
-            variant="h6"
-            sx={{
-              fontWeight: 900,
-              color: c.isRed ? 'error.main' : 'text.primary',
-              lineHeight: 1,
-            }}
-          >
-            {c.suit}
-          </Typography>
-        </Box>
-      );
-    },
-    [parseCard]
-  );
-
   const CardRow = useCallback(
     ({ cards }: { cards: string[] }) => (
       <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
         {(cards || []).map((c, i) => (
-          <PlayingCardView key={`${c}-${i}`} card={c} />
+          <PlayingCard key={`${c}-${i}`} card={c} size="sm" />
         ))}
       </Stack>
     ),
-    [PlayingCardView]
+    []
   );
 
 
@@ -559,6 +512,8 @@ export default function App(): React.ReactElement {
                                               ? 'Uno'
                                               : p.vote === 'exploding_kittens'
                                                 ? 'Exploding Kittens'
+                                              : p.vote === 'texas_holdem'
+                                                ? "Texas Hold'em"
                                             : p.vote === 'dnd' || p.vote === 'd&d'
                                               ? 'D&D'
                                               : p.vote
@@ -604,6 +559,8 @@ export default function App(): React.ReactElement {
 
             <ExplodingKittensPanel snapshot={snapshot} seatLabel={seatLabel} send={send} playerColors={playerColors} />
 
+            <TexasHoldemPanel snapshot={snapshot} seatLabel={seatLabel} send={send} playerColors={playerColors} />
+
             {snapshot.server_state === 'menu' && (
               <>
                 <Typography variant="subtitle1" gutterBottom>
@@ -616,22 +573,26 @@ export default function App(): React.ReactElement {
                 ) : (
                   <>
                     <Stack spacing={1}>
-                      {(snapshot.menu_games || []).map((g) => (
-                        <Button
-                          key={g.key}
-                          variant="outlined"
-                          onClick={() => send({ type: 'vote_game', key: g.key })}
-                          disabled={status !== 'connected' || !isSeated || !isReady}
-                        >
-                          Vote: {g.label}
-                        </Button>
-                      ))}
+                      {(snapshot.menu_games || []).map((g) => {
+                        const selected = normalizeVoteKey(myGameVote) === normalizeVoteKey(g.key);
+                        return (
+                          <Button
+                            key={g.key}
+                            variant="contained"
+                            color={selected ? 'success' : 'primary'}
+                            onClick={() => send({ type: 'vote_game', key: g.key })}
+                            disabled={status !== 'connected' || !isSeated || !isReady}
+                          >
+                            Vote: {g.label}
+                          </Button>
+                        );
+                      })}
                     </Stack>
 
                     <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                       Votes: Monopoly {snapshot.lobby?.votes?.monopoly ?? 0} · Blackjack{' '}
                       {snapshot.lobby?.votes?.blackjack ?? 0} · Uno {snapshot.lobby?.votes?.uno ?? 0} · Exploding Kittens{' '}
-                      {snapshot.lobby?.votes?.exploding_kittens ?? 0} · D&D{' '}
+                      {snapshot.lobby?.votes?.exploding_kittens ?? 0} · Texas Hold'em {snapshot.lobby?.votes?.texas_holdem ?? 0} · D&D{' '}
                       {(snapshot.lobby?.votes?.['d&d'] ?? 0) + (snapshot.lobby?.votes?.dnd ?? 0)}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">

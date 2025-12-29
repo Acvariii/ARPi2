@@ -805,11 +805,64 @@ class ExplodingKittensGame:
     def _draw_card_face(self, rect: Tuple[float, float, float, float], text: str, face_color: Tuple[int, int, int]) -> None:
         x, y, w, h = rect
         try:
+            t = str(text or "").strip().upper()
+
+            # Emoji + title mapping
+            emoji = "😺"
+            title = t or ""
+            if t == "EK":
+                emoji, title = "💣😼", "EXPLODING"
+            elif t == "DEF":
+                emoji, title = "🧯", "DEFUSE"
+            elif t == "ATK":
+                emoji, title = "⚔", "ATTACK"
+            elif t == "SKIP":
+                emoji, title = "⏭", "SKIP"
+            elif t == "SHUF":
+                emoji, title = "🔀", "SHUFFLE"
+            elif t == "FUT":
+                emoji, title = "🔮", "FUTURE"
+            elif t == "FAV":
+                emoji, title = "🎁", "FAVOR"
+            elif t == "NOPE":
+                emoji, title = "🚫", "NOPE"
+
+            # Physical-card style
+            ix, iy, iw, ih = int(x), int(y), int(w), int(h)
             # Slight shadow
-            self.renderer.draw_rect((0, 0, 0), (int(x + 4), int(y - 4), int(w), int(h)), alpha=70)
-            self.renderer.draw_rect(face_color, (int(x), int(y), int(w), int(h)), alpha=235)
-            self.renderer.draw_rect((18, 18, 22), (int(x), int(y), int(w), int(h)), width=2, alpha=240)
-            self.renderer.draw_text(text, int(x + w / 2), int(y + h / 2), font_size=14, color=(15, 15, 15), anchor_x="center", anchor_y="center")
+            self.renderer.draw_rect((0, 0, 0), (int(ix + 4), int(iy - 4), int(iw), int(ih)), alpha=70)
+            fc = tuple(int(v) for v in (face_color or (160, 160, 160)))
+            border = (max(0, fc[0] - 45), max(0, fc[1] - 45), max(0, fc[2] - 45))
+
+            # Colorful face
+            self.renderer.draw_rect(fc, (ix, iy, iw, ih), alpha=235)
+            # Soft highlight to keep a "card" feel
+            inset = 6
+            if iw > inset * 2 and ih > inset * 2:
+                self.renderer.draw_rect((255, 255, 255), (ix + inset, iy + inset, iw - inset * 2, ih - inset * 2), alpha=35)
+
+            # Border
+            self.renderer.draw_rect(border, (ix, iy, iw, ih), width=3, alpha=235)
+            self.renderer.draw_rect((20, 20, 20), (ix, iy, iw, ih), width=1, alpha=210)
+
+            # Contrast-aware text color
+            lum = 0.2126 * fc[0] + 0.7152 * fc[1] + 0.0722 * fc[2]
+            text_col = (245, 245, 245) if lum < 130 else (20, 20, 20)
+            sub_col = (235, 235, 235) if lum < 130 else (35, 35, 35)
+
+            # Corner index
+            corner = t or "EK"
+            self.renderer.draw_text(corner, int(ix + 10), int(iy + 10), font_size=12, color=text_col, bold=True, anchor_x="left", anchor_y="top")
+            self.renderer.draw_text(corner, int(ix + iw - 10), int(iy + ih - 10), font_size=12, color=text_col, bold=True, anchor_x="right", anchor_y="bottom")
+
+            # Center emoji + title
+            # Emoji glyphs can get tinted by the text color; draw in white to preserve emoji colors.
+            cx = int(ix + iw / 2)
+            cy = int(iy + ih / 2 - 10)
+            self.renderer.draw_text(emoji, cx + 1, cy + 1, font_size=26, color=(0, 0, 0), alpha=90, anchor_x="center", anchor_y="center")
+            self.renderer.draw_text(emoji, cx, cy, font_size=26, color=(255, 255, 255), alpha=255, anchor_x="center", anchor_y="center")
+            if title:
+                self.renderer.draw_text(title, int(ix + iw / 2), int(iy + ih / 2 + 22), font_size=10, color=sub_col, bold=True, anchor_x="center", anchor_y="center")
         except Exception:
             pass
 
@@ -824,7 +877,7 @@ class ExplodingKittensGame:
             self.renderer.draw_text(
                 "DISCARD",
                 int(x + w / 2),
-                int(y - 10),
+                int(y - 18),
                 font_size=10,
                 color=(200, 200, 200),
                 anchor_x="center",

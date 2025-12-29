@@ -214,6 +214,27 @@ export type Snapshot = {
     nope_count?: number;
     winner?: number | null;
   };
+  texas_holdem?: {
+    state?: string;
+    street?: string;
+    hand_id?: number;
+    dealer_seat?: number | null;
+    turn_seat?: number | null;
+    pot?: number;
+    current_bet?: number;
+    call_amount?: number | null;
+    community?: string[];
+    your_hole?: string[];
+    // keys are stringified in JSON
+    revealed_holes?: Record<string, string[]>;
+    players?: Array<{ seat: number; name: string; stack: number; status: string; bet: number }>;
+    showdown?: {
+      winners?: number[];
+      descriptions?: Record<string, string>;
+      pot?: number;
+      reason?: string;
+    } | null;
+  };
   cursors?: CursorSnapshot[];
 };
 

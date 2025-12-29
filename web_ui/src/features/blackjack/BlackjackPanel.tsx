@@ -43,36 +43,6 @@ export default function BlackjackPanel({ snapshot, status, isSeated, send, CardR
             </Typography>
           )}
 
-          {snapshot.blackjack.state === 'betting' && (
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-              <Button
-                variant="outlined"
-                onClick={() => send({ type: 'blackjack_adjust_bet', amount: 5 })}
-                disabled={status !== 'connected' || !isSeated || (snapshot.blackjack.your_current_bet ?? 0) < 5}
-              >
-                -$5
-              </Button>
-              <Button
-                variant="outlined"
-                onClick={() => send({ type: 'blackjack_adjust_bet', amount: 25 })}
-                disabled={status !== 'connected' || !isSeated || (snapshot.blackjack.your_current_bet ?? 0) < 25}
-              >
-                -$25
-              </Button>
-              <Button
-                variant="outlined"
-                onClick={() => send({ type: 'blackjack_adjust_bet', amount: snapshot.blackjack?.your_current_bet ?? 0 })}
-                disabled={
-                  status !== 'connected' ||
-                  !isSeated ||
-                  !(snapshot.blackjack?.your_current_bet && snapshot.blackjack.your_current_bet > 0)
-                }
-              >
-                Clear bet
-              </Button>
-            </Stack>
-          )}
-
           <Typography variant="body2" sx={{ fontWeight: 600 }}>
             Your hand
             {typeof snapshot.blackjack.your_hand_value === 'number' ? ` (value ${snapshot.blackjack.your_hand_value})` : ''}
@@ -83,6 +53,41 @@ export default function BlackjackPanel({ snapshot, status, isSeated, send, CardR
             <Typography variant="body2" color="text.secondary">
               No cards yet.
             </Typography>
+          )}
+
+          {snapshot.blackjack.state === 'betting' && (
+            <>
+              <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                Actions
+              </Typography>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                <Button
+                  variant="outlined"
+                  onClick={() => send({ type: 'blackjack_adjust_bet', amount: 5 })}
+                  disabled={status !== 'connected' || !isSeated || (snapshot.blackjack.your_current_bet ?? 0) < 5}
+                >
+                  -$5
+                </Button>
+                <Button
+                  variant="outlined"
+                  onClick={() => send({ type: 'blackjack_adjust_bet', amount: 25 })}
+                  disabled={status !== 'connected' || !isSeated || (snapshot.blackjack.your_current_bet ?? 0) < 25}
+                >
+                  -$25
+                </Button>
+                <Button
+                  variant="outlined"
+                  onClick={() => send({ type: 'blackjack_adjust_bet', amount: snapshot.blackjack?.your_current_bet ?? 0 })}
+                  disabled={
+                    status !== 'connected' ||
+                    !isSeated ||
+                    !(snapshot.blackjack?.your_current_bet && snapshot.blackjack.your_current_bet > 0)
+                  }
+                >
+                  Clear bet
+                </Button>
+              </Stack>
+            </>
           )}
         </Stack>
       </Paper>

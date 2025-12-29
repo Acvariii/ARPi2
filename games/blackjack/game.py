@@ -1738,48 +1738,70 @@ class BlackjackGame:
     
     def _draw_card(self, card: Card, x: int, y: int, w: int, h: int, player_color: Tuple[int, int, int] = None):
         """Draw a playing card with optional player color outline"""
+        # Subtle shadow
+        self.renderer.draw_rect((0, 0, 0), (x + 3, y + 3, w, h), alpha=55)
+
         # Card background
-        self.renderer.draw_rect((255, 255, 255), (x, y, w, h))
+        self.renderer.draw_rect((248, 248, 248), (x, y, w, h))
+
         # Colored outline if player card, black if no color specified
-        outline_color = player_color if player_color else (0, 0, 0)
+        outline_color = player_color if player_color else (20, 20, 20)
         outline_width = 3 if player_color else 2
         self.renderer.draw_rect(outline_color, (x, y, w, h), width=outline_width)
-        
+        self.renderer.draw_rect((210, 210, 210), (x + 3, y + 3, w - 6, h - 6), width=1)
+
         # Suit color
         color = (220, 20, 20) if card.suit in ['♥', '♦'] else (20, 20, 20)
-        
-        # Rank (top left, inside card)
+
+        # Corners
         self.renderer.draw_text(
-            card.rank, x + w // 2, y + h - 20,
-            'Arial', 20, color,
-            bold=True, anchor_x='center', anchor_y='center'
+            f"{card.rank}{card.suit}",
+            x + 9,
+            y + 10,
+            'Arial',
+            14,
+            color,
+            bold=True,
+            anchor_x='left',
+            anchor_y='top',
         )
-        
+        self.renderer.draw_text(
+            f"{card.rank}{card.suit}",
+            x + w - 9,
+            y + h - 10,
+            'Arial',
+            14,
+            color,
+            bold=True,
+            anchor_x='right',
+            anchor_y='bottom',
+        )
+
         # Suit (center)
         self.renderer.draw_text(
-            card.suit, x + w // 2, y + h // 2,
-            'Arial', 40, color,
-            anchor_x='center', anchor_y='center'
-        )
-        
-        # Rank (bottom, inside card)
-        self.renderer.draw_text(
-            card.rank, x + w // 2, y + 20,
-            'Arial', 20, color,
-            bold=True, anchor_x='center', anchor_y='center'
+            card.suit,
+            x + w // 2,
+            y + h // 2,
+            'Arial',
+            40,
+            color,
+            anchor_x='center',
+            anchor_y='center',
         )
     
     def _draw_card_back(self, x: int, y: int, w: int, h: int):
         """Draw card back"""
-        self.renderer.draw_rect((50, 50, 150), (x, y, w, h))
-        self.renderer.draw_rect((200, 200, 200), (x, y, w, h), width=2)
-        
+        self.renderer.draw_rect((0, 0, 0), (x + 3, y + 3, w, h), alpha=55)
+        self.renderer.draw_rect((50, 70, 150), (x, y, w, h))
+        self.renderer.draw_rect((230, 230, 230), (x, y, w, h), width=2)
+
         # Pattern
-        for i in range(3):
-            for j in range(4):
-                px = x + 10 + i * 20
-                py = y + 10 + j * 20
-                self.renderer.draw_rect((100, 100, 200), (px, py, 15, 15))
+        for i in range(5):
+            self.renderer.draw_line((200, 200, 240), (x + 6, y + 10 + i * 18), (x + w - 6, y + 2 + i * 18), width=2, alpha=70)
+        try:
+            self.renderer.draw_text("🂠", x + w // 2, y + h // 2, 'Arial', 22, (235, 235, 235), anchor_x='center', anchor_y='center')
+        except Exception:
+            pass
     
     def _draw_game_over(self):
         """Draw game over screen"""
