@@ -155,6 +155,8 @@ export default function App(): React.ReactElement {
     (e: React.DragEvent, payload: { side: 'offer' | 'request'; propIdx: number; included: boolean }) => {
       try {
         e.dataTransfer.setData('application/json', JSON.stringify(payload));
+        // Some browsers require a text type for drag to initiate.
+        e.dataTransfer.setData('text/plain', JSON.stringify(payload));
       } catch {
         // ignore
       }
@@ -406,6 +408,12 @@ export default function App(): React.ReactElement {
     return 'Selecting game (vote now)';
   }, [snapshot?.lobby?.all_ready, snapshot?.lobby?.min_players, snapshot?.lobby?.seated_count]);
 
+  const audio = snapshot?.audio || null;
+  const voteMuteMusic = useCallback(() => {
+    if (!isSeated) return;
+    send({ type: 'vote_music_mute' });
+  }, [isSeated, send]);
+
   return (
     <Box sx={{ minHeight: '100vh' }}>
       <AppBar position="static">
@@ -459,6 +467,25 @@ export default function App(): React.ReactElement {
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
               Seat: {isSeated ? seatLabel(mySeat as number) : 'No seat selected'}
             </Typography>
+
+            {!!audio && (
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 2 }}>
+                <Button
+                  variant={audio.you_voted_mute ? 'contained' : 'outlined'}
+                  color={audio.music_muted ? 'warning' : 'primary'}
+                  onClick={voteMuteMusic}
+                  disabled={!isSeated || status !== 'connected'}
+                >
+                  {audio.you_voted_mute ? 'Mute vote ✓' : 'Vote: Mute music'}
+                </Button>
+                <Chip
+                  label={`Mute votes: ${audio.mute_votes}/${audio.mute_required} (${audio.music_muted ? 'muted' : 'playing'})`}
+                  color={audio.music_muted ? 'warning' : 'default'}
+                  variant={audio.music_muted ? 'filled' : 'outlined'}
+                  size="small"
+                />
+              </Stack>
+            )}
 
             {inMenu && (
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 2 }}>

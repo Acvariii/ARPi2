@@ -10,6 +10,12 @@ export type CursorSnapshot = {
 export type Snapshot = {
   server_state: string;
   history?: string[];
+  audio?: {
+    music_muted: boolean;
+    mute_votes: number;
+    mute_required: number;
+    you_voted_mute: boolean;
+  };
   end_game?: {
     pressed: boolean;
     pressed_count: number;

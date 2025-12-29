@@ -68,6 +68,15 @@ export default function PopupDialog(props: Props): React.ReactElement {
 
   if (!snapshot?.popup?.active) return <></>;
 
+  const useTapToMove = React.useMemo(() => {
+    try {
+      if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
+      return window.matchMedia('(pointer: coarse)').matches || window.matchMedia('(hover: none)').matches;
+    } catch {
+      return false;
+    }
+  }, []);
+
   return (
     <Dialog open={!!snapshot.popup?.active}>
       <DialogContent dividers>
@@ -76,6 +85,12 @@ export default function PopupDialog(props: Props): React.ReactElement {
             <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
               Trade: {seatLabel(tradePopup!.initiator)} ↔ {seatLabel(tradePopup!.partner)}
             </Typography>
+
+            {isTradeEditable && useTapToMove && (
+              <Typography variant="body2" color="text.secondary">
+                Mobile: tap properties to add/remove.
+              </Typography>
+            )}
 
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
               <Card variant="outlined" sx={{ flex: 1 }}>
@@ -115,8 +130,9 @@ export default function PopupDialog(props: Props): React.ReactElement {
                             <Card
                               key={`offer-${p.idx}`}
                               variant="outlined"
-                              draggable={isTradeEditable && p.tradable}
+                              draggable={!useTapToMove && isTradeEditable && p.tradable}
                               onDragStart={(e) => onPropDragStart(e, { side: 'offer', propIdx: p.idx, included: true })}
+                              onClick={() => isTradeEditable && useTapToMove && tradeSetProperty('offer', p.idx, false)}
                               sx={{ borderColor: p.color || 'divider', opacity: p.tradable ? 1 : 0.6 }}
                             >
                               <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
@@ -177,8 +193,9 @@ export default function PopupDialog(props: Props): React.ReactElement {
                             <Card
                               key={`req-${p.idx}`}
                               variant="outlined"
-                              draggable={isTradeEditable && p.tradable}
+                              draggable={!useTapToMove && isTradeEditable && p.tradable}
                               onDragStart={(e) => onPropDragStart(e, { side: 'request', propIdx: p.idx, included: true })}
+                              onClick={() => isTradeEditable && useTapToMove && tradeSetProperty('request', p.idx, false)}
                               sx={{ borderColor: p.color || 'divider', opacity: p.tradable ? 1 : 0.6 }}
                             >
                               <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
@@ -219,9 +236,10 @@ export default function PopupDialog(props: Props): React.ReactElement {
                             <Card
                               key={`my-${p.idx}`}
                               variant="outlined"
-                              draggable={!selected && p.tradable}
+                              draggable={!useTapToMove && !selected && p.tradable}
                               onDragStart={(e) => onPropDragStart(e, { side: 'offer', propIdx: p.idx, included: false })}
-                              onDoubleClick={() => p.tradable && tradeSetProperty('offer', p.idx, !selected)}
+                              onDoubleClick={() => !useTapToMove && p.tradable && tradeSetProperty('offer', p.idx, !selected)}
+                              onClick={() => useTapToMove && p.tradable && tradeSetProperty('offer', p.idx, !selected)}
                               sx={{
                                 borderColor: p.color || 'divider',
                                 opacity: p.tradable ? 1 : 0.6,
@@ -271,9 +289,10 @@ export default function PopupDialog(props: Props): React.ReactElement {
                             <Card
                               key={`their-${p.idx}`}
                               variant="outlined"
-                              draggable={!selected && p.tradable}
+                              draggable={!useTapToMove && !selected && p.tradable}
                               onDragStart={(e) => onPropDragStart(e, { side: 'request', propIdx: p.idx, included: false })}
-                              onDoubleClick={() => p.tradable && tradeSetProperty('request', p.idx, !selected)}
+                              onDoubleClick={() => !useTapToMove && p.tradable && tradeSetProperty('request', p.idx, !selected)}
+                              onClick={() => useTapToMove && p.tradable && tradeSetProperty('request', p.idx, !selected)}
                               sx={{
                                 borderColor: p.color || 'divider',
                                 opacity: p.tradable ? 1 : 0.6,

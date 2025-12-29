@@ -138,6 +138,10 @@ class BlackjackGame:
         # Game state
         self.state = "player_select"  # player_select, betting, playing, dealer_turn, results
         self.selection_ui = PlayerSelectionUI(width, height)
+
+        # Wall projection mode: hide legacy physical-table player panels in the Pyglet view.
+        # Web UI is expected to handle per-player controls/cards.
+        self.wall_projection_mode = True
         
         # Players
         self.players: List[BlackjackPlayer] = []
@@ -294,9 +298,15 @@ class BlackjackGame:
     
     def _calculate_geometry(self):
         """Calculate table and dealer area"""
-        h_panel = int(self.height * 0.10)
-        v_panel = int(self.width * 0.12)
-        margin = 20
+        if getattr(self, "wall_projection_mode", False):
+            # Minimal margins so the table is larger on a wall display.
+            h_panel = max(10, int(self.height * 0.02))
+            v_panel = max(10, int(self.width * 0.02))
+            margin = 20
+        else:
+            h_panel = int(self.height * 0.10)
+            v_panel = int(self.width * 0.12)
+            margin = 20
         
         avail_w = self.width - (2 * v_panel) - (2 * margin)
         avail_h = self.height - (2 * h_panel) - (2 * margin)
@@ -1241,10 +1251,12 @@ class BlackjackGame:
     
     def draw(self):
         """Draw game"""
+        board_only = bool(getattr(self, "board_only_mode", False) or getattr(self, "wall_projection_mode", False))
+
         if self.state == "player_select":
-            if getattr(self, "web_ui_only_player_select", False):
+            if getattr(self, "web_ui_only_player_select", False) or board_only:
                 # Show the table full-screen while players are selecting on Web UI.
-                self.renderer.draw_rect((0, 80, 40), (0, 0, self.width, self.height))
+                self._draw_background(self.width, self.height)
                 self._draw_table()
                 self._draw_board_only_status_overlay()
             else:
@@ -1256,10 +1268,10 @@ class BlackjackGame:
             return
         
         # Background
-        self.renderer.draw_rect((0, 80, 40), (0, 0, self.width, self.height))
+        self._draw_background(self.width, self.height)
 
         # True board-only mode (no panels/popups in the Pyglet window)
-        if getattr(self, "board_only_mode", False):
+        if board_only:
             self._draw_table()
             self._draw_dealer()
             # Web UI shows per-player cards; keep Pyglet clean.
@@ -1268,6 +1280,20 @@ class BlackjackGame:
                 self._draw_animating_cards()
             self._draw_board_only_status_overlay()
             return
+
+        # Full table-mode UI (legacy physical-table view)
+        self._draw_panels()
+        self._draw_table()
+        self._draw_dealer()
+        self._draw_player_cards()
+
+        # Draw animating cards on top
+        if hasattr(self, 'card_animations') and len(self.card_animations) > 0:
+            self._draw_animating_cards()
+
+        # Popup without dimming overlay
+        if self.popup.active:
+            self.popup.draw(self.renderer)
 
     def _draw_board_only_status_overlay(self) -> None:
         """Small status line for the Pyglet window in Web-UI-first mode."""
@@ -1306,26 +1332,6 @@ class BlackjackGame:
             )
         except Exception:
             return
-
-        # Panels
-        self._draw_panels()
-
-        # Table
-        self._draw_table()
-
-        # Dealer cards
-        self._draw_dealer()
-
-        # Player cards
-        self._draw_player_cards()
-
-        # Draw animating cards on top
-        if hasattr(self, 'card_animations') and len(self.card_animations) > 0:
-            self._draw_animating_cards()
-
-        # Popup without dimming overlay
-        if self.popup.active:
-            self.popup.draw(self.renderer)
     
     def draw_immediate(self):
         """Draw elements on top (called after batched rendering)"""
@@ -1778,7 +1784,7 @@ class BlackjackGame:
     def _draw_game_over(self):
         """Draw game over screen"""
         # Background
-        self.renderer.draw_rect((0, 80, 40), (0, 0, self.width, self.height))
+        self._draw_background(self.width, self.height)
         
         # Draw panels to show final chip counts
         self._draw_panels()
@@ -1812,47 +1818,47 @@ class BlackjackGame:
     
     def _draw_player_select(self):
         """Draw player selection"""
-        self.renderer.draw_rect((0, 50, 25), (0, 0, self.width, self.height))
-        
+        self._draw_background(self.width, self.height)
+
         self.renderer.draw_text(
             "Select Players - Blackjack",
             self.width // 2, 50,
             'Arial', 48, Colors.WHITE,
             anchor_x='center', anchor_y='center'
         )
-        
+
         # Draw slots
         for i, (sx, sy, sw, sh) in enumerate(self.selection_ui.slots):
             cx = sx + sw // 2
             cy = sy + sh // 2
             radius = sw // 2
             color = PLAYER_COLORS[i]
-            
+
             if self.selection_ui.selected[i]:
                 self.renderer.draw_circle(color, (cx, cy), radius)
                 self.renderer.draw_circle((255, 255, 255), (cx, cy), radius, width=5)
             else:
                 self.renderer.draw_circle((80, 80, 80), (cx, cy), radius, width=3)
-            
+
             text_color = (255, 255, 255) if self.selection_ui.selected[i] else (150, 150, 150)
             self.renderer.draw_text(
                 f"P{i+1}", cx, cy,
                 'Arial', 36, text_color,
                 anchor_x='center', anchor_y='center'
             )
-        
+
         # Start button
         btn_size = 160
         cx = self.width // 2
         cy = self.height // 2
         count = self.selection_ui.selected_count()
-        
+
         if count >= 1:
             self.renderer.draw_circle((70, 130, 180), (cx, cy), btn_size // 2)
             self.renderer.draw_circle((200, 200, 200), (cx, cy), btn_size // 2, width=3)
         else:
             self.renderer.draw_circle((100, 100, 100), (cx, cy), btn_size // 2)
-        
+
         self.renderer.draw_text(
             "Start", cx, cy - 10,
             'Arial', 36, (255, 255, 255),
@@ -1863,3 +1869,26 @@ class BlackjackGame:
             'Arial', 18, (200, 200, 200),
             anchor_x='center', anchor_y='center'
         )
+
+    def _draw_background(self, w: int, h: int) -> None:
+        """Draw a subtle table/background (no external assets)."""
+        try:
+            # Base
+            self.renderer.draw_rect((10, 10, 12), (0, 0, w, h))
+            # Soft top/bottom bands
+            self.renderer.draw_rect((180, 80, 235), (0, int(h * 0.78), w, int(h * 0.22)), alpha=10)
+            self.renderer.draw_rect((240, 180, 90), (0, 0, w, int(h * 0.18)), alpha=6)
+
+            # Center glow
+            r = int(min(w, h) * 0.42)
+            self.renderer.draw_circle((120, 60, 160), (int(w * 0.50), int(h * 0.52)), r, alpha=7)
+            self.renderer.draw_circle((80, 140, 235), (int(w * 0.50), int(h * 0.52)), int(r * 0.72), alpha=6)
+
+            # Diagonal accents
+            self.renderer.draw_line((200, 200, 220), (int(w * 0.08), int(h * 0.88)), (int(w * 0.30), int(h * 0.68)), width=3, alpha=25)
+            self.renderer.draw_line((200, 200, 220), (int(w * 0.92), int(h * 0.12)), (int(w * 0.70), int(h * 0.32)), width=3, alpha=22)
+        except Exception:
+            try:
+                self.renderer.draw_rect((10, 10, 12), (0, 0, w, h))
+            except Exception:
+                pass

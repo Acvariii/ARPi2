@@ -2206,7 +2206,7 @@ class MonopolyGame:
         # True board-only mode (no panels/popups in the Pyglet window)
         if getattr(self, "board_only_mode", False):
             # Background
-            self.renderer.draw_rect((32, 96, 36), (0, 0, self.width, self.height))
+            self._draw_background(self.width, self.height)
 
             # IMPORTANT: keep geometry consistent for draw_immediate() (tokens are drawn after
             # renderer.draw_all() in the server). If we only change board_rect temporarily here,
@@ -2231,7 +2231,7 @@ class MonopolyGame:
             return
 
         # Background
-        self.renderer.draw_rect((32, 96, 36), (0, 0, self.width, self.height))
+        self._draw_background(self.width, self.height)
 
         # Panels
         self._draw_panels()
@@ -2255,7 +2255,30 @@ class MonopolyGame:
     def _draw_player_select_board_only(self):
         """Render the Monopoly board full-screen (no panels/selection UI)."""
         # Background
-        self.renderer.draw_rect((32, 96, 36), (0, 0, self.width, self.height))
+        self._draw_background(self.width, self.height)
+
+    def _draw_background(self, w: int, h: int) -> None:
+        """Draw a subtle table/background (no external assets)."""
+        try:
+            # Base
+            self.renderer.draw_rect((10, 10, 12), (0, 0, w, h))
+            # Soft top/bottom bands
+            self.renderer.draw_rect((180, 80, 235), (0, int(h * 0.78), w, int(h * 0.22)), alpha=10)
+            self.renderer.draw_rect((240, 180, 90), (0, 0, w, int(h * 0.18)), alpha=6)
+
+            # Center glow
+            r = int(min(w, h) * 0.42)
+            self.renderer.draw_circle((120, 60, 160), (int(w * 0.50), int(h * 0.52)), r, alpha=7)
+            self.renderer.draw_circle((80, 140, 235), (int(w * 0.50), int(h * 0.52)), int(r * 0.72), alpha=6)
+
+            # Diagonal accents
+            self.renderer.draw_line((200, 200, 220), (int(w * 0.08), int(h * 0.88)), (int(w * 0.30), int(h * 0.68)), width=3, alpha=25)
+            self.renderer.draw_line((200, 200, 220), (int(w * 0.92), int(h * 0.12)), (int(w * 0.70), int(h * 0.32)), width=3, alpha=22)
+        except Exception:
+            try:
+                self.renderer.draw_rect((10, 10, 12), (0, 0, w, h))
+            except Exception:
+                pass
 
         # Temporarily expand the board to use the full window.
         old_board_rect = getattr(self, "board_rect", None)

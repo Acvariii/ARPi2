@@ -63,9 +63,23 @@ class PygletGameServer:
         self.ui_client_ready: Dict[str, bool] = {}
         self.ui_client_vote: Dict[str, str] = {}
         self.ui_client_end_game: Dict[str, bool] = {}
+        self.ui_client_music_mute_vote: Dict[str, bool] = {}
         self.player_names: Dict[int, str] = {}
         self.web_cursors: Dict[int, Dict] = {}  # player_idx -> {pos:(x,y), click:bool, t:float}
         self.web_esc_requested = False
+
+        # Audio (Pyglet)
+        self._audio_inited = False
+        self._bg_player = None
+        self._bg_track: Optional[str] = None
+        self._bg_volume = 0.35
+        self._sfx_cache: Dict[str, object] = {}
+        self._music_muted = False
+        self._last_music_state: Optional[str] = None
+
+        # Draw SFX tracking (detect deck size drops)
+        self._last_deck_state: Optional[str] = None
+        self._last_deck_counts: Dict[str, int] = {}
 
         # Web-UI-first mode: do not rely on hand tracking or mouse hover input.
         self.web_ui_only = True
@@ -100,6 +114,230 @@ class PygletGameServer:
 
         # Finish initializing networking/window/rendering.
         self._finish_init()
+
+    def _sounds_dir(self) -> Path:
+        return (Path(__file__).parent / "sounds").resolve()
+
+    def _audio_init(self) -> None:
+        if bool(getattr(self, "_audio_inited", False)):
+            return
+        try:
+            self._bg_player = pyglet.media.Player()
+            try:
+                self._bg_player.volume = float(getattr(self, "_bg_volume", 0.35))
+            except Exception:
+                pass
+        except Exception:
+            self._bg_player = None
+        self._sfx_cache = {}
+        self._audio_inited = True
+
+    def _audio_load(self, filename: str, streaming: bool = False):
+        try:
+            self._audio_init()
+        except Exception:
+            return None
+        name = (filename or "").strip()
+        if not name:
+            return None
+        path = self._sounds_dir() / name
+        try:
+            if not path.exists():
+                return None
+        except Exception:
+            return None
+        try:
+            return pyglet.media.load(str(path), streaming=bool(streaming))
+        except Exception:
+            return None
+
+    def _play_sfx(self, filename: str) -> None:
+        # One-shot sound effect.
+        try:
+            self._audio_init()
+        except Exception:
+            return
+        src = self._sfx_cache.get(filename)
+        if src is None:
+            src = self._audio_load(filename, streaming=False)
+            if src is None:
+                return
+            self._sfx_cache[filename] = src
+        try:
+            src.play()
+        except Exception:
+            return
+
+    def _stop_bg_music(self) -> None:
+        try:
+            p = getattr(self, "_bg_player", None)
+            if p is None:
+                return
+            try:
+                p.pause()
+            except Exception:
+                pass
+            try:
+                p.delete()
+            except Exception:
+                pass
+        except Exception:
+            pass
+        try:
+            self._bg_player = pyglet.media.Player()
+            try:
+                self._bg_player.volume = float(getattr(self, "_bg_volume", 0.35))
+            except Exception:
+                pass
+        except Exception:
+            self._bg_player = None
+
+    def _set_bg_music(self, filename: Optional[str]) -> None:
+        # Looping background music.
+        try:
+            self._audio_init()
+        except Exception:
+            return
+
+        want = (filename or "").strip() or None
+        if want == getattr(self, "_bg_track", None):
+            return
+        self._bg_track = want
+
+        # Always stop old track when switching.
+        self._stop_bg_music()
+        if want is None:
+            return
+        if bool(getattr(self, "_music_muted", False)):
+            return
+
+        src = self._audio_load(want, streaming=False)
+        if src is None:
+            return
+
+        p = getattr(self, "_bg_player", None)
+        if p is None:
+            return
+
+        # Prefer SourceGroup looping; fallback to eos_action if needed.
+        try:
+            group = pyglet.media.SourceGroup(src.audio_format, None)
+            group.loop = True
+            group.queue(src)
+            p.queue(group)
+        except Exception:
+            try:
+                p.queue(src)
+                try:
+                    p.eos_action = pyglet.media.Player.EOS_LOOP
+                except Exception:
+                    pass
+            except Exception:
+                return
+
+        try:
+            p.play()
+        except Exception:
+            return
+
+    def _desired_bg_track_for_state(self, state: str) -> Optional[str]:
+        st = str(state or "").strip()
+        if st == "menu":
+            return "LobbyBG.mp3"
+        if st == "blackjack":
+            return "BlackjackBG.mp3"
+        if st == "exploding_kittens":
+            return "ExplodingKittensBG.mp3"
+        if st == "uno":
+            return "UnoBG.mp3"
+        if st == "monopoly":
+            return "MonopolyBG.mp3"
+        return None
+
+    def _eligible_music_vote_client_ids(self) -> List[str]:
+        eligible: List[str] = []
+        for cid, seat in (self.ui_client_player or {}).items():
+            if cid not in (self.ui_clients or {}):
+                continue
+            if isinstance(seat, int) and seat >= 0:
+                eligible.append(cid)
+        return eligible
+
+    def _music_vote_counts(self) -> tuple[int, int, bool]:
+        eligible = self._eligible_music_vote_client_ids()
+        total = len(eligible)
+        required = max(1, (total // 2) + 1)
+        votes = sum(1 for cid in eligible if bool(self.ui_client_music_mute_vote.get(cid, False)))
+        muted = votes >= required
+        return votes, required, muted
+
+    def _recompute_music_mute(self) -> None:
+        votes, required, muted = self._music_vote_counts()
+        prev = bool(getattr(self, "_music_muted", False))
+        self._music_muted = bool(muted)
+        if prev != self._music_muted:
+            desired = self._desired_bg_track_for_state(self.state)
+            if self._music_muted:
+                self._stop_bg_music()
+            else:
+                # Force restart even if the desired track matches the previous track.
+                self._bg_track = None
+                self._set_bg_music(desired)
+
+    def _audio_tick(self) -> None:
+        # Keep background music in sync with server state and vote mute.
+        try:
+            self._audio_init()
+        except Exception:
+            return
+        try:
+            self._recompute_music_mute()
+        except Exception:
+            pass
+
+        st = str(getattr(self, "state", "") or "")
+        if st != getattr(self, "_last_music_state", None):
+            self._last_music_state = st
+            self._set_bg_music(self._desired_bg_track_for_state(st))
+
+    def _current_deck_count_for_state(self) -> Optional[tuple[str, int]]:
+        st = str(getattr(self, "state", "") or "")
+        try:
+            if st == "uno":
+                g = getattr(self, "uno_game", None)
+                return ("uno", int(len(getattr(g, "draw_pile", []) or [])))
+            if st == "exploding_kittens":
+                g = getattr(self, "exploding_kittens_game", None)
+                return ("exploding_kittens", int(len(getattr(g, "draw_pile", []) or [])))
+            if st == "blackjack":
+                g = getattr(self, "blackjack_game", None)
+                return ("blackjack", int(len(getattr(g, "deck", []) or [])))
+        except Exception:
+            return None
+        return None
+
+    def _maybe_play_flip_on_deck_change(self) -> None:
+        info = self._current_deck_count_for_state()
+        if not info:
+            self._last_deck_state = str(getattr(self, "state", "") or "")
+            return
+
+        key, current = info
+        st = str(getattr(self, "state", "") or "")
+
+        # On state change, seed baseline without playing sounds.
+        if st != getattr(self, "_last_deck_state", None):
+            self._last_deck_state = st
+            self._last_deck_counts[key] = int(current)
+            return
+
+        last = self._last_deck_counts.get(key)
+        if isinstance(last, int) and int(current) < int(last):
+            try:
+                self._play_sfx("FlipCard.mp3")
+            except Exception:
+                pass
+        self._last_deck_counts[key] = int(current)
 
     def _dnd_backgrounds_dir(self) -> Path:
         return (Path(__file__).parent / "games" / "dnd" / "backgrounds").resolve()
@@ -427,6 +665,12 @@ class PygletGameServer:
         print(f"OpenGL Version: {gl.gl_info.get_version()}")
         print(f"OpenGL Renderer: {gl.gl_info.get_renderer()}")
         print(f"Web UI: http://{self.host}:{self.http_server_port}")
+
+        # Audio must be initialized after Pyglet is ready.
+        try:
+            self._audio_init()
+        except Exception:
+            pass
 
     def _log_history(self, msg: str) -> None:
         text = (msg or "").strip()
@@ -1147,9 +1391,32 @@ class PygletGameServer:
         return btns
 
     def get_ui_snapshot(self, player_idx: int):
+        # Audio snapshot (music mute vote)
+        my_client_id = None
+        try:
+            for cid, seat in (self.ui_client_player or {}).items():
+                if cid not in (self.ui_clients or {}):
+                    continue
+                if isinstance(seat, int) and seat == player_idx:
+                    my_client_id = cid
+                    break
+        except Exception:
+            my_client_id = None
+
+        try:
+            mute_votes, mute_required, music_muted = self._music_vote_counts()
+        except Exception:
+            mute_votes, mute_required, music_muted = 0, 1, False
+
         snap = {
             "server_state": self.state,
             "history": list(getattr(self, "ui_history", [])),
+            "audio": {
+                "music_muted": bool(music_muted),
+                "mute_votes": int(mute_votes),
+                "mute_required": int(mute_required),
+                "you_voted_mute": bool(self.ui_client_music_mute_vote.get(my_client_id, False)) if my_client_id else False,
+            },
             "palette": {
                 "player_colors": [
                     "#ff4d4d",  # Player 1
@@ -1653,6 +1920,8 @@ class PygletGameServer:
             self.ui_client_ready[client_id] = False
             self.ui_client_vote.pop(client_id, None)
             self.ui_client_end_game[client_id] = False
+            self.ui_client_music_mute_vote.pop(client_id, None)
+            self._recompute_music_mute()
             self._sync_player_select_from_seats()
 
             who = None
@@ -1698,6 +1967,16 @@ class PygletGameServer:
                 if isinstance(seat, int) and seat >= 0 and name:
                     self.player_names[seat] = name[:24]
             self.ui_client_end_game.setdefault(client_id, False)
+            return
+
+        if msg_type == "vote_music_mute":
+            # Only seated clients can vote.
+            seat = self.ui_client_player.get(client_id, -1)
+            if not (isinstance(seat, int) and seat >= 0):
+                return
+            cur = bool(self.ui_client_music_mute_vote.get(client_id, False))
+            self.ui_client_music_mute_vote[client_id] = not cur
+            self._recompute_music_mute()
             return
 
         if msg_type == "set_seat":
@@ -2498,6 +2777,12 @@ class PygletGameServer:
         self.ui_client_end_game.setdefault(client_id, False)
         print(f"UI client connected: {client_id}")
 
+        if self.state == "menu":
+            try:
+                self._play_sfx("HeartbeatReady.mp3")
+            except Exception:
+                pass
+
         try:
             async for message in websocket:
                 if isinstance(message, bytes):
@@ -2519,6 +2804,11 @@ class PygletGameServer:
             self.ui_client_ready.pop(client_id, None)
             self.ui_client_vote.pop(client_id, None)
             self.ui_client_end_game.pop(client_id, None)
+            self.ui_client_music_mute_vote.pop(client_id, None)
+            try:
+                self._recompute_music_mute()
+            except Exception:
+                pass
             print(f"UI client disconnected: {client_id}")
     
     def _create_game_buttons(self):
@@ -2891,6 +3181,8 @@ class PygletGameServer:
     
     def update(self, dt: float):
         """Update game state"""
+        self._audio_tick()
+        self._maybe_play_flip_on_deck_change()
         # Web UI history feed (log only on deltas)
         self._update_monopoly_history()
 

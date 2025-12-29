@@ -178,16 +178,7 @@ class UnoGame:
             w, h = int(getattr(self.renderer, "width", self.width)), int(getattr(self.renderer, "height", self.height))
         except Exception:
             w, h = self.width, self.height
-        try:
-            # Dark base + subtle UNO-ish diagonal accents.
-            self.renderer.draw_rect((12, 12, 12), (0, 0, w, h))
-            diag_cols = [self._color_rgb("R"), self._color_rgb("G"), self._color_rgb("B"), self._color_rgb("Y")]
-            # Big, low-alpha diagonal strokes.
-            for i, c in enumerate(diag_cols):
-                y0 = int(h * (0.10 + i * 0.18))
-                self.renderer.draw_line(c, (0, y0), (w, int(y0 + h * 0.15)), width=int(max(18, w * 0.04)), alpha=32)
-        except Exception:
-            return
+        self._draw_background(w, h)
 
         title = "UNO"
         top = self.top_card
@@ -195,11 +186,6 @@ class UnoGame:
         status = f"Turn: {self._seat_label(turn)}" if isinstance(turn, int) else "Turn: —"
         tc = top.short() if top else "—"
         col = self.current_color or "—"
-
-        try:
-            self.renderer.draw_rect((14, 14, 16), (-4, -4, w + 8, h + 8))
-        except Exception:
-            return
 
         # Header
         try:
@@ -240,6 +226,29 @@ class UnoGame:
             )
         except Exception:
             pass
+
+    def _draw_background(self, w: int, h: int) -> None:
+        """Draw a subtle table/background (no external assets)."""
+        try:
+            # Base
+            self.renderer.draw_rect((10, 10, 12), (0, 0, w, h))
+            # Soft top/bottom bands
+            self.renderer.draw_rect((180, 80, 235), (0, int(h * 0.78), w, int(h * 0.22)), alpha=10)
+            self.renderer.draw_rect((240, 180, 90), (0, 0, w, int(h * 0.18)), alpha=6)
+
+            # Center glow
+            r = int(min(w, h) * 0.42)
+            self.renderer.draw_circle((120, 60, 160), (int(w * 0.50), int(h * 0.52)), r, alpha=7)
+            self.renderer.draw_circle((80, 140, 235), (int(w * 0.50), int(h * 0.52)), int(r * 0.72), alpha=6)
+
+            # Diagonal accents
+            self.renderer.draw_line((200, 200, 220), (int(w * 0.08), int(h * 0.88)), (int(w * 0.30), int(h * 0.68)), width=3, alpha=25)
+            self.renderer.draw_line((200, 200, 220), (int(w * 0.92), int(h * 0.12)), (int(w * 0.70), int(h * 0.32)), width=3, alpha=22)
+        except Exception:
+            try:
+                self.renderer.draw_rect((10, 10, 12), (0, 0, w, h))
+            except Exception:
+                pass
 
         # Seat zones + counts
         for seat in self.active_players:
