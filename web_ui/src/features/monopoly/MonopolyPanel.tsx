@@ -10,6 +10,8 @@ type Props = {
 };
 
 export default function MonopolyPanel({ snapshot, seatLabel, send, playerColors }: Props): React.ReactElement {
+  if (snapshot.server_state !== 'monopoly' || !snapshot.monopoly) return <></>;
+
   return (
     <>
       {!!snapshot.panel_buttons?.length && !snapshot.popup?.active && (

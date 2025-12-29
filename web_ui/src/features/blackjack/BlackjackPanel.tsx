@@ -24,6 +24,9 @@ type Props = {
 export default function BlackjackPanel({ snapshot, status, isSeated, send, CardRow }: Props): React.ReactElement {
   if (snapshot.server_state !== 'blackjack' || !snapshot.blackjack) return <></>;
 
+  const panelButtons = snapshot.panel_buttons || [];
+  const sendClick = (id: string) => send({ type: 'click_button', id });
+
   return (
     <>
       <Paper variant="outlined" sx={{ p: 1.5, mb: 2 }}>
@@ -86,6 +89,42 @@ export default function BlackjackPanel({ snapshot, status, isSeated, send, CardR
                 >
                   Clear bet
                 </Button>
+              </Stack>
+
+              {!!panelButtons.length && !snapshot.popup?.active && (
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 1 }}>
+                  {panelButtons.map((b) => (
+                    <Button
+                      key={b.id}
+                      variant={String(b.text || '').toLowerCase().includes('ready') ? 'contained' : 'outlined'}
+                      color={String(b.text || '').toLowerCase().includes('ready') ? 'success' : 'primary'}
+                      disabled={status !== 'connected' || !isSeated || !b.enabled}
+                      onClick={() => sendClick(b.id)}
+                    >
+                      {b.text || b.id}
+                    </Button>
+                  ))}
+                </Stack>
+              )}
+            </>
+          )}
+
+          {snapshot.blackjack.state === 'playing' && !!panelButtons.length && !snapshot.popup?.active && (
+            <>
+              <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                Actions
+              </Typography>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                {panelButtons.map((b) => (
+                  <Button
+                    key={b.id}
+                    variant="contained"
+                    disabled={status !== 'connected' || !isSeated || !b.enabled}
+                    onClick={() => sendClick(b.id)}
+                  >
+                    {b.text || b.id}
+                  </Button>
+                ))}
               </Stack>
             </>
           )}

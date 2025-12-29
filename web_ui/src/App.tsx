@@ -26,6 +26,7 @@ import MonopolyPanel from './features/monopoly/MonopolyPanel';
 import UnoPanel from './features/uno/UnoPanel';
 import ExplodingKittensPanel from './features/exploding_kittens/ExplodingKittensPanel';
 import TexasHoldemPanel from './features/texas_holdem/TexasHoldemPanel';
+import CluedoPanel from './features/cluedo/CluedoPanel';
 
 type ConnStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -561,6 +562,8 @@ export default function App(): React.ReactElement {
 
             <TexasHoldemPanel snapshot={snapshot} seatLabel={seatLabel} send={send} playerColors={playerColors} />
 
+            <CluedoPanel snapshot={snapshot} seatLabel={seatLabel} send={send} playerColors={playerColors} />
+
             {snapshot.server_state === 'menu' && (
               <>
                 <Typography variant="subtitle1" gutterBottom>
@@ -592,7 +595,8 @@ export default function App(): React.ReactElement {
                     <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                       Votes: Monopoly {snapshot.lobby?.votes?.monopoly ?? 0} · Blackjack{' '}
                       {snapshot.lobby?.votes?.blackjack ?? 0} · Uno {snapshot.lobby?.votes?.uno ?? 0} · Exploding Kittens{' '}
-                      {snapshot.lobby?.votes?.exploding_kittens ?? 0} · Texas Hold'em {snapshot.lobby?.votes?.texas_holdem ?? 0} · D&D{' '}
+                      {snapshot.lobby?.votes?.exploding_kittens ?? 0} · Texas Hold'em {snapshot.lobby?.votes?.texas_holdem ?? 0} · Cluedo{' '}
+                      {snapshot.lobby?.votes?.cluedo ?? 0} · D&D{' '}
                       {(snapshot.lobby?.votes?.['d&d'] ?? 0) + (snapshot.lobby?.votes?.dnd ?? 0)}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">

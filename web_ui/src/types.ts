@@ -235,6 +235,23 @@ export type Snapshot = {
       reason?: string;
     } | null;
   };
+  cluedo?: {
+    state?: string;
+    active_players?: number[];
+    current_turn_seat?: number | null;
+    last_roll?: number | null;
+    steps_remaining?: number;
+    mode?: string;
+    winner?: number | null;
+    // keys are stringified in JSON
+    hand_counts?: Record<string, number>;
+    players?: Array<{ seat: number; name: string; eliminated: boolean; room?: string | null; hand_count: number }>;
+    your_hand?: Array<{ kind: string; name: string; emoji?: string; text: string }>;
+    last_event?: string | null;
+    last_event_age_ms?: number;
+    private_event?: string | null;
+    private_event_age_ms?: number;
+  };
   cursors?: CursorSnapshot[];
 };
 

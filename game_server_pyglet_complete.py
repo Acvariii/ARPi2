@@ -33,6 +33,7 @@ from games.blackjack import BlackjackGame
 from games.uno import UnoGame
 from games.exploding_kittens import ExplodingKittensGame
 from games.texas_holdem import TexasHoldemGame
+from games.cluedo import CluedoGame
 from games.dnd import DnDCharacterCreation
 
 from server.dnd_dice import CenterDiceRollDisplay
@@ -77,6 +78,7 @@ class PygletGameServer:
         self._sfx_cache: Dict[str, object] = {}
         self._music_muted = False
         self._last_music_state: Optional[str] = None
+        self._bg_restart_in_progress: bool = False
 
         # Draw SFX tracking (detect deck size drops)
         self._last_deck_state: Optional[str] = None
@@ -123,15 +125,61 @@ class PygletGameServer:
         if bool(getattr(self, "_audio_inited", False)):
             return
         try:
-            self._bg_player = pyglet.media.Player()
-            try:
-                self._bg_player.volume = float(getattr(self, "_bg_volume", 0.35))
-            except Exception:
-                pass
+            self._bg_player = self._create_bg_player()
         except Exception:
             self._bg_player = None
         self._sfx_cache = {}
         self._audio_inited = True
+
+    def _create_bg_player(self):
+        p = pyglet.media.Player()
+        try:
+            p.volume = float(getattr(self, "_bg_volume", 0.35))
+        except Exception:
+            pass
+        try:
+            p.push_handlers(on_eos=lambda: self._on_bg_eos())
+        except Exception:
+            pass
+        return p
+
+    def _on_bg_eos(self) -> None:
+        # Defensive fallback: some platforms/codecs don't loop reliably.
+        if bool(getattr(self, "_bg_restart_in_progress", False)):
+            return
+        self._bg_restart_in_progress = True
+        try:
+            track = (getattr(self, "_bg_track", None) or "").strip() or None
+            if track is None:
+                return
+            if bool(getattr(self, "_music_muted", False)):
+                return
+
+            p = getattr(self, "_bg_player", None)
+            if p is None:
+                return
+
+            src = self._audio_load(track, streaming=True)
+            if src is None:
+                return
+
+            try:
+                group = pyglet.media.SourceGroup(src.audio_format, None)
+                group.loop = True
+                group.queue(src)
+                p.queue(group)
+            except Exception:
+                try:
+                    p.queue(src)
+                except Exception:
+                    return
+
+            try:
+                p.play()
+            except Exception:
+                return
+        finally:
+            self._bg_restart_in_progress = False
 
     def _audio_load(self, filename: str, streaming: bool = False):
         try:
@@ -185,11 +233,7 @@ class PygletGameServer:
         except Exception:
             pass
         try:
-            self._bg_player = pyglet.media.Player()
-            try:
-                self._bg_player.volume = float(getattr(self, "_bg_volume", 0.35))
-            except Exception:
-                pass
+            self._bg_player = self._create_bg_player()
         except Exception:
             self._bg_player = None
 
@@ -212,7 +256,8 @@ class PygletGameServer:
         if bool(getattr(self, "_music_muted", False)):
             return
 
-        src = self._audio_load(want, streaming=False)
+        # Prefer streaming sources for long-running BG tracks.
+        src = self._audio_load(want, streaming=True)
         if src is None:
             return
 
@@ -220,7 +265,7 @@ class PygletGameServer:
         if p is None:
             return
 
-        # Prefer SourceGroup looping; fallback to eos_action if needed.
+        # Prefer SourceGroup looping; fallback to eos_action + on_eos restart if needed.
         try:
             group = pyglet.media.SourceGroup(src.audio_format, None)
             group.loop = True
@@ -255,6 +300,8 @@ class PygletGameServer:
             return "MonopolyBG.mp3"
         if st == "texas_holdem":
             return "TexasHoldemBG.mp3"
+        if st == "cluedo":
+            return "CluedoBG.mp3"
         return None
 
     def _eligible_music_vote_client_ids(self) -> List[str]:
@@ -630,6 +677,7 @@ class PygletGameServer:
         self.uno_game = UnoGame(self.window.width, self.window.height, self.renderer)
         self.exploding_kittens_game = ExplodingKittensGame(self.window.width, self.window.height, self.renderer)
         self.texas_holdem_game = TexasHoldemGame(self.window.width, self.window.height, self.renderer)
+        self.cluedo_game = CluedoGame(self.window.width, self.window.height, self.renderer)
 
         # Provide seat->name to games that can render player names on the board.
         try:
@@ -650,18 +698,26 @@ class PygletGameServer:
         except Exception:
             pass
 
+        try:
+            if hasattr(self.cluedo_game, "set_name_provider"):
+                self.cluedo_game.set_name_provider(self._player_display_name)
+        except Exception:
+            pass
+
         # Player selection is handled via Web UI (button-driven), so hide in-window selection UIs.
         setattr(self.monopoly_game, "web_ui_only_player_select", True)
         setattr(self.blackjack_game, "web_ui_only_player_select", True)
         setattr(self.uno_game, "web_ui_only_player_select", True)
         setattr(self.exploding_kittens_game, "web_ui_only_player_select", True)
         setattr(self.texas_holdem_game, "web_ui_only_player_select", True)
+        setattr(self.cluedo_game, "web_ui_only_player_select", True)
         # Board-only rendering in the Pyglet window (no panels). Web UI shows actions/info.
         setattr(self.monopoly_game, "board_only_mode", True)
         setattr(self.blackjack_game, "board_only_mode", True)
         setattr(self.uno_game, "board_only_mode", True)
         setattr(self.exploding_kittens_game, "board_only_mode", True)
         setattr(self.texas_holdem_game, "board_only_mode", True)
+        setattr(self.cluedo_game, "board_only_mode", True)
         if hasattr(self.dnd_creation, "game"):
             setattr(self.dnd_creation.game, "web_ui_only_player_select", True)
             setattr(self.dnd_creation.game, "web_ui_only_char_creation", True)
@@ -991,6 +1047,10 @@ class PygletGameServer:
             self.state = "texas_holdem"
             self.texas_holdem_game.state = "player_select"
             self.texas_holdem_game.selection_ui.reset()
+        elif key == "cluedo":
+            self.state = "cluedo"
+            self.cluedo_game.state = "player_select"
+            self.cluedo_game.selection_ui.reset()
         elif key in ("d&d", "dnd"):
             self.state = "dnd_creation"
             self.dnd_dm_seat = None
@@ -1055,6 +1115,8 @@ class PygletGameServer:
             return self.exploding_kittens_game
         if self.state == "texas_holdem":
             return self.texas_holdem_game
+        if self.state == "cluedo":
+            return self.cluedo_game
         if self.state == "dnd_creation":
             return getattr(self.dnd_creation, "game", None) or self.dnd_creation
         return None
@@ -1086,6 +1148,8 @@ class PygletGameServer:
         elif self.state == "exploding_kittens":
             start_enabled = sum(1 for s in slots if s["selected"]) >= 2
         elif self.state == "texas_holdem":
+            start_enabled = sum(1 for s in slots if s["selected"]) >= 2
+        elif self.state == "cluedo":
             start_enabled = sum(1 for s in slots if s["selected"]) >= 2
         elif self.state == "dnd_creation":
             sel_count = sum(1 for s in slots if s["selected"])
@@ -1782,6 +1846,15 @@ class PygletGameServer:
             except Exception:
                 pass
 
+        if self.state == "cluedo":
+            try:
+                cg = self.cluedo_game
+                st = cg.get_public_state(player_idx) if hasattr(cg, "get_public_state") else None
+                if isinstance(st, dict):
+                    snap["cluedo"] = st
+            except Exception:
+                pass
+
         if self.state == "dnd_creation":
             try:
                 dg = getattr(self.dnd_creation, "game", None)
@@ -2032,7 +2105,17 @@ class PygletGameServer:
             if not self._lobby_all_ready():
                 return
             key = data.get("key")
-            if key not in ("monopoly", "blackjack", "uno", "exploding_kittens", "texas_holdem", "d&d", "dnd"):
+            if not isinstance(key, str):
+                return
+            key = key.strip()
+            # Back-compat alias
+            if key == "dnd":
+                key = "d&d"
+            try:
+                allowed_keys = {str(b.get("key")) for b in (self.game_buttons or []) if b and b.get("key")}
+            except Exception:
+                allowed_keys = set()
+            if key not in allowed_keys:
                 return
             # Only ready+seated clients may vote.
             seat = self.ui_client_player.get(client_id, -1)
@@ -2040,7 +2123,7 @@ class PygletGameServer:
                 return
             if not bool(self.ui_client_ready.get(client_id, False)):
                 return
-            self.ui_client_vote[client_id] = "d&d" if key == "dnd" else key
+            self.ui_client_vote[client_id] = key
             self._maybe_apply_vote_result()
             return
 
@@ -2270,6 +2353,8 @@ class PygletGameServer:
             elif self.state == "exploding_kittens" and len(selected_indices) >= 2:
                 game.start_game(selected_indices)
             elif self.state == "texas_holdem" and len(selected_indices) >= 2:
+                game.start_game(selected_indices)
+            elif self.state == "cluedo" and len(selected_indices) >= 2:
                 game.start_game(selected_indices)
             elif self.state == "dnd_creation":
                 dm = self.dnd_dm_seat
@@ -2801,6 +2886,14 @@ class PygletGameServer:
             elif self.state == "texas_holdem":
                 if hasattr(game, "handle_click"):
                     game.handle_click(pidx, btn_id)
+            elif self.state == "cluedo":
+                if hasattr(game, "handle_click"):
+                    if btn_id == "roll":
+                        try:
+                            self._play_sfx("RollDice.mp3")
+                        except Exception:
+                            pass
+                    game.handle_click(pidx, btn_id)
             return
 
     async def handle_ui_client(self, websocket):
@@ -2853,6 +2946,7 @@ class PygletGameServer:
             ("Uno", "uno"),
             ("Exploding Kittens", "exploding_kittens"),
             ("Texas Hold'em", "texas_holdem"),
+            ("Cluedo", "cluedo"),
             ("D&D", "d&d"),
         ]
         buttons = []
@@ -2914,6 +3008,7 @@ class PygletGameServer:
             getattr(self, "uno_game", None),
             getattr(self, "exploding_kittens_game", None),
             getattr(self, "texas_holdem_game", None),
+            getattr(self, "cluedo_game", None),
             getattr(self, "dnd_creation", None),
         ):
             if g is None:
@@ -2941,6 +3036,8 @@ class PygletGameServer:
             self.exploding_kittens_game.draw()
         elif self.state == "texas_holdem":
             self.texas_holdem_game.draw()
+        elif self.state == "cluedo":
+            self.cluedo_game.draw()
         elif self.state == "dnd_creation":
             # Web UI drives D&D fully; keep the server window clean/fullscreen,
             # but reflect the chosen background + encounter.
@@ -3271,6 +3368,11 @@ class PygletGameServer:
             except Exception:
                 pass
             try:
+                self.cluedo_game.state = "player_select"
+                self.cluedo_game.selection_ui.reset()
+            except Exception:
+                pass
+            try:
                 sess = getattr(self.dnd_creation, "game", None)
                 if sess is not None:
                     sess.state = "player_select"
@@ -3321,6 +3423,8 @@ class PygletGameServer:
             self.exploding_kittens_game.update(dt)
         elif self.state == "texas_holdem":
             self.texas_holdem_game.update(dt)
+        elif self.state == "cluedo":
+            self.cluedo_game.update(dt)
         elif self.state == "dnd_creation":
             self.dnd_creation.update(dt)
             try:
