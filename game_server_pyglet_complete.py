@@ -368,6 +368,20 @@ class PygletGameServer:
             self._last_music_state = st
             self._set_bg_music(self._desired_bg_track_for_state(st))
 
+        # Defensive: if playback stopped for any reason, restart the desired track.
+        try:
+            if not bool(getattr(self, "_music_muted", False)):
+                desired = self._desired_bg_track_for_state(str(getattr(self, "state", "") or ""))
+                if desired:
+                    p = getattr(self, "_bg_player", None)
+                    playing = bool(getattr(p, "playing", False)) if p is not None else False
+                    if not playing:
+                        # Force restart even if the desired track matches the previous track.
+                        self._bg_track = None
+                        self._set_bg_music(desired)
+        except Exception:
+            pass
+
     def _current_deck_count_for_state(self) -> Optional[tuple[str, int]]:
         st = str(getattr(self, "state", "") or "")
         try:
@@ -2987,6 +3001,11 @@ class PygletGameServer:
                     game.handle_click(pidx, btn_id)
             elif self.state == "risk":
                 if hasattr(game, "handle_click"):
+                    if btn_id == "attack":
+                        try:
+                            self._play_sfx("SwordSlice.mp3")
+                        except Exception:
+                            pass
                     game.handle_click(pidx, btn_id)
             return
 

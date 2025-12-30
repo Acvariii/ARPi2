@@ -30,9 +30,38 @@ export default function RiskPanel(props: {
     return Array.isArray(arr) ? arr : [];
   }, [st?.territories]);
 
+  const visibleTerritories = useMemo(() => {
+    if (!Array.isArray(territories)) return [];
+    const phase = String(st?.phase || '');
+
+    const myOwned = typeof mySeat === 'number' ? territories.filter((t: any) => t?.owner === mySeat) : territories;
+
+    if (phase === 'initial_deploy' || phase === 'reinforce' || phase === 'fortify') {
+      return myOwned;
+    }
+
+    if (phase === 'attack') {
+      const selectedFrom = typeof (st as any)?.selected_from === 'number' ? (st as any).selected_from : null;
+      const attackFrom = Array.isArray((st as any)?.attack_from_tids) ? ((st as any).attack_from_tids as number[]) : [];
+      const attackTo = Array.isArray((st as any)?.attack_to_tids) ? ((st as any).attack_to_tids as number[]) : [];
+
+      // If an attacker is selected, show only attackable defenders + the selected attacker.
+      if (typeof mySeat === 'number' && typeof selectedFrom === 'number') {
+        const fromTerr = territories.find((t: any) => Number(t?.tid) === selectedFrom);
+        const defenders = territories.filter((t: any) => attackTo.includes(Number(t?.tid)));
+        return fromTerr ? [fromTerr, ...defenders] : defenders;
+      }
+
+      // Otherwise show only possible attackers.
+      return territories.filter((t: any) => attackFrom.includes(Number(t?.tid)));
+    }
+
+    return territories;
+  }, [territories, st?.phase, (st as any)?.selected_from, (st as any)?.attack_from_tids, (st as any)?.attack_to_tids, mySeat]);
+
   const byContinent = useMemo(() => {
     const m = new Map<string, any[]>();
-    for (const t of territories) {
+    for (const t of visibleTerritories) {
       const c = String(t?.continent || '');
       if (!m.has(c)) m.set(c, []);
       m.get(c)!.push(t);
@@ -42,13 +71,17 @@ export default function RiskPanel(props: {
       m.set(k, v);
     }
     return Array.from(m.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-  }, [territories]);
+  }, [visibleTerritories]);
 
   const showTerritories = st?.state === 'playing';
 
   const isMyTurn = typeof mySeat === 'number' && typeof st?.current_turn_seat === 'number' && mySeat === st.current_turn_seat;
 
-  const pick = (tid: number) => send({ type: 'click_button', id: `pick:${tid}` });
+  const pick = (tid: number) => {
+    if (!Number.isFinite(tid)) return;
+    if (String(st?.phase || '') === 'conquer_move') return;
+    send({ type: 'click_button', id: `pick:${tid}` });
+  };
 
   const actionButtons = snapshot.panel_buttons || [];
 
@@ -67,9 +100,11 @@ export default function RiskPanel(props: {
         <Typography variant="body2" color="text.secondary" align="center">
           {typeof st?.winner === 'number'
             ? `Winner: ${seatLabel(st.winner)}`
-            : `Turn: ${typeof st?.current_turn_seat === 'number' ? seatLabel(st.current_turn_seat) : '—'} · Phase: ${
-                st?.phase || '—'
-              } · Reinforcements: ${st?.reinforcements_left ?? 0}`}
+            : st?.phase === 'initial_deploy'
+              ? `Initial Deploy · Pool: ${(st as any)?.initial_deploy_pool ?? 0}`
+              : `Turn: ${typeof st?.current_turn_seat === 'number' ? seatLabel(st.current_turn_seat) : '—'} · Phase: ${
+                  st?.phase || '—'
+                } · Reinforcements: ${st?.reinforcements_left ?? 0}`}
         </Typography>
         {st?.last_event ? (
           <Typography variant="caption" color="text.secondary" display="block" align="center" sx={{ mt: 0.5 }}>
@@ -77,6 +112,17 @@ export default function RiskPanel(props: {
           </Typography>
         ) : null}
       </Paper>
+
+      {st?.state === 'playing' && (st as any)?.your_mission ? (
+        <Paper variant="outlined" sx={{ p: 1.25 }}>
+          <Typography variant="subtitle1" gutterBottom>
+            Mission
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            {(st as any).your_mission}
+          </Typography>
+        </Paper>
+      ) : null}
 
       <Paper variant="outlined" sx={{ p: 1.25 }}>
         <Typography variant="subtitle1" gutterBottom>
