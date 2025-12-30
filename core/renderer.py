@@ -17,6 +17,11 @@ class PygletRenderer:
         self.batch = pyglet.graphics.Batch()
         self.shapes_cache = []
         self.text_cache = []
+
+        # When True, "immediate" draw helpers enqueue into the batch instead of
+        # drawing right away. This prevents batched background/UI from overpainting
+        # game content drawn earlier in the frame.
+        self.defer_immediate = False
         
     def clear_cache(self):
         """Clear cached shapes and text for next frame"""
@@ -90,6 +95,23 @@ class PygletRenderer:
         """Draw circle immediately without batching (for drawing on top of everything)"""
         x, y = center
         y_flipped = self.flip_y(y)
+
+        if getattr(self, "defer_immediate", False):
+            if width == 0:
+                circle_shape = shapes.Circle(
+                    x, y_flipped, radius,
+                    color=(*color, alpha),
+                    batch=self.batch,
+                )
+                self.shapes_cache.append(circle_shape)
+            else:
+                arc_shape = shapes.Arc(
+                    x, y_flipped, radius,
+                    color=(*color, alpha),
+                    batch=self.batch,
+                )
+                self.shapes_cache.append(arc_shape)
+            return
         
         if width == 0:
             # Filled circle - draw immediately
@@ -158,6 +180,26 @@ class PygletRenderer:
                             alpha: int = 255, rotation: int = 0):
         """Draw text immediately (not batched). Useful for overlays above all UI."""
         y_flipped = self.flip_y(y)
+
+        if getattr(self, "defer_immediate", False):
+            label = text.Label(
+                text_str,
+                font_name=font_name,
+                font_size=font_size,
+                x=x,
+                y=y_flipped,
+                color=(*color, alpha),
+                anchor_x=anchor_x,
+                anchor_y=anchor_y,
+                batch=self.batch,
+            )
+            if bold:
+                label.bold = True
+            if rotation != 0:
+                label.rotation = rotation
+            self.text_cache.append(label)
+            return
+
         label = text.Label(
             text_str,
             font_name=font_name,
@@ -223,10 +265,14 @@ class PygletRenderer:
         """Draw filled polygon immediately using pyglet.shapes (core-profile friendly)."""
         if not points or len(points) < 3:
             return
-        gl_points = []
+        coords = []
         for x, y in points:
-            gl_points.extend([x, self.flip_y(y)])
-        poly = shapes.Polygon(*gl_points, color=(*color, alpha))
+            coords.append((x, self.flip_y(y)))
+        if getattr(self, "defer_immediate", False):
+            poly = shapes.Polygon(*coords, color=(*color, alpha), batch=self.batch)
+            self.shapes_cache.append(poly)
+            return
+        poly = shapes.Polygon(*coords, color=(*color, alpha))
         poly.draw()
 
     def draw_polyline_immediate(self, color: Tuple[int, int, int], points: List[Tuple[int, int]],
@@ -238,9 +284,28 @@ class PygletRenderer:
         if closed:
             pts.append(points[0])
         for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
-            line = shapes.Line(x1, self.flip_y(y1), x2, self.flip_y(y2), color=(*color, alpha))
+            if getattr(self, "defer_immediate", False):
+                line = shapes.Line(x1, self.flip_y(y1), x2, self.flip_y(y2), color=(*color, alpha), batch=self.batch)
+                line.width = width
+                self.shapes_cache.append(line)
+            else:
+                line = shapes.Line(x1, self.flip_y(y1), x2, self.flip_y(y2), color=(*color, alpha))
+                line.width = width
+                line.draw()
+
+    def draw_line_immediate(self, color: Tuple[int, int, int], start: Tuple[int, int], end: Tuple[int, int],
+                            width: int = 2, alpha: int = 255):
+        """Draw a line immediately; supports deferring into the batch."""
+        x1, y1 = start
+        x2, y2 = end
+        if getattr(self, "defer_immediate", False):
+            line = shapes.Line(x1, self.flip_y(y1), x2, self.flip_y(y2), color=(*color, alpha), batch=self.batch)
             line.width = width
-            line.draw()
+            self.shapes_cache.append(line)
+            return
+        line = shapes.Line(x1, self.flip_y(y1), x2, self.flip_y(y2), color=(*color, alpha))
+        line.width = width
+        line.draw()
     
     def draw_all(self):
         """Draw all batched shapes and text"""

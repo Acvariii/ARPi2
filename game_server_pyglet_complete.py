@@ -4,6 +4,7 @@ High-performance OpenGL-accelerated game server with complete UI
 All games include player selection and player panels matching Pygame version
 """
 import asyncio
+import traceback
 import random
 import websockets
 import pyglet
@@ -35,6 +36,7 @@ from games.exploding_kittens import ExplodingKittensGame
 from games.texas_holdem import TexasHoldemGame
 from games.cluedo import CluedoGame
 from games.risk import RiskGame
+from games.catan import CatanGame
 from games.dnd import DnDCharacterCreation
 
 from core.popup_system import UniversalPopup
@@ -82,6 +84,9 @@ class PygletGameServer:
         self._music_muted = False
         self._last_music_state: Optional[str] = None
         self._bg_restart_in_progress: bool = False
+        self._bg_track_duration: Dict[str, float] = {}
+        self._bg_last_pos: float = 0.0
+        self._bg_last_pos_time: float = 0.0
 
         # Draw SFX tracking (detect deck size drops)
         self._last_deck_state: Optional[str] = None
@@ -271,6 +276,14 @@ class PygletGameServer:
         if src is None:
             return
 
+        # Cache duration for watchdog purposes.
+        try:
+            dur = float(getattr(src, "duration", 0.0) or 0.0)
+            if dur > 0:
+                self._bg_track_duration[str(want)] = float(dur)
+        except Exception:
+            pass
+
         p = getattr(self, "_bg_player", None)
         if p is None:
             return
@@ -320,6 +333,8 @@ class PygletGameServer:
             return "CluedoBG.mp3"
         if st == "risk":
             return "RiskBG.mp3"
+        if st == "catan":
+            return "TavernBG.mp3"
         return None
 
     def _eligible_music_vote_client_ids(self) -> List[str]:
@@ -379,6 +394,30 @@ class PygletGameServer:
                         # Force restart even if the desired track matches the previous track.
                         self._bg_track = None
                         self._set_bg_music(desired)
+                        return
+
+                    # Extra defensive: some platforms report `playing=True` at EOS.
+                    try:
+                        now = float(time.time())
+                        pos = float(getattr(p, "time", 0.0) or 0.0) if p is not None else 0.0
+                        dur = float(self._bg_track_duration.get(str(desired), 0.0) or 0.0)
+                        # If we are at/near the end and not making progress, force a restart.
+                        # (This catches "song not repeated" issues on some codecs.)
+                        last_pos = float(getattr(self, "_bg_last_pos", 0.0) or 0.0)
+                        last_t = float(getattr(self, "_bg_last_pos_time", 0.0) or 0.0)
+
+                        # Update tracking first.
+                        self._bg_last_pos = float(pos)
+                        self._bg_last_pos_time = float(now)
+
+                        if dur > 1.0:
+                            near_end = pos >= (dur - 0.25)
+                            stalled = (now - last_t) > 1.0 and abs(pos - last_pos) < 0.02
+                            if near_end and stalled:
+                                self._bg_track = None
+                                self._set_bg_music(desired)
+                    except Exception:
+                        pass
         except Exception:
             pass
 
@@ -711,6 +750,7 @@ class PygletGameServer:
         self.texas_holdem_game = TexasHoldemGame(self.window.width, self.window.height, self.renderer)
         self.cluedo_game = CluedoGame(self.window.width, self.window.height, self.renderer)
         self.risk_game = RiskGame(self.window.width, self.window.height, self.renderer)
+        self.catan_game = CatanGame(self.window.width, self.window.height, self.renderer)
 
         # Universal (server-managed) end-of-game vote popup state
         self._endgame_vote_token: Optional[str] = None
@@ -755,6 +795,7 @@ class PygletGameServer:
         setattr(self.texas_holdem_game, "web_ui_only_player_select", True)
         setattr(self.cluedo_game, "web_ui_only_player_select", True)
         setattr(self.risk_game, "web_ui_only_player_select", True)
+        setattr(self.catan_game, "web_ui_only_player_select", True)
         # Board-only rendering in the Pyglet window (no panels). Web UI shows actions/info.
         setattr(self.monopoly_game, "board_only_mode", True)
         setattr(self.blackjack_game, "board_only_mode", True)
@@ -763,6 +804,7 @@ class PygletGameServer:
         setattr(self.texas_holdem_game, "board_only_mode", True)
         setattr(self.cluedo_game, "board_only_mode", True)
         setattr(self.risk_game, "board_only_mode", True)
+        setattr(self.catan_game, "board_only_mode", True)
         if hasattr(self.dnd_creation, "game"):
             setattr(self.dnd_creation.game, "web_ui_only_player_select", True)
             setattr(self.dnd_creation.game, "web_ui_only_char_creation", True)
@@ -1100,6 +1142,10 @@ class PygletGameServer:
             self.state = "risk"
             self.risk_game.state = "player_select"
             self.risk_game.selection_ui.reset()
+        elif key == "catan":
+            self.state = "catan"
+            self.catan_game.state = "player_select"
+            self.catan_game.selection_ui.reset()
         elif key in ("d&d", "dnd"):
             self.state = "dnd_creation"
             self.dnd_dm_seat = None
@@ -1168,6 +1214,8 @@ class PygletGameServer:
             return self.cluedo_game
         if self.state == "risk":
             return self.risk_game
+        if self.state == "catan":
+            return self.catan_game
         if self.state == "dnd_creation":
             return getattr(self.dnd_creation, "game", None) or self.dnd_creation
         return None
@@ -1205,6 +1253,8 @@ class PygletGameServer:
             sel_count = sum(1 for s in slots if s["selected"])
             start_enabled = sel_count >= 3 and sel_count <= 6
         elif self.state == "risk":
+            start_enabled = sum(1 for s in slots if s["selected"]) >= 2
+        elif self.state == "catan":
             start_enabled = sum(1 for s in slots if s["selected"]) >= 2
         elif self.state == "dnd_creation":
             sel_count = sum(1 for s in slots if s["selected"])
@@ -1943,6 +1993,15 @@ class PygletGameServer:
             except Exception:
                 pass
 
+        if self.state == "catan":
+            try:
+                cg = self.catan_game
+                st = cg.get_public_state(player_idx) if hasattr(cg, "get_public_state") else None
+                if isinstance(st, dict):
+                    snap["catan"] = st
+            except Exception:
+                pass
+
         if self.state == "dnd_creation":
             try:
                 dg = getattr(self.dnd_creation, "game", None)
@@ -2453,6 +2512,8 @@ class PygletGameServer:
             elif self.state == "cluedo" and len(selected_indices) >= 3 and len(selected_indices) <= 6:
                 game.start_game(selected_indices)
             elif self.state == "risk" and len(selected_indices) >= 2:
+                game.start_game(selected_indices)
+            elif self.state == "catan" and len(selected_indices) >= 2 and len(selected_indices) <= 8:
                 game.start_game(selected_indices)
             elif self.state == "dnd_creation":
                 dm = self.dnd_dm_seat
@@ -3007,6 +3068,14 @@ class PygletGameServer:
                         except Exception:
                             pass
                     game.handle_click(pidx, btn_id)
+            elif self.state == "catan":
+                if hasattr(game, "handle_click"):
+                    if btn_id == "roll":
+                        try:
+                            self._play_sfx("RollDice.mp3")
+                        except Exception:
+                            pass
+                    game.handle_click(pidx, btn_id)
             return
 
     async def handle_ui_client(self, websocket):
@@ -3061,6 +3130,7 @@ class PygletGameServer:
             ("Texas Hold'em", "texas_holdem"),
             ("Cluedo", "cluedo"),
             ("Risk", "risk"),
+            ("Catan", "catan"),
             ("D&D", "d&d"),
         ]
         buttons = []
@@ -3124,6 +3194,7 @@ class PygletGameServer:
             getattr(self, "texas_holdem_game", None),
             getattr(self, "cluedo_game", None),
             getattr(self, "risk_game", None),
+            getattr(self, "catan_game", None),
             getattr(self, "dnd_creation", None),
         ):
             if g is None:
@@ -3138,6 +3209,13 @@ class PygletGameServer:
         
         # Clear renderer cache for new frame
         self.renderer.clear_cache()
+
+        # Defer "immediate" draws into the batch during the main draw pass.
+        # This prevents the later batch draw (background/UI) from covering game content.
+        try:
+            self.renderer.defer_immediate = True
+        except Exception:
+            pass
         
         if self.state == "menu":
             self._draw_menu()
@@ -3155,6 +3233,8 @@ class PygletGameServer:
             self.cluedo_game.draw()
         elif self.state == "risk":
             self.risk_game.draw()
+        elif self.state == "catan":
+            self.catan_game.draw()
         elif self.state == "dnd_creation":
             # Web UI drives D&D fully; keep the server window clean/fullscreen,
             # but reflect the chosen background + encounter.
@@ -3320,6 +3400,12 @@ class PygletGameServer:
         
         # Draw all batched shapes (board, panels, popups)
         self.renderer.draw_all()
+
+        # From here on, allow true immediate drawing for overlay passes.
+        try:
+            self.renderer.defer_immediate = False
+        except Exception:
+            pass
         
         # Draw game-specific immediate elements (tokens on top of board, under popups)
         if self.state == "monopoly" and hasattr(self.monopoly_game, 'draw_immediate'):
@@ -3490,6 +3576,11 @@ class PygletGameServer:
             except Exception:
                 pass
             try:
+                self.catan_game.state = "player_select"
+                self.catan_game.selection_ui.reset()
+            except Exception:
+                pass
+            try:
                 sess = getattr(self.dnd_creation, "game", None)
                 if sess is not None:
                     sess.state = "player_select"
@@ -3526,6 +3617,30 @@ class PygletGameServer:
             for pidx, cur in list(self.web_cursors.items()):
                 if now - float(cur.get("t", now)) > 10.0:
                     del self.web_cursors[pidx]
+
+        # Allow Catan to consume web "tap" clicks as board selections.
+        if self.state == "catan" and self.web_cursors:
+            try:
+                cg = getattr(self, "catan_game", None)
+                if cg is not None and hasattr(cg, "handle_pointer_click"):
+                    for pidx, cur in list(self.web_cursors.items()):
+                        if not bool(cur.get("click")):
+                            continue
+                        pos = cur.get("pos")
+                        if not pos:
+                            continue
+                        try:
+                            cg.handle_pointer_click(int(pidx), int(pos[0]), int(pos[1]))
+                        except Exception:
+                            pass
+                        # consume click so it doesn't repeat
+                        try:
+                            cur["click"] = False
+                            self.web_cursors[pidx] = cur
+                        except Exception:
+                            pass
+            except Exception:
+                pass
         
         # Web-UI-only: no in-window input handling (no hover/click processing).
         if self.state == "menu":
@@ -3554,6 +3669,11 @@ class PygletGameServer:
             try:
                 self._pump_dnd_dice_pending()
                 self._dnd_dice_display.update(dt)
+            except Exception:
+                pass
+        elif self.state == "catan":
+            try:
+                self.catan_game.update(dt)
             except Exception:
                 pass
 
@@ -4192,6 +4312,10 @@ class PygletGameServer:
             # Ignore the flip error during shutdown
             if "'NoneType' object has no attribute 'flip'" not in str(e):
                 print(f"\nServer error: {e}")
+                try:
+                    print(traceback.format_exc())
+                except Exception:
+                    pass
         finally:
             self.running = False
             # Stop HTTP server

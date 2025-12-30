@@ -273,6 +273,30 @@ export type Snapshot = {
       troops: number;
     }>;
   };
+  catan?: {
+    state?: string;
+    active_players?: number[];
+    current_turn_seat?: number | null;
+    expansion_mode?: string;
+    map_radius?: number;
+    ports?: Array<{ q: number; r: number; kind: string }>;
+    phase?: string;
+    rolled?: boolean;
+    pending_build?: string | null;
+    your_resources?: Record<string, number> | null;
+    robber_tile_idx?: number | null;
+    robber_candidates?: number[];
+    bank?: Record<string, number>;
+    dev?: Record<string, number>;
+    knights_played?: number;
+    vp?: number;
+    largest_army_holder?: number | null;
+    longest_road_holder?: number | null;
+    winner?: number | null;
+    last_event?: string | null;
+    last_roll?: number | null;
+    tiles?: Array<{ q: number; r: number; kind: string; number: number | null }>;
+  };
   cursors?: CursorSnapshot[];
 };
 
