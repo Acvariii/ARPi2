@@ -523,6 +523,52 @@ class DnDGameSession:
         if not getattr(self, "web_ui_only_char_creation", False):
             self._init_character_creators()
 
+    def handle_player_quit(self, seat: int) -> None:
+        """Handle a player disconnecting mid-session.
+
+        D&D character creation/gameplay can become stuck if we keep waiting on a
+        seat's character inputs. We drop the seat from `active_players` and clear
+        any per-seat state.
+        """
+        try:
+            s = int(seat)
+        except Exception:
+            return
+
+        if s not in (self.active_players or []):
+            return
+
+        try:
+            self.active_players = [int(x) for x in (self.active_players or []) if int(x) != s]
+        except Exception:
+            self.active_players = [x for x in (self.active_players or []) if x != s]
+
+        try:
+            self.characters.pop(int(s), None)
+            self.character_creators.pop(int(s), None)
+            self.player_panels.pop(int(s), None)
+            self.panels.pop(int(s), None)
+        except Exception:
+            pass
+
+        if self.dm_player_idx is not None and int(self.dm_player_idx) == s:
+            self.dm_player_idx = None
+
+        if not self.active_players:
+            self.state = "player_select"
+            try:
+                if hasattr(self, "selection_ui"):
+                    self.selection_ui.reset()
+            except Exception:
+                pass
+            return
+
+        # If we are in char creation, re-check if we can advance.
+        try:
+            self.maybe_advance_from_char_creation()
+        except Exception:
+            pass
+
     def set_dm_player_idx(self, player_idx: Optional[int]) -> None:
         try:
             if player_idx is None:

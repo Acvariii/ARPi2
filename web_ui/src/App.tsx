@@ -126,7 +126,6 @@ export default function App(): React.ReactElement {
   const [isReady, setIsReady] = useState<boolean>(false);
 
   const inMenu = snapshot?.server_state === 'menu';
-  const inPlayerSelect = !!snapshot?.player_select;
   const inGame = !!snapshot && !inMenu;
 
   const screenLabel = useMemo(() => {
@@ -578,22 +577,30 @@ export default function App(): React.ReactElement {
                   </Typography>
                 ) : (
                   <>
-                    <Stack spacing={1}>
+                    <Box
+                      sx={{
+                        display: 'grid',
+                        gridTemplateColumns: { xs: 'repeat(2, 1fr)', sm: 'repeat(3, 1fr)' },
+                        gap: 1,
+                      }}
+                    >
                       {(snapshot.menu_games || []).map((g) => {
                         const selected = normalizeVoteKey(myGameVote) === normalizeVoteKey(g.key);
                         return (
                           <Button
                             key={g.key}
+                            fullWidth
                             variant="contained"
                             color={selected ? 'success' : 'primary'}
                             onClick={() => send({ type: 'vote_game', key: g.key })}
                             disabled={status !== 'connected' || !isSeated || !isReady}
+                            sx={{ minHeight: 44 }}
                           >
-                            Vote: {g.label}
+                            {g.label}
                           </Button>
                         );
                       })}
-                    </Stack>
+                    </Box>
 
                     <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                       Votes: Monopoly {snapshot.lobby?.votes?.monopoly ?? 0} · Blackjack{' '}
@@ -607,59 +614,6 @@ export default function App(): React.ReactElement {
                     </Typography>
                   </>
                 )}
-              </>
-            )}
-
-            {snapshot.player_select && (
-              <>
-                <Typography variant="subtitle1" gutterBottom sx={{ mt: 2 }}>
-                  Player Selection
-                </Typography>
-
-                {isDnD && (
-                  <>
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                      DM: {typeof dndDmSeat === 'number' ? seatLabel(dndDmSeat) : 'Not set'}
-                    </Typography>
-                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 1 }}>
-                      <Button
-                        variant="contained"
-                        disabled={!isSeated || isDm}
-                        onClick={() => send({ type: 'dnd_set_dm' })}
-                      >
-                        {isDm ? 'You are DM' : 'Set Me as DM'}
-                      </Button>
-                    </Stack>
-                  </>
-                )}
-
-                <Stack spacing={1}>
-                  {snapshot.player_select.slots.map((s) => (
-                    <Box key={s.player_idx} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <Chip
-                        label={s.selected ? 'Selected' : 'Not selected'}
-                        color={s.selected ? 'success' : 'default'}
-                        size="small"
-                        variant={s.selected ? 'filled' : 'outlined'}
-                      />
-                      <Typography variant="body2">{s.label}</Typography>
-                    </Box>
-                  ))}
-                </Stack>
-
-                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 2 }}>
-                  <Button
-                    variant="contained"
-                    disabled={!snapshot.player_select.start_enabled}
-                    onClick={() => send({ type: 'start_game' })}
-                  >
-                    {snapshot.player_select.start_enabled
-                      ? 'Start Game'
-                      : isDnD
-                        ? 'Start (choose DM + 2 players)'
-                        : 'Start (need more players)'}
-                  </Button>
-                </Stack>
               </>
             )}
 

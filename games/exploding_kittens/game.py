@@ -137,6 +137,101 @@ class ExplodingKittensGame:
         self.state = "playing"
         self._rebuild_buttons()
 
+    def handle_player_quit(self, seat: int) -> None:
+        """Handle a player disconnecting mid-game.
+
+        Goals:
+        - Never leave the game waiting on a seat that no longer exists.
+        - Return their hand to the draw pile.
+        - If they were the current turn / actor for a pending prompt, advance safely.
+        """
+        try:
+            s = int(seat)
+        except Exception:
+            return
+
+        if self.state != "playing":
+            return
+
+        if self.winner is not None:
+            return
+
+        if s not in self.active_players:
+            return
+
+        # Return hand to draw pile.
+        hand = list(self.hands.pop(s, []) or [])
+        if hand:
+            self.draw_pile.extend(hand)
+            random.shuffle(self.draw_pile)
+
+        # Remove from active players, tracking their prior index.
+        try:
+            removed_idx = self.active_players.index(s)
+        except Exception:
+            removed_idx = None
+
+        was_turn = bool(self.current_turn_seat == s)
+
+        try:
+            self.active_players = [int(x) for x in self.active_players if int(x) != s]
+        except Exception:
+            self.active_players = [x for x in self.active_players if x != s]
+
+        if s not in self.eliminated_players:
+            self.eliminated_players.append(int(s))
+
+        # If we were waiting on them for Favor targeting, cancel.
+        if bool(self.awaiting_favor_target) and int(self.favor_actor or -1) == s:
+            self.awaiting_favor_target = False
+            self.favor_actor = None
+
+        # If they were involved in an active NOPE window, cancel it.
+        if bool(self._nope_active):
+            if int(self._nope_actor or -1) == s:
+                self._clear_nope()
+            else:
+                # Still cancel to avoid awkward "waiting" states around a quit.
+                self._clear_nope()
+
+        # If nobody left, reset to player_select.
+        if not self.active_players:
+            self.pending_draws = 1
+            self.current_player_idx = 0
+            self.awaiting_favor_target = False
+            self.favor_actor = None
+            self._clear_nope()
+            self.state = "player_select"
+            self._note_event("All players left")
+            self._rebuild_buttons()
+            return
+
+        # Winner if only one remains.
+        if len(self.active_players) == 1:
+            self.winner = int(self.active_players[0])
+            self.pending_draws = 1
+            self._note_event(f"Winner: {self._seat_label(self.winner)}")
+            self._rebuild_buttons()
+            return
+
+        # Keep current_player_idx consistent.
+        if isinstance(removed_idx, int):
+            if removed_idx < int(self.current_player_idx):
+                self.current_player_idx = max(0, int(self.current_player_idx) - 1)
+            if was_turn:
+                # Next player now occupies the removed index.
+                self.current_player_idx = int(removed_idx) % len(self.active_players)
+
+        if self.current_player_idx >= len(self.active_players):
+            self.current_player_idx = 0
+
+        # Reset per-turn draw expectation so we don't wait on a quitter's draw.
+        if was_turn:
+            self.pending_draws = 1
+
+        self._note_event(f"{self._seat_label(s)} quit")
+        self._rebuild_buttons()
+
     def update(self, dt: float) -> None:
         try:
             delta = float(dt)

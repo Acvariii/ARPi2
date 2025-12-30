@@ -1373,6 +1373,72 @@ class RiskGame:
         self._border_dirty = True
         self._refresh_buttons()
 
+    def handle_player_quit(self, seat: int) -> None:
+        """Handle a player disconnecting mid-game.
+
+        Risk can freeze if the current-turn player leaves; also their territories must
+        be reassigned or the game becomes unwinnable.
+        """
+        try:
+            s = int(seat)
+        except Exception:
+            return
+
+        if self.state != "playing":
+            return
+
+        if self.winner is not None:
+            return
+
+        if s not in self.active_players:
+            return
+
+        was_turn = bool(isinstance(self.current_turn_seat, int) and int(self.current_turn_seat) == s)
+
+        remaining = [int(x) for x in self.active_players if int(x) != s]
+
+        # Reassign all territories owned by the quitter.
+        owned = [int(tid) for tid, owner in (self.owner or {}).items() if int(owner) == s]
+        if remaining and owned:
+            random.shuffle(owned)
+            for i, tid in enumerate(owned):
+                self.owner[int(tid)] = int(remaining[i % len(remaining)])
+            self._border_dirty = True
+            self._fill_dirty = True
+
+        # Remove from turn order.
+        self.active_players = remaining
+        if s in self.eliminated_players:
+            try:
+                self.eliminated_players = [int(x) for x in self.eliminated_players if int(x) != s]
+            except Exception:
+                pass
+
+        if not remaining:
+            self.state = "player_select"
+            self.current_turn_seat = None
+            self.last_event = "All players left"
+            self._refresh_buttons()
+            return
+
+        # If their removal ends the game, set winner.
+        self._check_eliminations()
+        if self.winner is not None:
+            self._refresh_buttons()
+            return
+
+        # If it was their turn, advance to the next remaining seat.
+        if was_turn:
+            self.current_turn_seat = int(remaining[0])
+            self.phase = "reinforce"
+            self.selected_from = None
+            self.selected_to = None
+            self.reinforcements_left = self._calc_reinforcements(int(self.current_turn_seat))
+            self.last_event = f"Turn: {self._seat_label(int(self.current_turn_seat))}"
+
+        self.last_event = f"{self._seat_label(s)} quit"
+        self._refresh_buttons()
+
     def update(self, dt: float) -> None:
         return
 

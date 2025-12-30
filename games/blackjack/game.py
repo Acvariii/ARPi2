@@ -318,11 +318,91 @@ class BlackjackGame:
         self.table_rect = (x, y, size, size)
         
         # Dealer area at center of screen
+
         self.dealer_area = (
             self.width // 2 - 200,
             self.height // 2 - 65,
             400, 130
         )
+
+    def handle_player_quit(self, seat: int) -> None:
+        """Handle a player disconnecting mid-game.
+
+        Blackjack can stall if the server is waiting on a quitter's ready/decision.
+        We remove them from `active_players`, clear their per-round state, and
+        redistribute their remaining chips among remaining players.
+        """
+        try:
+            s = int(seat)
+        except Exception:
+            return
+
+        if self.state == "player_select":
+            return
+
+        if s not in (self.active_players or []):
+            return
+
+        remaining = [int(x) for x in (self.active_players or []) if int(x) != s]
+
+        # Redistribute their remaining chips.
+        try:
+            quitter = self.players[int(s)]
+            chips_left = int(getattr(quitter, "chips", 0) or 0)
+        except Exception:
+            quitter = None
+            chips_left = 0
+
+        if quitter is not None:
+            try:
+                quitter.chips = 0
+                quitter.is_ready = True
+                quitter.is_active = False
+                quitter.hands = []
+                quitter.current_bet = 0
+                quitter.insurance_bet = 0
+            except Exception:
+                pass
+
+        if remaining and chips_left > 0:
+            share = int(chips_left) // int(len(remaining))
+            if share > 0:
+                for r in remaining:
+                    try:
+                        self.players[int(r)].chips = int(getattr(self.players[int(r)], "chips", 0) or 0) + share
+                    except Exception:
+                        pass
+
+        self.active_players = remaining
+
+        # Ensure current index stays in range.
+        try:
+            if self.current_player_idx >= len(self.active_players):
+                self.current_player_idx = 0
+        except Exception:
+            self.current_player_idx = 0
+
+        # Remove any outstanding web result popup requirement for this seat.
+        try:
+            popups = getattr(self, "_web_result_popups", {}) or {}
+            popups.pop(int(s), None)
+            self._web_result_popups = popups
+            dismissed = getattr(self, "_web_result_dismissed_round", {}) or {}
+            dismissed[int(s)] = int(getattr(self, "_web_round_id", 0) or 0)
+            self._web_result_dismissed_round = dismissed
+        except Exception:
+            pass
+
+        # Refresh actions if we're in a phase that depends on active players.
+        try:
+            if self.state == "betting":
+                # Let existing bet/ready checks pick up the new active set.
+                return
+            if self.state == "playing":
+                self._show_player_actions()
+                return
+        except Exception:
+            pass
     
     def start_game(self, player_indices: List[int]):
         """Start game with selected players"""
@@ -1237,17 +1317,7 @@ class BlackjackGame:
             if self._web_results_all_closed():
                 self._start_new_round()
         
-        # Auto-return to player selection after game over
-        if self.state == "game_over" and hasattr(self, 'game_over_time'):
-            if current_time - self.game_over_time > 5.0:
-                self.state = "player_select"
-                self.selection_ui = PlayerSelectionUI(self.width, self.height)
-        
-        # Auto-return to player selection after game over
-        if self.state == "game_over" and hasattr(self, 'game_over_time'):
-            if current_time - self.game_over_time > 5.0:
-                self.state = "player_select"
-                self.selection_ui = PlayerSelectionUI(self.width, self.height)
+        # Game-over flow is handled by the server/Web UI (majority vote: play again vs lobby).
     
     def draw(self):
         """Draw game"""

@@ -236,9 +236,11 @@ export type Snapshot = {
     } | null;
   };
   cluedo?: {
+    game_id?: number;
     state?: string;
     active_players?: number[];
     current_turn_seat?: number | null;
+    dice?: [number, number] | null;
     last_roll?: number | null;
     steps_remaining?: number;
     mode?: string;

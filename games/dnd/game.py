@@ -33,3 +33,11 @@ class DnDCharacterCreation:
         """Forward immediate draw to game session"""
         self.game.draw_immediate()
 
+    def handle_player_quit(self, seat: int) -> None:
+        try:
+            g = getattr(self, "game", None)
+            if g is not None and hasattr(g, "handle_player_quit"):
+                g.handle_player_quit(seat)
+        except Exception:
+            pass
+

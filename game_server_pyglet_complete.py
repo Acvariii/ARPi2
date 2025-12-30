@@ -37,6 +37,8 @@ from games.cluedo import CluedoGame
 from games.risk import RiskGame
 from games.dnd import DnDCharacterCreation
 
+from core.popup_system import UniversalPopup
+
 from server.dnd_dice import CenterDiceRollDisplay
 from server.dnd_character_creation import (
     _dnd_background_questions,
@@ -696,6 +698,10 @@ class PygletGameServer:
         self.cluedo_game = CluedoGame(self.window.width, self.window.height, self.renderer)
         self.risk_game = RiskGame(self.window.width, self.window.height, self.renderer)
 
+        # Universal (server-managed) end-of-game vote popup state
+        self._endgame_vote_token: Optional[str] = None
+        self._endgame_votes_by_seat: Dict[int, str] = {}
+
         # Provide seat->name to games that can render player names on the board.
         try:
             if hasattr(self.uno_game, "set_name_provider"):
@@ -1158,7 +1164,8 @@ class PygletGameServer:
         selected = list(getattr(game.selection_ui, "selected", []))
         slots = []
         dm_seat = self.dnd_dm_seat if self.state == "dnd_creation" else None
-        for i in range(8):
+        slot_count = 6 if self.state == "cluedo" else 8
+        for i in range(slot_count):
             name = self.player_names.get(i) or f"Player {i + 1}"
             if self.state == "dnd_creation" and isinstance(dm_seat, int) and i == dm_seat:
                 name = f"{name} (DM)"
@@ -1181,7 +1188,8 @@ class PygletGameServer:
         elif self.state == "texas_holdem":
             start_enabled = sum(1 for s in slots if s["selected"]) >= 2
         elif self.state == "cluedo":
-            start_enabled = sum(1 for s in slots if s["selected"]) >= 2
+            sel_count = sum(1 for s in slots if s["selected"])
+            start_enabled = sel_count >= 3 and sel_count <= 6
         elif self.state == "risk":
             start_enabled = sum(1 for s in slots if s["selected"]) >= 2
         elif self.state == "dnd_creation":
@@ -1237,6 +1245,26 @@ class PygletGameServer:
                     # a popup snapshot, which can lead to confusing or unsafe actions.
                     if isinstance(btn_id, str) and btn_id.startswith("popup_"):
                         buttons.append({"id": btn_id, "text": text, "enabled": enabled})
+
+        # Server-managed popups may provide Web UI buttons directly via popup.data.
+        if not buttons:
+            try:
+                pdata = getattr(popup, "data", None) or {}
+                pbtns = pdata.get("buttons")
+                if isinstance(pbtns, list):
+                    for b in pbtns:
+                        if not isinstance(b, dict):
+                            continue
+                        bid = b.get("id")
+                        if not (isinstance(bid, str) and bid.startswith("popup_")):
+                            continue
+                        txt = str(b.get("text") or "")
+                        if not txt:
+                            continue
+                        en = bool(b.get("enabled", True))
+                        buttons.append({"id": bid, "text": txt, "enabled": en})
+            except Exception:
+                pass
 
         trade = None
         trade_select = None
@@ -1483,6 +1511,10 @@ class PygletGameServer:
         if not player_buttons:
             return []
         for btn_id, btn in player_buttons.items():
+            # Popup-only buttons are rendered in the dedicated popup snapshot/UI.
+            # Avoid duplicating them in the normal panel button list.
+            if isinstance(btn_id, str) and btn_id.startswith("popup_"):
+                continue
             text = getattr(btn, "text", "")
             enabled = bool(getattr(btn, "enabled", True))
 
@@ -2049,14 +2081,22 @@ class PygletGameServer:
 
             # If a player quits mid-game, apply game-specific cleanup.
             try:
-                if isinstance(seat, int) and seat >= 0 and self.state == "monopoly":
-                    mg = getattr(self, "monopoly_game", None)
-                    if mg is not None and hasattr(mg, "handle_player_quit"):
-                        mg.handle_player_quit(seat)
-                if isinstance(seat, int) and seat >= 0 and self.state == "blackjack":
-                    bg = getattr(self, "blackjack_game", None)
-                    if bg is not None and hasattr(bg, "close_web_result"):
-                        bg.close_web_result(seat)
+                if isinstance(seat, int) and seat >= 0:
+                    # Monopoly already has bespoke quit logic; do not change it.
+                    if self.state == "monopoly":
+                        mg = getattr(self, "monopoly_game", None)
+                        if mg is not None and hasattr(mg, "handle_player_quit"):
+                            mg.handle_player_quit(seat)
+                    else:
+                        g = self._get_active_game()
+                        if g is not None and hasattr(g, "handle_player_quit"):
+                            g.handle_player_quit(seat)
+
+                    # Blackjack has per-seat result popups; ensure quitters don't block progression.
+                    if self.state == "blackjack":
+                        bg = getattr(self, "blackjack_game", None)
+                        if bg is not None and hasattr(bg, "close_web_result"):
+                            bg.close_web_result(seat)
             except Exception:
                 pass
 
@@ -2396,7 +2436,7 @@ class PygletGameServer:
                 game.start_game(selected_indices)
             elif self.state == "texas_holdem" and len(selected_indices) >= 2:
                 game.start_game(selected_indices)
-            elif self.state == "cluedo" and len(selected_indices) >= 2:
+            elif self.state == "cluedo" and len(selected_indices) >= 3 and len(selected_indices) <= 6:
                 game.start_game(selected_indices)
             elif self.state == "risk" and len(selected_indices) >= 2:
                 game.start_game(selected_indices)
@@ -2856,6 +2896,13 @@ class PygletGameServer:
             pidx = self.ui_client_player.get(client_id, -1)
             if not (isinstance(pidx, int) and pidx >= 0):
                 return
+
+            # Universal end-of-game vote popup (server-managed)
+            try:
+                if btn_id.startswith("popup_") and self._handle_endgame_vote_click(int(pidx), btn_id):
+                    return
+            except Exception:
+                pass
             if self.state == "monopoly":
                 # Enforce turn/popup ownership server-side.
                 if getattr(game.popup, "active", False):
@@ -3476,6 +3523,13 @@ class PygletGameServer:
             self.texas_holdem_game.update(dt)
         elif self.state == "cluedo":
             self.cluedo_game.update(dt)
+            # Allow games to request a return-to-lobby flow (same as pressing ESC).
+            try:
+                if bool(getattr(self.cluedo_game, "request_return_to_lobby", False)):
+                    self.cluedo_game.request_return_to_lobby = False
+                    self.web_esc_requested = True
+            except Exception:
+                pass
         elif self.state == "dnd_creation":
             self.dnd_creation.update(dt)
             try:
@@ -3483,6 +3537,11 @@ class PygletGameServer:
                 self._dnd_dice_display.update(dt)
             except Exception:
                 pass
+
+        # Server-managed lifecycle behaviors
+        if self.state != "menu":
+            self._maybe_auto_start_active_game()
+            self._maybe_show_endgame_vote_popup()
     
     def _handle_menu_input(self, fingertip_meta: List[Dict]):
         """Handle menu input"""
@@ -3490,6 +3549,302 @@ class PygletGameServer:
         # Keep this as a no-op to avoid accidental local state changes.
         self.hover_states.clear()
         return
+
+    def _active_connected_seats(self) -> List[int]:
+        seats: List[int] = []
+        for cid, seat in (self.ui_client_player or {}).items():
+            if cid not in (self.ui_clients or {}):
+                continue
+            if isinstance(seat, int) and 0 <= seat <= 7 and seat not in seats:
+                seats.append(int(seat))
+        seats.sort()
+        return seats
+
+    def _maybe_auto_start_active_game(self) -> None:
+        """Skip redundant in-game player selection; auto-start using seated clients."""
+        game = self._get_active_game()
+        if game is None:
+            return
+        if getattr(game, "state", None) != "player_select":
+            return
+
+        seats = self._active_connected_seats()
+        if not seats:
+            return
+
+        # Per-game minimums.
+        min_players = 2
+        if self.state == "blackjack":
+            min_players = 1
+        elif self.state == "cluedo":
+            min_players = 3
+        elif self.state == "dnd_creation":
+            min_players = 2
+
+        if len(seats) < int(min_players):
+            return
+
+        # D&D: choose a default DM (lowest seat) if not set.
+        if self.state == "dnd_creation":
+            try:
+                dm = getattr(self, "dnd_dm_seat", None)
+                if not (isinstance(dm, int) and dm in seats):
+                    dm = int(seats[0])
+                    self.dnd_dm_seat = dm
+                if hasattr(game, "set_dm_player_idx"):
+                    game.set_dm_player_idx(dm)
+                else:
+                    setattr(game, "dm_player_idx", dm)
+            except Exception:
+                pass
+
+        try:
+            game.start_game(list(seats))
+            self._log_history(f"Auto-started {self.state} with {len(seats)} players")
+        except Exception:
+            return
+
+    def _endgame_participant_seats(self, game) -> List[int]:
+        """Return seats who participated in the game, including eliminated when present."""
+        seats: List[int] = []
+
+        try:
+            ap = getattr(game, "active_players", None)
+            if isinstance(ap, list):
+                for s in ap:
+                    try:
+                        si = int(s)
+                    except Exception:
+                        continue
+                    if 0 <= si <= 7 and si not in seats:
+                        seats.append(si)
+        except Exception:
+            pass
+
+        # Include eliminated players when available (requested behavior).
+        for attr in ("eliminated_players", "eliminated"):
+            try:
+                elim = getattr(game, attr, None)
+                if isinstance(elim, list):
+                    for s in elim:
+                        try:
+                            si = int(s)
+                        except Exception:
+                            continue
+                        if 0 <= si <= 7 and si not in seats:
+                            seats.append(si)
+            except Exception:
+                continue
+
+        seats.sort()
+        return seats
+
+    def _is_game_over(self, game) -> bool:
+        try:
+            if getattr(game, "winner", None) is not None:
+                return True
+        except Exception:
+            pass
+
+        # Monopoly
+        try:
+            if str(getattr(game, "state", "")) == "winner" and getattr(game, "winner_idx", None) is not None:
+                return True
+        except Exception:
+            pass
+
+        # Blackjack
+        try:
+            if str(getattr(game, "state", "")) == "game_over":
+                return True
+        except Exception:
+            pass
+
+        # Texas Hold'em (terminal showdown)
+        try:
+            if str(getattr(game, "state", "")) == "showdown":
+                sd = getattr(game, "last_showdown", None)
+                if isinstance(sd, dict) and str(sd.get("reason") or "") == "Not enough players with chips":
+                    return True
+        except Exception:
+            pass
+
+        return False
+
+    def _endgame_token(self, game) -> str:
+        parts = [str(self.state)]
+        for attr in ("game_id", "hand_id", "_web_round_id"):
+            try:
+                v = getattr(game, attr, None)
+            except Exception:
+                v = None
+            if v is not None:
+                parts.append(f"{attr}:{v}")
+        for attr in ("winner", "winner_idx"):
+            try:
+                v = getattr(game, attr, None)
+            except Exception:
+                v = None
+            if v is not None:
+                parts.append(f"{attr}:{v}")
+        return "|".join(parts)
+
+    def _ensure_game_popup(self, game) -> None:
+        if hasattr(game, "popup"):
+            return
+        try:
+            setattr(game, "popup", UniversalPopup())
+        except Exception:
+            pass
+
+    def _set_endgame_popup_text(self, game, eligible_seats: List[int]) -> None:
+        popup = getattr(game, "popup", None)
+        if popup is None:
+            return
+
+        votes_again = sum(1 for v in (self._endgame_votes_by_seat or {}).values() if v == "again")
+        votes_lobby = sum(1 for v in (self._endgame_votes_by_seat or {}).values() if v == "lobby")
+        total = int(len(eligible_seats))
+        required = (total // 2) + 1 if total > 0 else 1
+
+        winner_text = ""
+        try:
+            w = getattr(game, "winner", None)
+            if isinstance(w, int):
+                winner_text = f"Winner: {self._player_display_name(int(w))}"
+        except Exception:
+            winner_text = ""
+        try:
+            if not winner_text and str(getattr(game, "state", "")) == "winner":
+                w = getattr(game, "winner_idx", None)
+                if isinstance(w, int):
+                    winner_text = f"Winner: {self._player_display_name(int(w))}"
+        except Exception:
+            pass
+
+        lines = [("Game finished", 18, (220, 220, 220))]
+        if winner_text:
+            lines.append((winner_text, 18, (255, 255, 255)))
+        lines.append((f"Votes (need {required}): Play again {votes_again} · Lobby {votes_lobby}", 16, (200, 200, 200)))
+        popup.text_lines = lines
+
+        # Provide popup buttons via popup.data so we don't need to mutate game.buttons.
+        popup.data = {
+            "buttons": [
+                {"id": "popup_0", "text": "Play again", "enabled": True},
+                {"id": "popup_1", "text": "Return to lobby", "enabled": True},
+            ]
+        }
+
+    def _maybe_show_endgame_vote_popup(self) -> None:
+        game = self._get_active_game()
+        if game is None:
+            return
+
+        if not self._is_game_over(game):
+            self._endgame_vote_token = None
+            self._endgame_votes_by_seat = {}
+            return
+
+        self._ensure_game_popup(game)
+        popup = getattr(game, "popup", None)
+        if popup is None:
+            return
+
+        # Don't override other game popups.
+        if bool(getattr(popup, "active", False)) and str(getattr(popup, "popup_type", "")) not in ("", "end_game_vote"):
+            return
+
+        token = self._endgame_token(game)
+        if token != self._endgame_vote_token:
+            self._endgame_vote_token = token
+            self._endgame_votes_by_seat = {}
+
+        participants = self._endgame_participant_seats(game)
+        if not participants:
+            participants = self._active_connected_seats()
+        eligible = [s for s in self._active_connected_seats() if s in set(participants)]
+        if not eligible:
+            eligible = list(participants)
+
+        popup.active = True
+        popup.player_idx = None
+        popup.popup_type = "end_game_vote"
+        self._set_endgame_popup_text(game, eligible)
+
+    def _handle_endgame_vote_click(self, seat: int, btn_id: str) -> bool:
+        """Return True if handled."""
+        game = self._get_active_game()
+        if game is None:
+            return False
+
+        popup = getattr(game, "popup", None)
+        if popup is None:
+            return False
+
+        if not (bool(getattr(popup, "active", False)) and str(getattr(popup, "popup_type", "")) == "end_game_vote"):
+            return False
+
+        if not self._is_game_over(game):
+            return False
+
+        participants = self._endgame_participant_seats(game)
+        if not participants:
+            participants = self._active_connected_seats()
+        if int(seat) not in set(participants):
+            return True  # handled (ignore)
+
+        eligible = [s for s in self._active_connected_seats() if s in set(participants)]
+        if not eligible:
+            eligible = list(participants)
+
+        choice = None
+        if btn_id == "popup_0":
+            choice = "again"
+        elif btn_id == "popup_1":
+            choice = "lobby"
+        else:
+            return False
+
+        self._endgame_votes_by_seat[int(seat)] = str(choice)
+
+        votes_again = sum(1 for v in (self._endgame_votes_by_seat or {}).values() if v == "again")
+        votes_lobby = sum(1 for v in (self._endgame_votes_by_seat or {}).values() if v == "lobby")
+        total = int(len(eligible))
+        required = (total // 2) + 1 if total > 0 else 1
+
+        self._set_endgame_popup_text(game, eligible)
+
+        if votes_again >= required:
+            try:
+                popup.hide()
+            except Exception:
+                try:
+                    popup.active = False
+                except Exception:
+                    pass
+            try:
+                game.start_game(list(participants))
+            except Exception:
+                pass
+            self._endgame_votes_by_seat = {}
+            self._endgame_vote_token = None
+            return True
+
+        if votes_lobby >= required:
+            try:
+                popup.hide()
+            except Exception:
+                try:
+                    popup.active = False
+                except Exception:
+                    pass
+            self._endgame_votes_by_seat = {}
+            self._endgame_vote_token = None
+            self.web_esc_requested = True
+            return True
+
+        return True
     
     def _draw_menu(self):
         """Draw main menu"""

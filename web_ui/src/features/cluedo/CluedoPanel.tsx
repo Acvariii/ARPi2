@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { Box, Paper, Stack, Typography } from '@mui/material';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Box, Paper, Stack, TextField, Typography } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import type { Snapshot } from '../../types';
 
@@ -18,6 +18,7 @@ export default function CluedoPanel({ snapshot, seatLabel, send, playerColors }:
 
   const mySeat = typeof snapshot.your_player_slot === 'number' ? snapshot.your_player_slot : null;
   const turnSeat = typeof cl.current_turn_seat === 'number' ? cl.current_turn_seat : null;
+  const dice = Array.isArray(cl.dice) && cl.dice.length === 2 ? (cl.dice as [number, number]) : null;
 
   const panelButtons = snapshot.panel_buttons || [];
   const buttonById = useMemo(() => new Map(panelButtons.map((b) => [b.id, b] as const)), [panelButtons]);
@@ -43,6 +44,23 @@ export default function CluedoPanel({ snapshot, seatLabel, send, playerColors }:
   const pickSuspects = panelButtons.filter((b) => b.id.startsWith('pick_suspect:'));
   const pickWeapons = panelButtons.filter((b) => b.id.startsWith('pick_weapon:'));
   const pickRooms = panelButtons.filter((b) => b.id.startsWith('pick_room:'));
+  const revealButtons = panelButtons.filter((b) => b.id.startsWith('reveal:'));
+
+  const [notes, setNotes] = useState('');
+  const gameKey = typeof cl.game_id === 'number' ? cl.game_id : null;
+  const lastGameKeyRef = useRef<number | null>(gameKey);
+
+  useEffect(() => {
+    if (gameKey === null) return;
+    if (lastGameKeyRef.current === null) {
+      lastGameKeyRef.current = gameKey;
+      return;
+    }
+    if (lastGameKeyRef.current !== gameKey) {
+      lastGameKeyRef.current = gameKey;
+      setNotes('');
+    }
+  }, [gameKey]);
 
   const padButtonSx = (enabled: boolean) => ({
     p: 1,
@@ -80,7 +98,8 @@ export default function CluedoPanel({ snapshot, seatLabel, send, playerColors }:
           </Typography>
           <Typography variant="body2" color="text.secondary" align="center">
             Turn: {turnSeat !== null ? seatLabel(turnSeat) : '—'}
-            {typeof cl.last_roll === 'number' ? ` · Roll: ${cl.last_roll}` : ''}
+            {dice ? ` · Roll: ${dice[0]}+${dice[1]}=${typeof cl.last_roll === 'number' ? cl.last_roll : dice[0] + dice[1]}` : ''}
+            {!dice && typeof cl.last_roll === 'number' ? ` · Roll: ${cl.last_roll}` : ''}
             {typeof cl.steps_remaining === 'number' ? ` · Steps: ${cl.steps_remaining}` : ''}
           </Typography>
           {!!cl.last_event && (
@@ -158,7 +177,7 @@ export default function CluedoPanel({ snapshot, seatLabel, send, playerColors }:
 
       {canInteract &&
         !snapshot.popup?.active &&
-        (envelopeBtn || rollBtn || suggestBtn || accuseBtn || endTurnBtn || moveUp || moveDown || moveLeft || moveRight || pickSuspects.length || pickWeapons.length || pickRooms.length) && (
+        (envelopeBtn || rollBtn || suggestBtn || accuseBtn || endTurnBtn || moveUp || moveDown || moveLeft || moveRight || pickSuspects.length || pickWeapons.length || pickRooms.length || revealButtons.length) && (
           <>
             <Typography variant="subtitle1" gutterBottom align="center">
               Actions
@@ -208,7 +227,7 @@ export default function CluedoPanel({ snapshot, seatLabel, send, playerColors }:
               </Box>
             </Paper>
 
-            {(pickSuspects.length > 0 || pickWeapons.length > 0 || pickRooms.length > 0) && (
+            {(pickSuspects.length > 0 || pickWeapons.length > 0 || pickRooms.length > 0 || revealButtons.length > 0) && (
               <Paper variant="outlined" sx={{ p: 1.25, mb: 2, borderColor: sectionBorderColor }}>
                 <Box
                   sx={{
@@ -218,6 +237,18 @@ export default function CluedoPanel({ snapshot, seatLabel, send, playerColors }:
                     justifyContent: 'center',
                   }}
                 >
+                  {revealButtons.map((b) => (
+                    <Paper
+                      key={b.id}
+                      variant="outlined"
+                      onClick={b.enabled ? () => sendClick(b.id) : undefined}
+                      sx={padButtonSx(!!b.enabled)}
+                    >
+                      <Typography variant="body2" sx={{ fontWeight: 900 }}>
+                        {b.text}
+                      </Typography>
+                    </Paper>
+                  ))}
                   {pickSuspects.map((b) => (
                     <Paper
                       key={b.id}
@@ -259,6 +290,20 @@ export default function CluedoPanel({ snapshot, seatLabel, send, playerColors }:
             )}
           </>
         )}
+
+      <Typography variant="subtitle1" gutterBottom align="center">
+        Notes
+      </Typography>
+      <Paper variant="outlined" sx={{ p: 1.25, mb: 2, borderColor: sectionBorderColor }}>
+        <TextField
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Type your notes here…"
+          multiline
+          minRows={6}
+          fullWidth
+        />
+      </Paper>
 
       <Typography variant="subtitle1" gutterBottom align="center">
         Players

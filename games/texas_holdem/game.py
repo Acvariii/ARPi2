@@ -228,6 +228,81 @@ class TexasHoldemGame:
         self.last_showdown = None
         self._start_new_hand()
 
+    def handle_player_quit(self, seat: int) -> None:
+        """Handle a player disconnecting mid-game.
+
+        - If they are in the current hand, treat as a fold.
+        - Remove them from active_players so turn progression can't target them.
+        - Redistribute their remaining stack evenly among remaining players.
+        """
+        try:
+            s = int(seat)
+        except Exception:
+            return
+
+        if self.state == "player_select":
+            return
+
+        if s not in self.active_players:
+            return
+
+        # If they are in-hand, fold them first while they're still in active_players.
+        try:
+            if self.state == "playing" and bool(self.in_hand.get(s, False)):
+                self.in_hand[s] = False
+                self.acted.add(s)
+                self._after_action(s)
+        except Exception:
+            pass
+
+        # Remove from active list.
+        remaining = [int(x) for x in self.active_players if int(x) != s]
+        self.active_players = remaining
+
+        # Remove their per-hand state.
+        try:
+            self.hole.pop(s, None)
+            self.in_hand.pop(s, None)
+            self.bet_in_round.pop(s, None)
+            self.reveal_hole.pop(s, None)
+        except Exception:
+            pass
+        try:
+            self.acted.discard(s)
+        except Exception:
+            pass
+
+        # Redistribute chips/resources.
+        stack = int(self.stacks.pop(s, 0) or 0)
+        if remaining and stack > 0:
+            share = int(stack) // int(len(remaining))
+            if share > 0:
+                for r in remaining:
+                    self.stacks[int(r)] = int(self.stacks.get(int(r), 0) or 0) + share
+
+        # Keep dealer/turn seats valid.
+        if self.dealer_seat == s:
+            self.dealer_seat = int(remaining[0]) if remaining else None
+
+        if self.turn_seat == s:
+            in_players = [p for p in (self.hole or {}).keys() if bool(self.in_hand.get(p, False))]
+            if in_players:
+                nxt = self._next_seat(s, predicate=lambda x: bool(self.in_hand.get(x, False)))
+                self.turn_seat = int(nxt) if isinstance(nxt, int) else int(in_players[0])
+            else:
+                self.turn_seat = None
+
+        # If not enough players remain to continue, let the normal loop mark showdown.
+        try:
+            seats_with_chips = [p for p in self.active_players if int(self.stacks.get(int(p), 0) or 0) > 0]
+            if self.state == "playing" and len(seats_with_chips) < 2:
+                self._start_new_hand()
+                return
+        except Exception:
+            pass
+
+        self._rebuild_buttons()
+
     def update(self, dt: float) -> None:
         # No animations yet; keep for interface parity.
         return

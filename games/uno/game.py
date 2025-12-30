@@ -146,6 +146,80 @@ class UnoGame:
         self.state = "playing"
         self._rebuild_buttons()
 
+    def handle_player_quit(self, seat: int) -> None:
+        """Handle a player disconnecting mid-game.
+
+        Removes the seat from turn order and returns their hand to the draw pile so
+        the game cannot get stuck waiting on a missing player.
+        """
+        try:
+            s = int(seat)
+        except Exception:
+            return
+
+        if self.state != "playing":
+            return
+
+        if self.winner is not None:
+            return
+
+        if s not in self.active_players:
+            return
+
+        was_turn = bool(self.current_turn_seat == s)
+
+        # If we're waiting on a color selection from this seat, pick a color and continue.
+        if bool(self.awaiting_color_choice) and int(self.awaiting_color_player or -1) == s:
+            self.awaiting_color_choice = False
+            self.awaiting_color_player = None
+            # Choose something valid; prefer not None.
+            self.current_color = random.choice(["R", "G", "B", "Y"])
+
+        # Return their hand to the draw pile.
+        hand = list(self.hands.pop(s, []) or [])
+        if hand:
+            self.draw_pile.extend(hand)
+            random.shuffle(self.draw_pile)
+
+        # Remove from turn order, keeping current_player_idx stable.
+        try:
+            removed_idx = self.active_players.index(s)
+        except Exception:
+            removed_idx = None
+
+        self.active_players = [int(x) for x in self.active_players if int(x) != s]
+        self._next_round_ready.pop(s, None)
+        self._hand_page.pop(s, None)
+
+        if not self.active_players:
+            self.state = "player_select"
+            self.current_player_idx = 0
+            self._note_event("All players left")
+            self._rebuild_buttons()
+            return
+
+        if len(self.active_players) == 1:
+            self.winner = int(self.active_players[0])
+            self._note_event(f"Winner: {self._seat_label(self.winner)}")
+            self._rebuild_buttons()
+            return
+
+        if isinstance(removed_idx, int):
+            if removed_idx < int(self.current_player_idx):
+                self.current_player_idx = max(0, int(self.current_player_idx) - 1)
+            if was_turn:
+                self.current_player_idx = int(removed_idx) % len(self.active_players)
+
+        if self.current_player_idx >= len(self.active_players):
+            self.current_player_idx = 0
+
+        # If they quit on their turn, ensure the game advances immediately.
+        if was_turn:
+            self.drew_this_turn = False
+
+        self._note_event(f"{self._seat_label(s)} quit")
+        self._rebuild_buttons()
+
     def update(self, dt: float) -> None:
         # Advance Pyglet-board animations.
         try:
@@ -599,12 +673,8 @@ class UnoGame:
     def _build_player_buttons(self, seat: int) -> Dict[str, _WebButton]:
         btns: Dict[str, _WebButton] = {}
 
-        # Winner view: rematch controls
+        # Winner view: end-of-game flow is handled by the server/Web UI.
         if self.winner is not None:
-            is_ready = bool(self._next_round_ready.get(int(seat), False))
-            btns["play_again"] = _WebButton("Play Again (Ready)", enabled=not is_ready)
-            ready_count = sum(1 for s in self.active_players if self._next_round_ready.get(int(s), False))
-            btns["force_start"] = _WebButton("Force Start (Ready Players)", enabled=bool(ready_count >= 2))
             return btns
 
         is_turn = seat == self.current_turn_seat

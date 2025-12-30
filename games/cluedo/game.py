@@ -38,7 +38,7 @@ class CluedoGame:
     """
 
     SUSPECTS: List[Tuple[str, str]] = [
-        ("🔴", "Miss Scarlet"),
+        ("🔴", "Miss Scarlett"),
         ("🟡", "Colonel Mustard"),
         ("⚪", "Mrs. White"),
         ("🟢", "Mr. Green"),
@@ -136,6 +136,20 @@ class CluedoGame:
         self.last_roll: Optional[int] = None
         self.steps_remaining: int = 0
 
+        # Dice details (2d6). last_roll remains the total for UI/buttons.
+        self.last_dice: Optional[Tuple[int, int]] = None
+
+        # Turn rule: at most one suggestion per turn.
+        self.suggested_this_turn: bool = False
+
+        # Suggestion reveal flow: if a player can disprove a suggestion, they choose which matching card to reveal.
+        self._pending_reveal_suggester: Optional[int] = None
+        self._pending_reveal_revealer: Optional[int] = None
+        self._pending_reveal_options: List[Tuple[str, str]] = []  # (kind, name)
+
+        # If a player suggests without rolling (starts turn already in a room), end their turn after the reveal completes.
+        self._end_turn_after_suggestion: bool = False
+
         # Dice roll animation (board)
         self.dice_rolling: bool = False
         self.dice_roll_start: float = 0.0
@@ -161,6 +175,9 @@ class CluedoGame:
 
         # Web UI buttons
         self.buttons: Dict[int, Dict[str, _WebButton]] = {}
+
+        # Incremented each time a new game starts (used by clients for per-game UI resets)
+        self.game_id: int = 0
 
         self._seat_name_provider: Optional[Callable[[int], str]] = None
 
@@ -386,6 +403,12 @@ class CluedoGame:
                 self.current_turn_idx = idx
                 self.last_roll = None
                 self.steps_remaining = 0
+                self.last_dice = None
+                self.suggested_this_turn = False
+                self._pending_reveal_suggester = None
+                self._pending_reveal_revealer = None
+                self._pending_reveal_options = []
+                self._end_turn_after_suggestion = False
                 self._mode = "need_roll"
                 self._pending_pick_suspect = None
                 self._pending_pick_weapon = None
@@ -397,12 +420,15 @@ class CluedoGame:
     def start_game(self, selected_indices: List[int]) -> None:
         self._ensure_board()
         seats = [int(i) for i in selected_indices if isinstance(i, int) or str(i).isdigit()]
-        seats = [s for s in seats if 0 <= s <= 7]
-        if len(seats) < 2:
+        # Cluedo supports 3..6 players (seats 0..5).
+        seats = [s for s in seats if 0 <= s <= 5]
+        if len(seats) < 3:
             return
 
+        self.game_id = int(self.game_id) + 1
+
         self.active_players = seats
-        self.current_turn_idx = 0
+        self.current_turn_idx = random.randrange(len(seats))
         self.eliminated = []
         self.winner = None
 
@@ -431,6 +457,10 @@ class CluedoGame:
 
         # Start positions (distinct start squares)
         starts = list(self._START_POSITIONS or [])
+        try:
+            random.shuffle(starts)
+        except Exception:
+            pass
         self.player_pos = {}
         for i, s in enumerate(seats):
             self.player_pos[int(s)] = starts[i % len(starts)]
@@ -438,6 +468,12 @@ class CluedoGame:
         # Turn action state
         self.last_roll = None
         self.steps_remaining = 0
+        self.last_dice = None
+        self.suggested_this_turn = False
+        self._pending_reveal_suggester = None
+        self._pending_reveal_revealer = None
+        self._pending_reveal_options = []
+        self._end_turn_after_suggestion = False
         self.dice_rolling = False
         self.dice_roll_start = 0.0
         self._dice_show_until = 0.0
@@ -451,6 +487,82 @@ class CluedoGame:
 
         # Randomize door positions each game while keeping the same allowed sides.
         self._randomize_doors()
+        self._rebuild_buttons_all()
+
+    def handle_player_quit(self, seat: int) -> None:
+        """Handle a player disconnecting mid-game.
+
+        Cluedo can freeze if the current-turn player leaves or if a pending reveal is
+        waiting for a seat that no longer has a Web UI client.
+
+        We also redistribute the quitter's hand to keep the game playable.
+        """
+        try:
+            s = int(seat)
+        except Exception:
+            return
+
+        if self.state != "playing":
+            return
+
+        if self.winner is not None:
+            return
+
+        if s not in self.active_players:
+            return
+
+        was_turn = bool(self._current_turn_seat() == s)
+
+        # If a reveal is pending and either suggester or revealer quits, cancel it.
+        if self._mode == "reveal_pick":
+            if int(self._pending_reveal_revealer or -1) == s or int(self._pending_reveal_suggester or -1) == s:
+                self._pending_reveal_suggester = None
+                self._pending_reveal_revealer = None
+                self._pending_reveal_options = []
+                self._end_turn_after_suggestion = False
+                self._mode = "in_room"
+
+        # Redistribute their cards to remaining players so suggestions remain resolvable.
+        quitter_hand = list(self.hands.pop(s, []) or [])
+        remaining = [int(x) for x in self.active_players if int(x) != s]
+        if remaining and quitter_hand:
+            random.shuffle(quitter_hand)
+            for i, card in enumerate(quitter_hand):
+                tgt = int(remaining[i % len(remaining)])
+                self.hands.setdefault(tgt, []).append(card)
+
+        # Remove from the game.
+        self.active_players = remaining
+        try:
+            self.player_pos.pop(s, None)
+        except Exception:
+            pass
+        if s not in set(self.eliminated):
+            self.eliminated.append(int(s))
+
+        if not self.active_players:
+            self.state = "player_select"
+            self._set_event("All players left")
+            self._rebuild_buttons_all()
+            return
+
+        # Winner if only one non-eliminated remains.
+        remaining_live = [x for x in self.active_players if int(x) not in set(self.eliminated)]
+        if len(remaining_live) == 1:
+            self.winner = int(remaining_live[0])
+            self._set_event(f"{self._seat_name(self.winner)} wins! (Last remaining)")
+            self._rebuild_buttons_all()
+            return
+
+        # Keep the turn index valid.
+        if self.current_turn_idx >= len(self.active_players):
+            self.current_turn_idx = 0
+
+        if was_turn:
+            # Reset turn state and advance to the next available seat.
+            self._advance_turn()
+
+        self._set_event(f"{self._seat_name(s)} quit")
         self._rebuild_buttons_all()
 
     def _randomize_doors(self) -> None:
@@ -553,6 +665,21 @@ class CluedoGame:
         if self.state != "playing":
             return btns
 
+        # Special case: suggestion reveal selection is made by the revealer (even though it's not their turn).
+        if self._mode == "reveal_pick":
+            revealer = self._pending_reveal_revealer
+            suggester = self._pending_reveal_suggester
+            if revealer is None or suggester is None:
+                return btns
+            if int(seat) != int(revealer):
+                return btns
+
+            # Present only the matching cards as choices.
+            for kind, name in (self._pending_reveal_options or []):
+                kid = f"reveal:{str(kind)}:{str(name)}"
+                btns[kid] = _WebButton(f"Reveal {str(kind).title()} — {str(name)}", enabled=True)
+            return btns
+
         turn_seat = self._current_turn_seat()
         is_turn = (turn_seat is not None and int(seat) == int(turn_seat) and int(seat) not in set(self.eliminated))
 
@@ -574,7 +701,7 @@ class CluedoGame:
         tile_kind, tile_label = self._tile_info(cur_pos) if cur_pos is not None else (None, None)
         in_suggest_room = bool(tile_kind == self._TILE_ROOM and isinstance(tile_label, str) and tile_label not in ("Accusation",))
         # Suggest: must be in the room you're suggesting, and after movement ends.
-        suggest_enabled = is_turn and (not bool(self.dice_rolling)) and self.steps_remaining == 0 and in_suggest_room
+        suggest_enabled = is_turn and (not bool(self.dice_rolling)) and (not bool(self.suggested_this_turn)) and self.steps_remaining == 0 and in_suggest_room
         # Accuse: only from the Accusation room.
         in_accuse_room = bool(tile_kind == self._TILE_ACCUSATION)
         accuse_enabled = is_turn and (not bool(self.dice_rolling)) and self.winner is None and in_accuse_room
@@ -615,6 +742,50 @@ class CluedoGame:
         if self.winner is not None:
             return
 
+        # If we're waiting for a reveal choice, only the designated revealer may act.
+        if self._mode == "reveal_pick":
+            revealer = self._pending_reveal_revealer
+            suggester = self._pending_reveal_suggester
+            if revealer is None or suggester is None:
+                # Safety: clear bad pending state.
+                self._pending_reveal_suggester = None
+                self._pending_reveal_revealer = None
+                self._pending_reveal_options = []
+                self._mode = "in_room"
+                self._rebuild_buttons_all()
+                return
+            if int(seat) != int(revealer):
+                return
+            if not btn_id.startswith("reveal:"):
+                return
+
+            try:
+                _, kind, name = btn_id.split(":", 2)
+            except Exception:
+                return
+
+            opts = list(self._pending_reveal_options or [])
+            if (str(kind), str(name)) not in [(str(k), str(n)) for (k, n) in opts]:
+                return
+
+            self._set_private_event(int(suggester), f"Revealed by {self._seat_name(int(revealer))}: {str(kind).title()} — {str(name)}")
+            self._set_private_event(int(revealer), f"You revealed: {str(kind).title()} — {str(name)}")
+
+            self._pending_reveal_suggester = None
+            self._pending_reveal_revealer = None
+            self._pending_reveal_options = []
+
+            # Return control to the suggester's turn.
+            self._mode = "in_room"
+
+            # If the suggester started the turn in the room and used their "free" suggestion, end their turn now.
+            if bool(self._end_turn_after_suggestion):
+                self._end_turn_after_suggestion = False
+                self._advance_turn()
+
+            self._rebuild_buttons_all()
+            return
+
         turn_seat = self._current_turn_seat()
         if turn_seat is None or seat != int(turn_seat):
             return
@@ -652,6 +823,8 @@ class CluedoGame:
 
         if btn_id == "suggest":
             if self.steps_remaining != 0:
+                return
+            if bool(self.suggested_this_turn):
                 return
             # Must be in a room; room is taken from your current location.
             kind, label = self._tile_info(self.player_pos.get(seat))
@@ -699,10 +872,19 @@ class CluedoGame:
             if self._mode == "suggest_pick_weapon":
                 if not room:
                     return
+                self.suggested_this_turn = True
+                self._end_turn_after_suggestion = (self.last_roll is None)
+
                 self._resolve_suggestion(seat, suspect, weapon, room)
-                self._mode = "in_room"
+                if self._mode != "reveal_pick":
+                    self._mode = "in_room"
                 self._pending_pick_suspect = None
                 self._pending_pick_weapon = None
+
+                # If the suggestion resolved immediately (no reveal needed), end turn now when applicable.
+                if bool(self._end_turn_after_suggestion) and self._mode != "reveal_pick":
+                    self._end_turn_after_suggestion = False
+                    self._advance_turn()
                 self._rebuild_buttons_all()
                 return
 
@@ -883,8 +1065,8 @@ class CluedoGame:
 
         self._last_suggestion = (str(suspect), str(weapon), str(room))
 
-        reveal = None
         revealer = None
+        matches_for_revealer: List[CluedoCard] = []
         ap = list(self.active_players)
         if suggester in ap:
             start = ap.index(suggester)
@@ -900,17 +1082,22 @@ class CluedoGame:
             cards = self.hands.get(other, [])
             matches = [c for c in cards if c.key() in wanted]
             if matches:
-                shown = random.choice(matches)
-                reveal = shown
                 revealer = other
+                matches_for_revealer = list(matches)
                 break
 
-        if reveal is None:
+        if revealer is None or not matches_for_revealer:
             self._set_private_event(suggester, "No one could reveal a matching card.")
             return
 
-        self._set_private_event(suggester, f"Revealed by {self._seat_name(revealer)}: {reveal.kind.title()} — {reveal.name}")
-        self._set_private_event(revealer, f"You revealed: {reveal.kind.title()} — {reveal.name}")
+        # Ask the revealer which matching card to show.
+        self._pending_reveal_suggester = int(suggester)
+        self._pending_reveal_revealer = int(revealer)
+        self._pending_reveal_options = [(str(c.kind), str(c.name)) for c in matches_for_revealer]
+        self._mode = "reveal_pick"
+
+        self._set_private_event(suggester, f"Waiting for {self._seat_name(int(revealer))} to reveal a card…")
+        self._set_private_event(int(revealer), f"Choose a card to reveal to {self._seat_name(int(suggester))}.")
 
     def _resolve_accusation(self, seat: int, suspect: str, weapon: str, room: str) -> None:
         accuser = int(seat)
@@ -1002,9 +1189,11 @@ class CluedoGame:
             }
 
         return {
+            "game_id": int(self.game_id),
             "state": str(self.state),
             "active_players": list(self.active_players),
             "current_turn_seat": self._current_turn_seat(),
+            "dice": [int(self.last_dice[0]), int(self.last_dice[1])] if self.last_dice else None,
             "last_roll": self.last_roll,
             "steps_remaining": int(self.steps_remaining),
             "mode": str(self._mode),
@@ -1031,10 +1220,13 @@ class CluedoGame:
 
                 turn_seat = self._current_turn_seat()
                 if turn_seat is not None and int(turn_seat) not in set(self.eliminated) and self.winner is None:
-                    self.last_roll = random.randint(1, 6)
+                    d1 = random.randint(1, 6)
+                    d2 = random.randint(1, 6)
+                    self.last_dice = (int(d1), int(d2))
+                    self.last_roll = int(d1) + int(d2)
                     self.steps_remaining = int(self.last_roll)
                     self._mode = "moving" if self.steps_remaining > 0 else "in_room"
-                    self._set_event(f"{self._seat_name(int(turn_seat))} rolled {self.last_roll}.")
+                    self._set_event(f"{self._seat_name(int(turn_seat))} rolled {d1}+{d2} = {self.last_roll}.")
                     self._dice_show_until = time.time() + 2.2
 
                 self._rebuild_buttons_all()
@@ -1049,6 +1241,15 @@ class CluedoGame:
         except Exception:
             elapsed = 0.0
         return int((elapsed * 20) % 6) + 1
+
+    def _dice_preview_values(self) -> Tuple[int, int]:
+        try:
+            elapsed = max(0.0, time.time() - float(self.dice_roll_start or time.time()))
+        except Exception:
+            elapsed = 0.0
+        d1 = int((elapsed * 20) % 6) + 1
+        d2 = int((elapsed * 17 + 2.5) % 6) + 1
+        return (int(d1), int(d2))
 
     def draw(self) -> None:
         if self.renderer is None:
@@ -1290,11 +1491,14 @@ class CluedoGame:
         # Dice in footer-left (keep result visible briefly after rolling)
         show_dice = bool(self.dice_rolling) or (self.last_roll is not None and time.time() < float(self._dice_show_until or 0.0))
         if show_dice and self.winner is None:
-            dv = self._dice_preview_value() if bool(self.dice_rolling) else int(self.last_roll or 0)
+            if bool(self.dice_rolling):
+                d1, d2 = self._dice_preview_values()
+            else:
+                d1, d2 = (int(self.last_dice[0]), int(self.last_dice[1])) if self.last_dice else (int(self.last_roll or 0), 0)
             dx = margin + 18
             dy = footer_y + int((footer_pad - 16) * 0.44)
             self.renderer.draw_text(
-                f"🎲 {dv}",
+                f"🎲 {d1}  🎲 {d2}",
                 int(dx) + 2,
                 int(dy) + 2,
                 font_name="Segoe UI Emoji",
@@ -1305,7 +1509,7 @@ class CluedoGame:
                 alpha=140,
             )
             self.renderer.draw_text(
-                f"🎲 {dv}",
+                f"🎲 {d1}  🎲 {d2}",
                 int(dx),
                 int(dy),
                 font_name="Segoe UI Emoji",
@@ -1325,7 +1529,10 @@ class CluedoGame:
         if bool(self.dice_rolling):
             info += "  ·  Rolling…"
         elif self.last_roll is not None:
-            info += f"  ·  Roll: {self.last_roll}  ·  Steps: {self.steps_remaining}"
+            if self.last_dice is not None:
+                info += f"  ·  Roll: {int(self.last_dice[0])}+{int(self.last_dice[1])}={self.last_roll}  ·  Steps: {self.steps_remaining}"
+            else:
+                info += f"  ·  Roll: {self.last_roll}  ·  Steps: {self.steps_remaining}"
         if self.winner is not None:
             info = f"Winner: {self._seat_name(self.winner)}"
 
