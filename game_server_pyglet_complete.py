@@ -410,12 +410,20 @@ class PygletGameServer:
                         self._bg_last_pos = float(pos)
                         self._bg_last_pos_time = float(now)
 
+                        stalled = (now - last_t) > 1.25 and abs(pos - last_pos) < 0.02
+
+                        # If duration is known, only restart when we're at the end.
                         if dur > 1.0:
                             near_end = pos >= (dur - 0.25)
-                            stalled = (now - last_t) > 1.0 and abs(pos - last_pos) < 0.02
                             if near_end and stalled:
                                 self._bg_track = None
                                 self._set_bg_music(desired)
+
+                        # If duration is unknown (common for some MP3 decoders), restart on stall anyway
+                        # once playback has clearly started.
+                        if dur <= 1.0 and pos > 0.25 and stalled:
+                            self._bg_track = None
+                            self._set_bg_music(desired)
                     except Exception:
                         pass
         except Exception:
@@ -1181,7 +1189,20 @@ class PygletGameServer:
             print(f"Web UI folder missing: {web_root}")
             return
 
-        handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(web_root))
+        class _NoCacheHandler(http.server.SimpleHTTPRequestHandler):
+            def end_headers(self):
+                try:
+                    # Prevent stale UI on phones when the server is rebuilt/restarted.
+                    # Hashed assets are fine to cache; index.html should revalidate.
+                    if self.path == "/" or self.path.endswith(".html"):
+                        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                        self.send_header("Pragma", "no-cache")
+                        self.send_header("Expires", "0")
+                except Exception:
+                    pass
+                return super().end_headers()
+
+        handler = functools.partial(_NoCacheHandler, directory=str(web_root))
         try:
             # ThreadingMixIn is built-in via ThreadingTCPServer; good enough for static files
             self._httpd = socketserver.ThreadingTCPServer((self.host, self.http_server_port), handler)
@@ -1215,6 +1236,12 @@ class PygletGameServer:
         if self.state == "risk":
             return self.risk_game
         if self.state == "catan":
+            try:
+                # Provide names so the Catan wall UI can show "Alex" instead of "Player 3".
+                if hasattr(self, "catan_game") and hasattr(self.catan_game, "player_names"):
+                    self.catan_game.player_names = dict(self.player_names or {})
+            except Exception:
+                pass
             return self.catan_game
         if self.state == "dnd_creation":
             return getattr(self.dnd_creation, "game", None) or self.dnd_creation

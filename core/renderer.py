@@ -7,6 +7,11 @@ from pyglet import gl, shapes, text
 import math
 from typing import Tuple, List
 
+try:
+    from pyglet.graphics import OrderedGroup  # pyglet 1.5/2.x
+except Exception:  # pragma: no cover
+    OrderedGroup = None
+
 
 class PygletRenderer:
     """High-performance OpenGL renderer for game elements"""
@@ -22,6 +27,23 @@ class PygletRenderer:
         # drawing right away. This prevents batched background/UI from overpainting
         # game content drawn earlier in the frame.
         self.defer_immediate = False
+
+        # Optional draw ordering for deferred-immediate shapes.
+        # When deferring into a batch, use OrderedGroup layers to force stable z-order.
+        self._layer_groups = {}
+
+    def _get_layer_group(self, layer: int):
+        if OrderedGroup is None:
+            return None
+        try:
+            layer_i = int(layer)
+        except Exception:
+            layer_i = 0
+        grp = self._layer_groups.get(layer_i)
+        if grp is None:
+            grp = OrderedGroup(layer_i)
+            self._layer_groups[layer_i] = grp
+        return grp
         
     def clear_cache(self):
         """Clear cached shapes and text for next frame"""
@@ -90,18 +112,20 @@ class PygletRenderer:
             )
             self.shapes_cache.append(arc_shape)
     
-    def draw_circle_immediate(self, color: Tuple[int, int, int], center: Tuple[int, int], 
-                             radius: int, width: int = 0, alpha: int = 255):
+    def draw_circle_immediate(self, color: Tuple[int, int, int], center: Tuple[int, int],
+                             radius: int, width: int = 0, alpha: int = 255, layer: int = 0):
         """Draw circle immediately without batching (for drawing on top of everything)"""
         x, y = center
         y_flipped = self.flip_y(y)
 
         if getattr(self, "defer_immediate", False):
+            grp = self._get_layer_group(layer)
             if width == 0:
                 circle_shape = shapes.Circle(
                     x, y_flipped, radius,
                     color=(*color, alpha),
                     batch=self.batch,
+                    group=grp,
                 )
                 self.shapes_cache.append(circle_shape)
             else:
@@ -109,6 +133,7 @@ class PygletRenderer:
                     x, y_flipped, radius,
                     color=(*color, alpha),
                     batch=self.batch,
+                    group=grp,
                 )
                 self.shapes_cache.append(arc_shape)
             return
@@ -177,11 +202,12 @@ class PygletRenderer:
     def draw_text_immediate(self, text_str: str, x: int, y: int, font_name: str = 'Arial',
                             font_size: int = 16, color: Tuple[int, int, int] = (255, 255, 255),
                             bold: bool = False, anchor_x: str = 'left', anchor_y: str = 'top',
-                            alpha: int = 255, rotation: int = 0):
+                            alpha: int = 255, rotation: int = 0, layer: int = 0):
         """Draw text immediately (not batched). Useful for overlays above all UI."""
         y_flipped = self.flip_y(y)
 
         if getattr(self, "defer_immediate", False):
+            grp = self._get_layer_group(layer)
             label = text.Label(
                 text_str,
                 font_name=font_name,
@@ -192,6 +218,7 @@ class PygletRenderer:
                 anchor_x=anchor_x,
                 anchor_y=anchor_y,
                 batch=self.batch,
+                group=grp,
             )
             if bold:
                 label.bold = True
@@ -261,7 +288,7 @@ class PygletRenderer:
         gl.glEnd()
 
     def draw_polygon_immediate(self, color: Tuple[int, int, int], points: List[Tuple[int, int]],
-                               alpha: int = 255):
+                               alpha: int = 255, layer: int = 0):
         """Draw filled polygon immediately using pyglet.shapes (core-profile friendly)."""
         if not points or len(points) < 3:
             return
@@ -269,14 +296,15 @@ class PygletRenderer:
         for x, y in points:
             coords.append((x, self.flip_y(y)))
         if getattr(self, "defer_immediate", False):
-            poly = shapes.Polygon(*coords, color=(*color, alpha), batch=self.batch)
+            grp = self._get_layer_group(layer)
+            poly = shapes.Polygon(*coords, color=(*color, alpha), batch=self.batch, group=grp)
             self.shapes_cache.append(poly)
             return
         poly = shapes.Polygon(*coords, color=(*color, alpha))
         poly.draw()
 
     def draw_polyline_immediate(self, color: Tuple[int, int, int], points: List[Tuple[int, int]],
-                                width: int = 2, alpha: int = 255, closed: bool = True):
+                                width: int = 2, alpha: int = 255, closed: bool = True, layer: int = 0):
         """Draw a polyline immediately using pyglet.shapes.Line segments."""
         if not points or len(points) < 2:
             return
@@ -285,7 +313,8 @@ class PygletRenderer:
             pts.append(points[0])
         for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
             if getattr(self, "defer_immediate", False):
-                line = shapes.Line(x1, self.flip_y(y1), x2, self.flip_y(y2), color=(*color, alpha), batch=self.batch)
+                grp = self._get_layer_group(layer)
+                line = shapes.Line(x1, self.flip_y(y1), x2, self.flip_y(y2), color=(*color, alpha), batch=self.batch, group=grp)
                 line.width = width
                 self.shapes_cache.append(line)
             else:
@@ -294,12 +323,13 @@ class PygletRenderer:
                 line.draw()
 
     def draw_line_immediate(self, color: Tuple[int, int, int], start: Tuple[int, int], end: Tuple[int, int],
-                            width: int = 2, alpha: int = 255):
+                            width: int = 2, alpha: int = 255, layer: int = 0):
         """Draw a line immediately; supports deferring into the batch."""
         x1, y1 = start
         x2, y2 = end
         if getattr(self, "defer_immediate", False):
-            line = shapes.Line(x1, self.flip_y(y1), x2, self.flip_y(y2), color=(*color, alpha), batch=self.batch)
+            grp = self._get_layer_group(layer)
+            line = shapes.Line(x1, self.flip_y(y1), x2, self.flip_y(y2), color=(*color, alpha), batch=self.batch, group=grp)
             line.width = width
             self.shapes_cache.append(line)
             return

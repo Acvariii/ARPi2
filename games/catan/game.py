@@ -125,7 +125,7 @@ class CatanGame:
         self.active_players: List[int] = []
         self.current_turn_seat: Optional[int] = None
 
-        self.phase: str = "player_select"  # player_select|initial_settlement|initial_road|main|discard|robber_move|robber_steal|trade_bank
+        self.phase: str = "player_select"  # player_select|initial_settlement|initial_road|main|discard|robber_move|robber_steal|trade_bank|trade_player_*
         self._initial_order: List[int] = []
         self._initial_step: int = 0
         self._initial_last_settlement_vertex: Optional[int] = None
@@ -191,9 +191,25 @@ class CatanGame:
 
         self.last_event: str = ""
         self.last_roll: Optional[int] = None
+        self._last_dice: Optional[Tuple[int, int]] = None
         self._last_roll_time: float = 0.0
 
+        # Monopoly-style dice animation
+        self.dice_rolling: bool = False
+        self._dice_roll_start: float = 0.0
+        self._pending_dice: Optional[Tuple[int, int]] = None
+        self._pending_roll_seat: Optional[int] = None
+        self._dice_roll_duration: float = 1.2
+
+        # Player-to-player trade (simple 1-for-1 offers)
+        self._p2p_offer: Optional[Dict[str, object]] = None
+        self._p2p_give: Optional[str] = None
+        self._p2p_get: Optional[str] = None
+
         self.buttons: Dict[int, Dict[str, _WebButton]] = {i: {} for i in range(8)}
+
+        # Optional: server can provide human-friendly player names.
+        self.player_names: Dict[int, str] = {}
 
         # Map layout cache
         self._hex_size: float = 28.0
@@ -207,6 +223,13 @@ class CatanGame:
         self.board_only_mode = True
 
     def _seat_label(self, seat: int) -> str:
+        try:
+            name = (self.player_names or {}).get(int(seat))
+            name = str(name or '').strip()
+            if name:
+                return name
+        except Exception:
+            pass
         return f"Player {int(seat) + 1}"
 
     def _is_my_turn(self, seat: int) -> bool:
@@ -280,6 +303,14 @@ class CatanGame:
         self.last_event = f"Catan started ({n} players, {self.expansion_mode})"
         self.last_roll = None
         self._last_roll_time = 0.0
+
+        self.dice_rolling = False
+        self._dice_roll_start = 0.0
+        self._pending_dice = None
+        self._pending_roll_seat = None
+        self._p2p_offer = None
+        self._p2p_give = None
+        self._p2p_get = None
         self._refresh_buttons()
 
     # --- Graph building ---
@@ -370,12 +401,12 @@ class CatanGame:
         if mode == "base":
             return ExpansionConfig(
                 name="base",
-                radius=3,
+                radius=4,
                 # Always keep an ocean border so the island reads clearly.
                 water_ring=True,
                 island_count=0,
                 island_radius=0,
-                ports=6,
+                ports=8,
                 extra_water_prob=0.0,
                 gold_tiles=0,
                 volcano_tiles=0,
@@ -383,12 +414,12 @@ class CatanGame:
         if mode == "extended":
             return ExpansionConfig(
                 name="extended",
-                radius=4,
+                radius=5,
                 # Always keep an ocean border so the island reads clearly.
                 water_ring=True,
                 island_count=0,
                 island_radius=0,
-                ports=8,
+                ports=10,
                 extra_water_prob=0.03,
                 gold_tiles=1,
                 volcano_tiles=0,
@@ -564,6 +595,10 @@ class CatanGame:
         if isinstance(self.winner, int):
             return
 
+        # Lock inputs while dice animation is running.
+        if bool(self.dice_rolling):
+            return
+
         # Discard selection (7): affected players discard via buttons even when it's not their turn.
         if self.phase == "discard":
             if isinstance(btn_id, str) and btn_id.startswith("discard:"):
@@ -596,15 +631,11 @@ class CatanGame:
                 return
             a = random.randint(1, 6)
             b = random.randint(1, 6)
-            self.last_roll = int(a + b)
-            self._last_roll_time = float(time.time())
-            self.last_event = f"{self._seat_label(player_idx)} rolled {self.last_roll} ({a}+{b})"
-            self._rolled_this_turn = True
-            if int(self.last_roll) == 7:
-                self._handle_roll_seven(int(player_idx))
-            else:
-                self._distribute_resources_for_roll(int(self.last_roll))
-                self._update_awards_and_winner()
+            self._pending_dice = (int(a), int(b))
+            self._pending_roll_seat = int(player_idx)
+            self.dice_rolling = True
+            self._dice_roll_start = float(time.time())
+            self.last_event = f"{self._seat_label(player_idx)} is rolling…"
         elif btn_id == "end_turn":
             if not self._is_my_turn(player_idx):
                 return
@@ -625,6 +656,9 @@ class CatanGame:
 
             self._trade_give = None
             self._trade_get = None
+            self._p2p_offer = None
+            self._p2p_give = None
+            self._p2p_get = None
             self._free_roads_left = 0
             self._yop_left = 0
             self._monopoly_pending = False
@@ -664,13 +698,110 @@ class CatanGame:
             self._trade_give = self._trade_give or "wood"
             self._trade_get = self._trade_get or "brick"
             self.last_event = f"{self._seat_label(player_idx)}: bank trade"
+        elif btn_id == "trade_player":
+            if not self._is_my_turn(player_idx) or self.phase != "main" or not self._rolled_this_turn or self._pending_build is not None:
+                return
+            self.phase = "trade_player_select"
+            self._p2p_give = self._p2p_give or "wood"
+            self._p2p_get = self._p2p_get or "brick"
+            self._p2p_offer = None
+            self.last_event = f"{self._seat_label(player_idx)}: pick a trade partner"
         elif btn_id == "trade_cancel":
             if not self._is_my_turn(player_idx):
                 return
             if self.phase == "trade_bank":
                 self.phase = "main"
+            if self.phase.startswith("trade_player"):
+                self.phase = "main"
+                self._p2p_offer = None
             self._trade_give = None
             self._trade_get = None
+            self._p2p_give = None
+            self._p2p_get = None
+        elif isinstance(btn_id, str) and btn_id.startswith("trade_to:"):
+            if not self._is_my_turn(player_idx) or self.phase != "trade_player_select":
+                return
+            try:
+                to_seat = int(str(btn_id.split(":", 1)[1]))
+            except Exception:
+                return
+            if to_seat == int(player_idx) or to_seat not in (self.active_players or []):
+                return
+            self.phase = "trade_player_offer"
+            self._p2p_offer = {"from": int(player_idx), "to": int(to_seat)}
+            self.last_event = f"{self._seat_label(player_idx)}: offering trade to {self._seat_label(int(to_seat))}"
+        elif isinstance(btn_id, str) and btn_id.startswith("p2p_give:"):
+            if not self._is_my_turn(player_idx) or self.phase != "trade_player_offer":
+                return
+            res = str(btn_id.split(":", 1)[1])
+            if res in _RESOURCE:
+                self._p2p_give = res
+        elif isinstance(btn_id, str) and btn_id.startswith("p2p_get:"):
+            if not self._is_my_turn(player_idx) or self.phase != "trade_player_offer":
+                return
+            res = str(btn_id.split(":", 1)[1])
+            if res in _RESOURCE:
+                self._p2p_get = res
+        elif btn_id == "p2p_offer":
+            if not self._is_my_turn(player_idx) or self.phase != "trade_player_offer":
+                return
+            if not isinstance(self._p2p_offer, dict):
+                return
+            try:
+                to_seat = int(self._p2p_offer.get("to"))  # type: ignore[arg-type]
+            except Exception:
+                return
+            give = str(self._p2p_give or "")
+            get = str(self._p2p_get or "")
+            if give not in _RESOURCE or get not in _RESOURCE or give == get:
+                return
+            if int((self._res.get(int(player_idx)) or {}).get(give, 0)) <= 0:
+                return
+            self._p2p_offer = {"from": int(player_idx), "to": int(to_seat), "give": give, "get": get}
+            self.phase = "trade_player_wait"
+            self.last_event = f"Trade offer sent to {self._seat_label(int(to_seat))}: you give 1 {give} for 1 {get}"
+        elif btn_id == "p2p_accept":
+            if not isinstance(self._p2p_offer, dict) or not self.phase.startswith("trade_player"):
+                return
+            try:
+                frm = int(self._p2p_offer.get("from"))  # type: ignore[arg-type]
+                to = int(self._p2p_offer.get("to"))  # type: ignore[arg-type]
+                give = str(self._p2p_offer.get("give"))
+                get = str(self._p2p_offer.get("get"))
+            except Exception:
+                return
+            if int(player_idx) != int(to):
+                return
+            if give not in _RESOURCE or get not in _RESOURCE:
+                return
+            if int((self._res.get(int(frm)) or {}).get(give, 0)) <= 0:
+                return
+            if int((self._res.get(int(to)) or {}).get(get, 0)) <= 0:
+                return
+            self._res[int(frm)][give] = int(self._res[int(frm)].get(give, 0)) - 1
+            self._res[int(to)][give] = int(self._res[int(to)].get(give, 0)) + 1
+            self._res[int(to)][get] = int(self._res[int(to)].get(get, 0)) - 1
+            self._res[int(frm)][get] = int(self._res[int(frm)].get(get, 0)) + 1
+            self.last_event = f"Trade completed: {self._seat_label(int(frm))} gave 1 {give} for 1 {get} from {self._seat_label(int(to))}"
+            self._p2p_offer = None
+            self._p2p_give = None
+            self._p2p_get = None
+            self.phase = "main"
+        elif btn_id == "p2p_decline":
+            if not isinstance(self._p2p_offer, dict) or not self.phase.startswith("trade_player"):
+                return
+            try:
+                to = int(self._p2p_offer.get("to"))  # type: ignore[arg-type]
+                frm = int(self._p2p_offer.get("from"))  # type: ignore[arg-type]
+            except Exception:
+                return
+            if int(player_idx) != int(to):
+                return
+            self.last_event = f"{self._seat_label(int(to))} declined trade offer from {self._seat_label(int(frm))}"
+            self._p2p_offer = None
+            self._p2p_give = None
+            self._p2p_get = None
+            self.phase = "main"
         elif isinstance(btn_id, str) and btn_id.startswith("trade_give:"):
             if not self._is_my_turn(player_idx) or self.phase != "trade_bank":
                 return
@@ -1435,6 +1566,29 @@ class CatanGame:
                     self.buttons[seat]["end_turn"] = _WebButton("Waiting (discard)", enabled=False)
                 continue
 
+            # Pending player-to-player trade: recipient can accept/decline even if it's not their turn.
+            if isinstance(self._p2p_offer, dict) and self.phase.startswith("trade_player"):
+                try:
+                    frm = int(self._p2p_offer.get("from"))  # type: ignore[arg-type]
+                    to = int(self._p2p_offer.get("to"))  # type: ignore[arg-type]
+                    give = str(self._p2p_offer.get("give")) if self._p2p_offer.get("give") is not None else ""
+                    get = str(self._p2p_offer.get("get")) if self._p2p_offer.get("get") is not None else ""
+                except Exception:
+                    frm = to = -1
+                    give = get = ""
+
+                if int(seat) == int(to) and give in _RESOURCE and get in _RESOURCE:
+                    self.buttons[seat]["initial_hint"] = _WebButton(f"Trade offer: give 1 {get} for 1 {give}", enabled=False)
+                    can_accept = int((self._res.get(int(seat)) or {}).get(get, 0)) > 0 and int((self._res.get(int(frm)) or {}).get(give, 0)) > 0
+                    self.buttons[seat]["p2p_accept"] = _WebButton("Accept", enabled=bool(can_accept))
+                    self.buttons[seat]["p2p_decline"] = _WebButton("Decline", enabled=True)
+                    continue
+
+                if int(seat) == int(frm) and self._is_my_turn(seat) and self.phase == "trade_player_wait":
+                    self.buttons[seat]["initial_hint"] = _WebButton("Waiting for response…", enabled=False)
+                    self.buttons[seat]["trade_cancel"] = _WebButton("Cancel Offer", enabled=True)
+                    continue
+
             # Not your turn
             if not self._is_my_turn(seat):
                 self.buttons[seat]["end_turn"] = _WebButton("Waiting", enabled=False)
@@ -1477,8 +1631,39 @@ class CatanGame:
                 self.buttons[seat]["trade_cancel"] = _WebButton("Back", enabled=True)
                 continue
 
+            # Player trade sub-modes
+            if self.phase == "trade_player_select":
+                self.buttons[seat]["initial_hint"] = _WebButton("Pick a trade partner", enabled=False)
+                for other in (self.active_players or []):
+                    if int(other) == int(seat):
+                        continue
+                    self.buttons[seat][f"trade_to:{int(other)}"] = _WebButton(f"Trade with {self._seat_label(int(other))}", enabled=True)
+                self.buttons[seat]["trade_cancel"] = _WebButton("Back", enabled=True)
+                continue
+            if self.phase == "trade_player_offer":
+                to_seat = None
+                try:
+                    if isinstance(self._p2p_offer, dict):
+                        to_seat = int(self._p2p_offer.get("to"))  # type: ignore[arg-type]
+                except Exception:
+                    to_seat = None
+                self.buttons[seat]["initial_hint"] = _WebButton(
+                    f"Offer 1-for-1 to {self._seat_label(int(to_seat))}" if isinstance(to_seat, int) else "Offer 1-for-1",
+                    enabled=False,
+                )
+                give = self._p2p_give or "wood"
+                get = self._p2p_get or "brick"
+                for r in _RESOURCE:
+                    self.buttons[seat][f"p2p_give:{r}"] = _WebButton(f"You give: {r}{' ✓' if r == give else ''}", enabled=True)
+                for r in _RESOURCE:
+                    self.buttons[seat][f"p2p_get:{r}"] = _WebButton(f"You get: {r}{' ✓' if r == get else ''}", enabled=True)
+                can_offer = give != get and int((self._res.get(int(seat)) or {}).get(str(give), 0)) > 0
+                self.buttons[seat]["p2p_offer"] = _WebButton("Send Offer", enabled=bool(can_offer))
+                self.buttons[seat]["trade_cancel"] = _WebButton("Back", enabled=True)
+                continue
+
             # Main phase
-            self.buttons[seat]["roll"] = _WebButton("Roll Dice", enabled=(not self._rolled_this_turn and self._pending_build is None))
+            self.buttons[seat]["roll"] = _WebButton("Roll Dice", enabled=(not self._rolled_this_turn and (not self.dice_rolling) and self._pending_build is None))
 
             can_road = self._rolled_this_turn and self._pending_build in (None, "road") and (
                 self._free_roads_left > 0 or self._can_afford(seat, {"wood": 1, "brick": 1})
@@ -1497,6 +1682,7 @@ class CatanGame:
                 enabled=(self._rolled_this_turn and self._pending_build in (None, "city") and self._can_afford(seat, {"ore": 3, "wheat": 2})),
             )
             self.buttons[seat]["trade_bank"] = _WebButton("Trade (Bank)", enabled=(self._rolled_this_turn and self._pending_build is None))
+            self.buttons[seat]["trade_player"] = _WebButton("Trade (Player)", enabled=(self._rolled_this_turn and self._pending_build is None))
             self.buttons[seat]["buy_dev"] = _WebButton(
                 "Buy Dev",
                 enabled=(
@@ -1577,8 +1763,103 @@ class CatanGame:
             "winner": self.winner,
             "last_event": self.last_event or None,
             "last_roll": self.last_roll,
+            "dice_rolling": bool(self.dice_rolling),
             "tiles": tiles,
         }
+
+    def _draw_pips(self, cx: int, cy: int, size: int, value: int, *, layer: int) -> None:
+        # Bigger pips for wall visibility.
+        r = max(3, size // 8)
+        off = size // 4
+        pips = {
+            1: [(0, 0)],
+            2: [(-off, -off), (off, off)],
+            3: [(-off, -off), (0, 0), (off, off)],
+            4: [(-off, -off), (off, -off), (-off, off), (off, off)],
+            5: [(-off, -off), (off, -off), (0, 0), (-off, off), (off, off)],
+            6: [(-off, -off), (off, -off), (-off, 0), (off, 0), (-off, off), (off, off)],
+        }
+        for dx, dy in pips.get(int(value), []):
+            self.renderer.draw_circle_immediate((0, 0, 0), (int(cx + dx), int(cy + dy)), int(r), width=0, alpha=255, layer=layer)
+
+    def _draw_dice_overlay(self) -> None:
+        now = float(time.time())
+        show = bool(self.dice_rolling) or (isinstance(self.last_roll, int) and (now - float(self._last_roll_time or 0.0)) <= 2.5)
+        if not show:
+            return
+
+        w = int(self.width)
+        # Position under the header, top-right.
+        cx = int(w - 180)
+        cy = 122
+        # Bigger dice so pips are visible from a distance.
+        dice_size = 86
+        gap = 16
+
+        if self.dice_rolling:
+            display_values = (random.randint(1, 6), random.randint(1, 6))
+        else:
+            try:
+                if isinstance(self._last_dice, tuple) and len(self._last_dice) == 2:
+                    display_values = (int(self._last_dice[0]), int(self._last_dice[1]))
+                else:
+                    display_values = (1, 1)
+            except Exception:
+                display_values = (1, 1)
+
+        for i, value in enumerate(display_values):
+            # Simple animation: slight jitter while rolling (Monopoly-like feel).
+            jx = 0
+            jy = 0
+            if self.dice_rolling:
+                try:
+                    jx = int(6 * math.sin(now * 38.0 + i * 1.7))
+                    jy = int(6 * math.cos(now * 41.0 + i * 2.3))
+                except Exception:
+                    jx = jy = 0
+
+            dx = int(cx + (i - 0.5) * (dice_size + gap)) + jx
+            dy = int(cy) + jy
+            half = int(dice_size // 2)
+            shadow = 3
+
+            # Shadow
+            self.renderer.draw_polygon_immediate(
+                (100, 100, 100),
+                [(dx - half + shadow, dy - half + shadow), (dx + half + shadow, dy - half + shadow), (dx + half + shadow, dy + half + shadow), (dx - half + shadow, dy + half + shadow)],
+                alpha=180,
+                layer=200,
+            )
+            # Face
+            self.renderer.draw_polygon_immediate(
+                (255, 255, 255),
+                [(dx - half, dy - half), (dx + half, dy - half), (dx + half, dy + half), (dx - half, dy + half)],
+                alpha=255,
+                layer=210,
+            )
+            # Border
+            self.renderer.draw_polyline_immediate(
+                (0, 0, 0),
+                [(dx - half, dy - half), (dx + half, dy - half), (dx + half, dy + half), (dx - half, dy + half)],
+                width=3,
+                alpha=255,
+                closed=True,
+                layer=220,
+            )
+            self._draw_pips(int(dx), int(dy), int(dice_size), int(value), layer=230)
+
+        if isinstance(self.last_roll, int) and not self.dice_rolling:
+            self.renderer.draw_text_immediate(
+                f"= {int(self.last_roll)}",
+                int(cx + dice_size + 38),
+                int(cy) + 2,
+                font_size=22,
+                color=(255, 255, 255),
+                anchor_x="left",
+                anchor_y="center",
+                alpha=255,
+                layer=240,
+            )
 
     # --- Drawing ---
 
@@ -1601,8 +1882,8 @@ class CatanGame:
         # Compute hex size to fit all tiles in the available area.
         w = int(self.width)
         h = int(self.height)
-        pad = 16
-        header_h = 64
+        pad = 10
+        header_h = 54
         avail_w = max(100, w - pad * 2)
         avail_h = max(100, h - header_h - pad)
 
@@ -1618,21 +1899,23 @@ class CatanGame:
         xs_u = [c[0] for c in centers_unit]
         ys_u = [c[1] for c in centers_unit]
 
-        span_x_u = (max(xs_u) - min(xs_u)) + 2.2
-        span_y_u = (max(ys_u) - min(ys_u)) + 2.2
+        # The +2.* term approximates the extra half-hex margin on both sides.
+        # Keep it a bit tight so the board fills the wall display.
+        span_x_u = (max(xs_u) - min(xs_u)) + 2.0
+        span_y_u = (max(ys_u) - min(ys_u)) + 2.0
         size = min(avail_w / max(1.0, span_x_u), avail_h / max(1.0, span_y_u))
-        size *= 0.98  # padding
-        size = max(14.0, min(64.0, float(size)))
+        size *= 0.995  # tiny padding
+        size = max(14.0, min(80.0, float(size)))
 
         # Sanity check the fit with the chosen size.
         centers = [self._axial_to_pixel(int(t.q), int(t.r), float(size)) for t in tiles]
         xs = [c[0] for c in centers]
         ys = [c[1] for c in centers]
-        span_x = (max(xs) - min(xs)) + float(size) * 2.2
-        span_y = (max(ys) - min(ys)) + float(size) * 2.2
+        span_x = (max(xs) - min(xs)) + float(size) * 2.0
+        span_y = (max(ys) - min(ys)) + float(size) * 2.0
         scale = min(avail_w / max(1.0, span_x), avail_h / max(1.0, span_y), 1.0)
         size = float(size) * float(scale)
-        size = max(14.0, min(64.0, float(size)))
+        size = max(14.0, min(80.0, float(size)))
 
         self._hex_size = float(size)
         self._map_center = (w // 2, (header_h + avail_h // 2))
@@ -1649,13 +1932,15 @@ class CatanGame:
         w = int(self.width)
         h = int(self.height)
         self.renderer.draw_rect((6, 34, 52), (0, 0, w, h))
-        # subtle water bands (lighter towards the top)
+        # subtle water bands (lighter towards the top) — more steps reduces visible banding
         try:
-            for i in range(12):
-                a = 14 + i * 4
+            steps = 64
+            for i in range(steps):
+                t = i / float(max(1, steps - 1))
+                a = 10 + int(40 * t)
                 self.renderer.draw_rect(
-                    (8, 70 + i * 6, 90 + i * 7),
-                    (0, int(h * (i / 14.0)), w, int(h / 14.0) + 1),
+                    (8, 70 + int(75 * t), 90 + int(95 * t)),
+                    (0, int(h * (i / float(steps + 6))), w, int(h / float(steps + 6)) + 2),
                     alpha=a,
                 )
         except Exception:
@@ -1717,14 +2002,17 @@ class CatanGame:
             pts_outer = self._hex_points(cx, cy, size * 1.00)
             dark = (max(0, int(col[0] * 0.72)), max(0, int(col[1] * 0.72)), max(0, int(col[2] * 0.72)))
             light = (min(255, int(col[0] * 1.08)), min(255, int(col[1] * 1.08)), min(255, int(col[2] * 1.08)))
-            self.renderer.draw_polygon_immediate(dark, pts_outer, alpha=235 if t.kind != "water" else 190)
+            self.renderer.draw_polygon_immediate(dark, pts_outer, alpha=235 if t.kind != "water" else 190, layer=10)
             pts_inner = self._hex_points(cx, cy, size * 0.94)
-            self.renderer.draw_polygon_immediate(light, pts_inner, alpha=235 if t.kind != "water" else 170)
+            self.renderer.draw_polygon_immediate(light, pts_inner, alpha=235 if t.kind != "water" else 170, layer=11)
             # outline
-            self.renderer.draw_polyline_immediate((15, 18, 22), pts_outer, width=2, alpha=150, closed=True)
+            self.renderer.draw_polyline_immediate((15, 18, 22), pts_outer, width=2, alpha=150, closed=True, layer=12)
+
+            pk = port_by_coord.get((int(t.q), int(t.r))) if t.kind == "water" else None
 
             emoji = _KIND_EMOJI.get(str(t.kind), "")
-            if emoji:
+            # If this is a port water tile, skip the water emoji so the port icon reads clearly.
+            if emoji and not (t.kind == "water" and pk):
                 self.renderer.draw_text_immediate(
                     emoji,
                     int(cx),
@@ -1734,12 +2022,13 @@ class CatanGame:
                     color=(255, 255, 255),
                     anchor_x="center",
                     anchor_y="center",
+                    layer=20,
                 )
 
             if isinstance(t.number, int) and t.kind not in ("water", "desert", "volcano"):
-                self.renderer.draw_circle_immediate((245, 235, 210), (int(cx), int(cy) + int(size * 0.35)), int(max(10, size * 0.26)), width=0, alpha=220)
-                self.renderer.draw_circle_immediate((0, 0, 0), (int(cx), int(cy) + int(size * 0.35)), int(max(10, size * 0.26) + 1), width=0, alpha=70)
-                self.renderer.draw_text_immediate(str(int(t.number)), int(cx), int(cy) + int(size * 0.35), font_size=int(max(12, size * 0.32)), color=(30, 30, 30), anchor_x="center", anchor_y="center")
+                self.renderer.draw_circle_immediate((245, 235, 210), (int(cx), int(cy) + int(size * 0.35)), int(max(10, size * 0.26)), width=0, alpha=220, layer=30)
+                self.renderer.draw_circle_immediate((0, 0, 0), (int(cx), int(cy) + int(size * 0.35)), int(max(10, size * 0.26) + 1), width=0, alpha=70, layer=31)
+                self.renderer.draw_text_immediate(str(int(t.number)), int(cx), int(cy) + int(size * 0.35), font_size=int(max(12, size * 0.32)), color=(30, 30, 30), anchor_x="center", anchor_y="center", layer=32)
 
             # Robber overlay
             try:
@@ -1751,19 +2040,18 @@ class CatanGame:
                 pass
 
             # Ports on coastal water tiles
-            if t.kind == "water":
-                pk = port_by_coord.get((int(t.q), int(t.r)))
-                if pk:
-                    pe = _PORT_EMOJI.get(str(pk), "⚓")
-                    self.renderer.draw_text_immediate(
-                        pe,
-                        int(cx),
-                        int(cy) - int(size * 0.05),
-                        font_size=int(max(12, size * 0.38)),
-                        color=(235, 235, 235),
-                        anchor_x="center",
-                        anchor_y="center",
-                    )
+            if t.kind == "water" and pk:
+                pe = _PORT_EMOJI.get(str(pk), "⚓")
+                self.renderer.draw_text_immediate(
+                    pe,
+                    int(cx),
+                    int(cy) - int(size * 0.05),
+                    font_size=int(max(12, size * 0.40)),
+                    color=(255, 255, 255),
+                    anchor_x="center",
+                    anchor_y="center",
+                    layer=40,
+                )
 
         # Draw roads
         for eid, owner in (self._roads or {}).items():
@@ -1780,19 +2068,44 @@ class CatanGame:
                     try:
                         # Use a bright-ish palette (fallback)
                         pal = [
-                            (235, 80, 80),
-                            (80, 120, 235),
-                            (80, 235, 135),
-                            (235, 200, 80),
-                            (185, 80, 235),
-                            (80, 235, 225),
-                            (235, 80, 200),
-                            (195, 235, 80),
+                            (255, 70, 70),
+                            (70, 145, 255),
+                            (70, 255, 150),
+                            (255, 220, 70),
+                            (210, 90, 255),
+                            (70, 255, 245),
+                            (255, 90, 210),
+                            (210, 255, 90),
                         ]
                         col = pal[int(owner) % len(pal)]
                     except Exception:
                         pass
-                self.renderer.draw_line_immediate(col, (int(ax), int(ay)), (int(bx), int(by)), width=int(max(3, size * 0.14)), alpha=230)
+
+                # NOTE: On many OpenGL core-profile drivers, wide line widths are clamped to 1px.
+                # To guarantee visible roads, draw them as filled quads (polygons).
+                dx = float(bx) - float(ax)
+                dy = float(by) - float(ay)
+                ln = math.hypot(dx, dy)
+                if ln <= 1e-6:
+                    continue
+                nx = -dy / ln
+                ny = dx / ln
+
+                half_glow = float(max(10.0, size * 0.20))
+                half_outer = float(max(7.0, size * 0.14))
+                half_inner = float(max(5.0, size * 0.10))
+
+                def _quad(half_w: float) -> List[Tuple[int, int]]:
+                    return [
+                        (int(ax + nx * half_w), int(ay + ny * half_w)),
+                        (int(bx + nx * half_w), int(by + ny * half_w)),
+                        (int(bx - nx * half_w), int(by - ny * half_w)),
+                        (int(ax - nx * half_w), int(ay - ny * half_w)),
+                    ]
+
+                self.renderer.draw_polygon_immediate((255, 255, 255), _quad(half_glow), alpha=70, layer=60)
+                self.renderer.draw_polygon_immediate((0, 0, 0), _quad(half_outer), alpha=220, layer=61)
+                self.renderer.draw_polygon_immediate(col, _quad(half_inner), alpha=255, layer=62)
             except Exception:
                 continue
 
@@ -1805,43 +2118,47 @@ class CatanGame:
                 owner = int(b.get("owner"))
                 kind = str(b.get("kind"))
                 pal = [
-                    (235, 80, 80),
-                    (80, 120, 235),
-                    (80, 235, 135),
-                    (235, 200, 80),
-                    (185, 80, 235),
-                    (80, 235, 225),
-                    (235, 80, 200),
-                    (195, 235, 80),
+                    (255, 70, 70),
+                    (70, 145, 255),
+                    (70, 255, 150),
+                    (255, 220, 70),
+                    (210, 90, 255),
+                    (70, 255, 245),
+                    (255, 90, 210),
+                    (210, 255, 90),
                 ]
                 col = pal[int(owner) % len(pal)]
-                r = int(max(7, size * (0.18 if kind == "settlement" else 0.22)))
-                self.renderer.draw_circle_immediate(col, (int(cx), int(cy)), r, width=0, alpha=245)
-                self.renderer.draw_circle_immediate((10, 10, 10), (int(cx), int(cy)), r + 1, width=0, alpha=80)
+
+                # Strong ownership cue: a colored halo behind the building emoji.
+                halo_r = int(max(10, size * 0.22))
+                self.renderer.draw_circle_immediate(col, (int(cx), int(cy)), halo_r, width=0, alpha=155, layer=68)
+                self.renderer.draw_circle_immediate((0, 0, 0), (int(cx), int(cy)), halo_r, width=0, alpha=120, layer=69)
+                # Emoji marker (keeps the friendly look) + a colored ownership dot.
                 em = "🏠" if kind == "settlement" else "🏰"
                 self.renderer.draw_text_immediate(
                     em,
                     int(cx),
                     int(cy) - 1,
-                    font_size=int(max(12, size * 0.40)),
+                    font_size=int(max(14, size * 0.48)),
                     color=(255, 255, 255),
                     anchor_x="center",
                     anchor_y="center",
+                    alpha=255,
+                    layer=70,
                 )
+
+                dot_r = int(max(7, size * 0.13))
+                # Place dot closer to the top edge so it's not lost in the emoji glyph.
+                dot_x = int(cx)
+                dot_y = int(cy - size * 0.32)
+                self.renderer.draw_circle_immediate((255, 255, 255), (dot_x, dot_y), dot_r + 4, width=0, alpha=220, layer=79)
+                self.renderer.draw_circle_immediate((0, 0, 0), (dot_x, dot_y), dot_r + 3, width=0, alpha=255, layer=80)
+                self.renderer.draw_circle_immediate(col, (dot_x, dot_y), dot_r, width=0, alpha=255, layer=81)
             except Exception:
                 continue
 
-        # Last roll overlay
-        if isinstance(self.last_roll, int) and (time.time() - float(self._last_roll_time or 0.0)) <= 2.5:
-            self.renderer.draw_text_immediate(
-                f"🎲 {self.last_roll}",
-                int(self.width) - 18,
-                22,
-                font_size=22,
-                color=(235, 235, 235),
-                anchor_x="right",
-                anchor_y="top",
-            )
+        # Dice overlay (Monopoly-style)
+        self._draw_dice_overlay()
 
         # Event line
         if self.last_event:
@@ -1877,10 +2194,46 @@ class CatanGame:
                     rpx, rpy = self._axial_to_pixel(int(rt.q), int(rt.r), size)
                     rcx = float(rpx) + off_x
                     rcy = float(rpy) + off_y
-                    self.renderer.draw_circle_immediate((0, 0, 0), (int(rcx), int(rcy)), int(max(10, size * 0.32)), width=0, alpha=90)
-                    self.renderer.draw_text_immediate("🦹", int(rcx), int(rcy) - 1, font_size=int(max(14, size * 0.55)), color=(235, 235, 235), anchor_x="center", anchor_y="center")
+                    self.renderer.draw_circle_immediate((0, 0, 0), (int(rcx), int(rcy)), int(max(10, size * 0.32)), width=0, alpha=90, layer=180)
+                    self.renderer.draw_text_immediate("🦹", int(rcx), int(rcy) - 1, font_size=int(max(14, size * 0.55)), color=(235, 235, 235), anchor_x="center", anchor_y="center", layer=181)
             except Exception:
                 pass
 
     def update(self, dt: float) -> None:
-        return
+        if not bool(self.dice_rolling):
+            return
+
+        now = float(time.time())
+        if (now - float(self._dice_roll_start or 0.0)) < float(self._dice_roll_duration):
+            return
+
+        # Resolve the pending roll after animation completes.
+        self.dice_rolling = False
+        a, b = (None, None)
+        try:
+            if isinstance(self._pending_dice, tuple) and len(self._pending_dice) == 2:
+                a = int(self._pending_dice[0])
+                b = int(self._pending_dice[1])
+        except Exception:
+            a, b = (None, None)
+        if not (isinstance(a, int) and isinstance(b, int)):
+            self._pending_dice = None
+            self._pending_roll_seat = None
+            return
+
+        self._last_dice = (int(a), int(b))
+        self.last_roll = int(a + b)
+        self._last_roll_time = float(time.time())
+
+        seat = int(self._pending_roll_seat) if isinstance(self._pending_roll_seat, int) else int(self.current_turn_seat or 0)
+        self._pending_dice = None
+        self._pending_roll_seat = None
+
+        self.last_event = f"{self._seat_label(seat)} rolled {int(self.last_roll)} ({a}+{b})"
+        self._rolled_this_turn = True
+        if int(self.last_roll) == 7:
+            self._handle_roll_seven(int(seat))
+        else:
+            self._distribute_resources_for_roll(int(self.last_roll))
+            self._update_awards_and_winner()
+        self._refresh_buttons()
