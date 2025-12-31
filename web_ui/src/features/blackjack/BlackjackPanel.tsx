@@ -25,6 +25,7 @@ export default function BlackjackPanel({ snapshot, status, isSeated, send, CardR
   if (snapshot.server_state !== 'blackjack' || !snapshot.blackjack) return <></>;
 
   const panelButtons = snapshot.panel_buttons || [];
+  const buttonById = new Map(panelButtons.map((b) => [b.id, b] as const));
   const sendClick = (id: string) => send({ type: 'click_button', id });
 
   return (
@@ -88,6 +89,14 @@ export default function BlackjackPanel({ snapshot, status, isSeated, send, CardR
                   }
                 >
                   Clear bet
+                </Button>
+
+                <Button
+                  variant="outlined"
+                  onClick={() => sendClick('btn_4')}
+                  disabled={status !== 'connected' || !isSeated || !(buttonById.get('btn_4')?.enabled ?? false)}
+                >
+                  All-in
                 </Button>
               </Stack>
 
@@ -178,7 +187,7 @@ export default function BlackjackPanel({ snapshot, status, isSeated, send, CardR
               ))}
 
               <Typography variant="caption" color="text.secondary">
-                You must close this popup.
+                All players must press Next hand.
               </Typography>
             </Stack>
           )}
@@ -189,7 +198,7 @@ export default function BlackjackPanel({ snapshot, status, isSeated, send, CardR
             onClick={() => send({ type: 'blackjack_close_result' })}
             disabled={status !== 'connected' || !isSeated}
           >
-            Close
+            Next hand
           </Button>
         </DialogActions>
       </Dialog>

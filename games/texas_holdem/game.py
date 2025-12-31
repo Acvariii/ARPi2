@@ -196,6 +196,10 @@ class TexasHoldemGame:
         # Web UI buttons
         self.buttons: Dict[int, Dict[str, _WebButton]] = {}
 
+        # Next-hand gating (require all in-hand players to confirm before dealing a new hand)
+        self.next_hand_ready: Dict[int, bool] = {}
+        self.next_hand_ready_hand_id: int = 0
+
         # Optional name provider for board rendering
         self._seat_name_provider: Optional[Callable[[int], str]] = None
 
@@ -342,6 +346,7 @@ class TexasHoldemGame:
             return
 
         self.hand_id += 1
+        self._reset_next_hand_ready()
         self.pot = 0
         self.community = []
         self.hole = {s: [] for s in seats}
@@ -378,10 +383,26 @@ class TexasHoldemGame:
         self.current_bet = int(self.big_blind)
 
         # Action starts left of big blind
-        first = self._next_seat(int(bb_seat), predicate=lambda s: s in seats and self.in_hand.get(s, False))
-        self.turn_seat = int(first) if isinstance(first, int) else int(bb_seat)
+        first = self._next_seat(
+            int(bb_seat),
+            predicate=lambda s: s in seats and self.in_hand.get(s, False) and int(self.stacks.get(s, 0) or 0) > 0,
+        )
+        self.turn_seat = int(first) if isinstance(first, int) else None
+
+        # If nobody has chips to act (everyone all-in), auto-run out the board.
+        if self.turn_seat is None:
+            self._advance_street()
+            return
 
         self._rebuild_buttons()
+
+    def _reset_next_hand_ready(self) -> None:
+        """Reset per-hand next-hand readiness flags."""
+        try:
+            self.next_hand_ready_hand_id = int(self.hand_id)
+        except Exception:
+            self.next_hand_ready_hand_id = 0
+        self.next_hand_ready = {}
 
     def _post_blind(self, seat: int, amount: int) -> None:
         if seat not in self.bet_in_round:
@@ -430,8 +451,18 @@ class TexasHoldemGame:
 
         # Next action starts left of dealer
         seats = [s for s in self.hole.keys() if self.in_hand.get(s, False)]
-        first = self._next_seat(int(self.dealer_seat), predicate=lambda s: s in seats and self.in_hand.get(s, False))
-        self.turn_seat = int(first) if isinstance(first, int) else (seats[0] if seats else None)
+        first = self._next_seat(
+            int(self.dealer_seat),
+            predicate=lambda s: s in seats and self.in_hand.get(s, False) and int(self.stacks.get(s, 0) or 0) > 0,
+        )
+        self.turn_seat = int(first) if isinstance(first, int) else None
+
+        # If nobody can act (all remaining players are all-in), auto-run out to showdown.
+        if self.turn_seat is None and self.state == "playing":
+            # Max recursion depth is tiny here (preflop->flop->turn->river->showdown)
+            self._advance_street()
+            return
+
         self._rebuild_buttons()
 
     # --- Actions ---
@@ -449,8 +480,25 @@ class TexasHoldemGame:
 
         if btn_id == "next_hand":
             if self.state in ("showdown", "playing") and self._is_hand_over():
-                self.state = "playing"
-                self._start_new_hand()
+                # Mark this seat as ready; only start when all seated players are ready.
+                if int(self.next_hand_ready_hand_id) != int(self.hand_id):
+                    self._reset_next_hand_ready()
+
+                required = [int(s) for s in (self.active_players or [])]
+
+                self.next_hand_ready[int(seat)] = True
+
+                if all(bool(self.next_hand_ready.get(int(s), False)) for s in required):
+                    self.state = "playing"
+                    self._start_new_hand()
+                else:
+                    self._rebuild_buttons()
+            return
+
+        if btn_id == "all_in":
+            if self.state == "playing" and isinstance(self.turn_seat, int) and seat == self.turn_seat and self.in_hand.get(seat, False):
+                self._do_all_in(seat)
+                self._after_action(seat)
             return
 
         if self.state != "playing":
@@ -459,6 +507,8 @@ class TexasHoldemGame:
         if not isinstance(self.turn_seat, int) or seat != self.turn_seat:
             return
         if not self.in_hand.get(seat, False):
+            return
+        if int(self.stacks.get(seat, 0) or 0) <= 0:
             return
 
         if btn_id == "fold":
@@ -511,6 +561,26 @@ class TexasHoldemGame:
         # New raise resets acted (others must respond)
         self.acted = {seat}
 
+    def _do_all_in(self, seat: int) -> None:
+        """Move entire remaining stack in as a bet/raise (MVP: no side pots)."""
+        stack = int(self.stacks.get(seat, 0) or 0)
+        if stack <= 0:
+            self.acted.add(seat)
+            return
+
+        self.stacks[seat] = 0
+        self.bet_in_round[seat] = int(self.bet_in_round.get(seat, 0) or 0) + int(stack)
+        self.pot += int(stack)
+
+        # If this exceeds the current bet, treat as a raise.
+        if int(self.bet_in_round.get(seat, 0) or 0) > int(self.current_bet):
+            self.current_bet = int(self.bet_in_round.get(seat, 0) or 0)
+            self.acted = {seat}
+            return
+
+        # Otherwise it's an all-in call/check.
+        self.acted.add(seat)
+
     def _after_action(self, seat: int) -> None:
         # If only one player remains, award pot and end.
         remaining = [s for s, alive in self.in_hand.items() if alive]
@@ -529,14 +599,32 @@ class TexasHoldemGame:
             return
 
         # Betting round complete?
+        # MVP rule: players who are all-in (stack == 0) never block action progression.
         in_players = [s for s in self.hole.keys() if self.in_hand.get(s, False)]
-        if all(int(self.bet_in_round.get(s, 0) or 0) == int(self.current_bet) for s in in_players) and all(s in self.acted for s in in_players):
+        active_bettors = [s for s in in_players if int(self.stacks.get(s, 0) or 0) > 0]
+        if all(int(self.bet_in_round.get(s, 0) or 0) == int(self.current_bet) for s in active_bettors) and all(s in self.acted for s in active_bettors):
             self._advance_street()
             return
 
-        # Advance turn to next active seat that still needs to act
-        nxt = self._next_seat(seat, predicate=lambda s: self.in_hand.get(s, False))
-        self.turn_seat = int(nxt) if isinstance(nxt, int) else (in_players[0] if in_players else None)
+        # Advance turn to next active seat that still needs to act.
+        def needs_action(s: int) -> bool:
+            if not bool(self.in_hand.get(s, False)):
+                return False
+            # All-in players cannot act.
+            if int(self.stacks.get(s, 0) or 0) <= 0:
+                return False
+            # Needs action if they haven't acted since last raise, or they haven't matched the current bet.
+            if s not in self.acted:
+                return True
+            return int(self.bet_in_round.get(s, 0) or 0) != int(self.current_bet)
+
+        nxt = self._next_seat(seat, predicate=needs_action)
+        if isinstance(nxt, int):
+            self.turn_seat = int(nxt)
+        else:
+            # Fallback: pick any actionable seat.
+            fallback = next((s for s in in_players if needs_action(int(s))), None)
+            self.turn_seat = int(fallback) if isinstance(fallback, int) else None
         self._rebuild_buttons()
 
     def _is_hand_over(self) -> bool:
@@ -586,7 +674,10 @@ class TexasHoldemGame:
         seat = int(player_idx) if isinstance(player_idx, int) else -1
         players = []
         for s in self.active_players:
-            if int(self.stacks.get(int(s), 0) or 0) <= 0:
+            stack = int(self.stacks.get(int(s), 0) or 0)
+            if stack <= 0 and bool(self.in_hand.get(int(s), False)):
+                status = "all-in"
+            elif stack <= 0:
                 status = "bust"
             else:
                 status = "in" if self.in_hand.get(int(s), False) else "fold"
@@ -640,7 +731,8 @@ class TexasHoldemGame:
 
         if self.state == "showdown" and self._is_hand_over():
             for s in self.active_players:
-                self.buttons[int(s)]["next_hand"] = _WebButton("Next Hand", enabled=True)
+                already = bool(self.next_hand_ready.get(int(s), False)) if int(self.next_hand_ready_hand_id) == int(self.hand_id) else False
+                self.buttons[int(s)]["next_hand"] = _WebButton("Next Hand", enabled=not already)
                 show = bool(self.reveal_hole.get(int(s), False))
                 self.buttons[int(s)]["toggle_reveal"] = _WebButton("Hide Cards" if show else "Show Cards", enabled=True)
             return
@@ -653,7 +745,8 @@ class TexasHoldemGame:
             s = int(s)
             is_turn = isinstance(self.turn_seat, int) and s == int(self.turn_seat)
             alive = bool(self.in_hand.get(s, False))
-            can_act = bool(is_turn and alive)
+            has_chips = int(self.stacks.get(s, 0) or 0) > 0
+            can_act = bool(is_turn and alive and has_chips)
 
             call_amt = max(0, int(self.current_bet) - int(self.bet_in_round.get(s, 0) or 0))
             if call_amt <= 0:
@@ -663,6 +756,7 @@ class TexasHoldemGame:
 
             self.buttons[s]["check_call"] = _WebButton(cc_text, enabled=can_act)
             self.buttons[s]["bet_raise"] = _WebButton("Bet/Raise", enabled=can_act and int(self.stacks.get(s, 0) or 0) > call_amt)
+            self.buttons[s]["all_in"] = _WebButton("All-in", enabled=can_act and int(self.stacks.get(s, 0) or 0) > 0)
             self.buttons[s]["fold"] = _WebButton("Fold", enabled=can_act)
 
     # --- Rendering (Pyglet board) ---

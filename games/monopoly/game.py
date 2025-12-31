@@ -102,6 +102,26 @@ class MonopolyGame:
         
         # Free Parking pot (house rule)
         self.free_parking_pot = 0
+
+        # Pyglet board-only UX: briefly show Chance/Community Chest card text on the board.
+        # Dict: {"deck": "chance"|"community_chest", "text": str, "ts": float}
+        self._last_card_banner: Optional[Dict] = None
+
+        # Pyglet UX: transient transaction messages (shown near the dice).
+        # List[Dict]: {"text": str, "color": (r,g,b), "ts": float, "ttl": float}
+        self._toasts: List[Dict] = []
+
+        # Auto-close timer for Chance/Community Chest card popups.
+        self._card_popup_auto_close_at: Optional[float] = None
+
+        # Debt resolution (when a player owes money but can mortgage/sell houses first)
+        self._debt_active: bool = False
+        self._debt_player_idx: Optional[int] = None
+        self._debt_amount: int = 0
+        self._debt_owed_to_idx: Optional[int] = None  # None means bank/free-parking pot
+        self._debt_to_free_parking: bool = True
+        self._debt_after: str = ""  # e.g. "finish_turn", "jail_release_move"
+        self._debt_after_data: Dict = {}
         
         self.panels = {}
         self.buttons: Dict[int, Dict[str, PygletButton]] = {}
@@ -153,6 +173,243 @@ class MonopolyGame:
         for i in range(1, 10):
             y = by + sum([corner if j in [0, 10] else edge for j in range(i)])
             self.spaces.append((bx + size - corner, y, corner, edge))
+
+    def _current_turn_seat(self) -> Optional[int]:
+        try:
+            ap = getattr(self, "active_players", None)
+            cpi = getattr(self, "current_player_idx", None)
+            if not isinstance(ap, list) or not ap:
+                return None
+            idx = int(cpi) if isinstance(cpi, int) else int(cpi or 0)
+            if idx < 0 or idx >= len(ap):
+                idx = 0
+            return int(ap[idx])
+        except Exception:
+            return None
+
+    def _group_positions(self, position: int) -> List[int]:
+        try:
+            from games.monopoly.data import PROPERTY_GROUPS
+            prop = self.properties[int(position)]
+            group = (getattr(prop, "data", {}) or {}).get("group")
+            if not group or group not in PROPERTY_GROUPS:
+                return []
+            return [int(p) for p in PROPERTY_GROUPS[group]]
+        except Exception:
+            return []
+
+    def _group_has_buildings(self, position: int) -> bool:
+        for pos in self._group_positions(position):
+            try:
+                if int(getattr(self.properties[pos], "houses", 0) or 0) > 0:
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def _can_sell_on_property(self, player_idx: int, position: int) -> bool:
+        try:
+            pos = int(position)
+            pidx = int(player_idx)
+        except Exception:
+            return False
+        if pos < 0 or pos >= len(self.properties):
+            return False
+        prop = self.properties[pos]
+        if prop is None:
+            return False
+        if getattr(prop, "owner", None) != pidx:
+            return False
+        if bool(getattr(prop, "is_mortgaged", False)):
+            return False
+        houses = int(getattr(prop, "houses", 0) or 0)
+        if houses <= 0:
+            return False
+
+        group_positions = self._group_positions(pos)
+        if not group_positions:
+            return True
+
+        # Even-selling rule: can only sell from a property that is at the current max houses in its group.
+        try:
+            max_h = max(int(getattr(self.properties[p], "houses", 0) or 0) for p in group_positions)
+        except Exception:
+            max_h = houses
+        return houses >= max_h
+
+    def _player_can_raise_funds(self, player: Player) -> bool:
+        try:
+            props = list(getattr(player, "properties", []) or [])
+        except Exception:
+            props = []
+
+        for pi in props:
+            try:
+                prop_idx = int(pi)
+            except Exception:
+                continue
+            if prop_idx < 0 or prop_idx >= len(self.properties):
+                continue
+            prop = self.properties[prop_idx]
+            if prop is None:
+                continue
+
+            # Selling buildings is always a way to raise funds.
+            try:
+                if int(getattr(prop, "houses", 0) or 0) > 0:
+                    return True
+            except Exception:
+                pass
+
+            # Mortgaging is only allowed if the entire group has no buildings.
+            try:
+                if (not bool(getattr(prop, "is_mortgaged", False))) and int(getattr(prop, "houses", 0) or 0) == 0:
+                    if not self._group_has_buildings(prop_idx):
+                        mv = int((getattr(prop, "data", {}) or {}).get("mortgage_value", 0) or 0)
+                        if mv > 0:
+                            return True
+            except Exception:
+                pass
+
+        return False
+
+    def _start_debt(
+        self,
+        player: Player,
+        amount: int,
+        owed_to: Optional[Player] = None,
+        *,
+        to_free_parking: bool = True,
+        after: str = "finish_turn",
+        after_data: Optional[Dict] = None,
+        auto_open_deeds: bool = True,
+    ) -> None:
+        try:
+            amt = int(amount)
+        except Exception:
+            amt = 0
+        if amt <= 0:
+            return
+        if player is None:
+            return
+
+        self._debt_active = True
+        self._debt_player_idx = int(getattr(player, "idx", -1) or -1)
+        self._debt_amount = int(amt)
+        self._debt_owed_to_idx = int(getattr(owed_to, "idx", -1)) if owed_to is not None else None
+        self._debt_to_free_parking = bool(to_free_parking)
+        self._debt_after = str(after or "finish_turn")
+        self._debt_after_data = dict(after_data or {})
+
+        # If they have no way to raise funds, bankrupt immediately.
+        if not self._player_can_raise_funds(player):
+            self._handle_bankruptcy(player, owed_to=owed_to)
+            return
+
+        if auto_open_deeds:
+            try:
+                self._show_properties_popup(player)
+            except Exception:
+                pass
+
+    def _pay_debt_if_possible(self) -> bool:
+        if not bool(getattr(self, "_debt_active", False)):
+            return False
+        try:
+            pidx = int(getattr(self, "_debt_player_idx", -1))
+            amt = int(getattr(self, "_debt_amount", 0) or 0)
+        except Exception:
+            return False
+        if pidx < 0 or pidx >= len(self.players) or amt <= 0:
+            return False
+        player = self.players[pidx]
+        if player is None:
+            return False
+
+        if int(getattr(player, "money", 0) or 0) < amt:
+            return False
+
+        if not player.remove_money(amt):
+            return False
+
+        owed_to_idx = getattr(self, "_debt_owed_to_idx", None)
+        if isinstance(owed_to_idx, int) and 0 <= owed_to_idx < len(self.players):
+            try:
+                self.players[owed_to_idx].add_money(amt)
+            except Exception:
+                pass
+        else:
+            if bool(getattr(self, "_debt_to_free_parking", True)):
+                try:
+                    self.free_parking_pot += int(amt)
+                except Exception:
+                    pass
+
+        try:
+            if isinstance(owed_to_idx, int) and 0 <= owed_to_idx < len(self.players):
+                self._push_toast(f"P{pidx + 1} paid ${amt} to P{owed_to_idx + 1}")
+            else:
+                self._push_toast(f"P{pidx + 1} paid ${amt}")
+        except Exception:
+            pass
+
+        # Close any popup the debt player used to raise funds.
+        try:
+            if bool(getattr(self.popup, "active", False)) and getattr(self.popup, "player_idx", None) == pidx:
+                if getattr(self.popup, "popup_type", "") in ("mortgage", "build_prompt"):
+                    self.popup.hide()
+                    self._restore_default_buttons(pidx)
+        except Exception:
+            pass
+
+        after = str(getattr(self, "_debt_after", "finish_turn") or "finish_turn")
+        after_data = dict(getattr(self, "_debt_after_data", {}) or {})
+
+        # Clear debt first to avoid re-entrancy.
+        self._debt_active = False
+        self._debt_player_idx = None
+        self._debt_amount = 0
+        self._debt_owed_to_idx = None
+        self._debt_to_free_parking = True
+        self._debt_after = ""
+        self._debt_after_data = {}
+
+        if after == "jail_release_move":
+            try:
+                player.in_jail = False
+                player.jail_turns = 0
+            except Exception:
+                pass
+
+            try:
+                spaces = int(after_data.get("spaces", 0) or 0)
+            except Exception:
+                spaces = 0
+
+            if spaces > 0:
+                try:
+                    old_pos = int(getattr(player, "position", 0) or 0)
+                    new_pos = (old_pos + spaces) % 40
+                    self._start_token_animation(player.idx, old_pos, new_pos)
+                    player.position = new_pos
+                    if new_pos < old_pos:
+                        player.add_money(PASSING_GO_MONEY)
+                        try:
+                            self._push_toast(f"P{player.idx + 1} received ${PASSING_GO_MONEY} (Go)")
+                        except Exception:
+                            pass
+                    self._pending_land_player_idx = int(player.idx)
+                except Exception:
+                    try:
+                        self._land_on_space(player)
+                    except Exception:
+                        pass
+            else:
+                self._finish_turn_or_allow_double()
+            return True
+
+        self._finish_turn_or_allow_double()
+        return True
     
     def _init_buttons(self):
         """Initialize buttons for all players using PlayerPanel objects"""
@@ -571,6 +828,17 @@ class MonopolyGame:
             if player.in_jail and isinstance(curr_idx, int) and player_idx != curr_idx:
                 return
 
+            # Keep trade popups stable: do not let other players' deeds interrupts
+            # replace/close the active trade popup.
+            try:
+                if bool(getattr(self.popup, "active", False)):
+                    pop_owner = getattr(self.popup, "player_idx", None)
+                    pop_type = str(getattr(self.popup, "popup_type", "") or "")
+                    if pop_owner is not None and pop_owner != player_idx and pop_type.startswith("trade_"):
+                        return
+            except Exception:
+                pass
+
             if player.in_jail and player.money >= 50:
                 # Pay to get out of jail
                 player.remove_money(50)
@@ -626,6 +894,8 @@ class MonopolyGame:
                 self._finish_turn_or_allow_double()
             elif popup_type in ["card", "properties"]:
                 # OK or Close button
+                if popup_type == "card":
+                    self._card_popup_auto_close_at = None
                 self.popup.hide()
                 self._restore_default_buttons(player_idx)
                 if popup_type == "card":
@@ -727,6 +997,8 @@ class MonopolyGame:
                     self._show_mortgage_detail(player)
                 else:
                     # Close button (when on first property)
+                    if bool(getattr(self, "_debt_active", False)) and getattr(self, "_debt_player_idx", None) == player_idx:
+                        return
                     self.popup.hide()
                     self._restore_default_buttons(player_idx)
         
@@ -788,12 +1060,60 @@ class MonopolyGame:
                         prop.is_mortgaged = False
                         self._show_mortgage_detail(player)  # Refresh view
                 else:
-                    # Mortgage (only if no houses)
-                    if prop.houses == 0:
-                        mortgage_value = prop.data.get("mortgage_value", 0)
-                        player.add_money(mortgage_value)
-                        prop.is_mortgaged = True
-                        self._show_mortgage_detail(player)  # Refresh view
+                    curr_turn = self._current_turn_seat()
+                    on_turn = isinstance(curr_turn, int) and int(curr_turn) == int(player.idx)
+                    debt_mode = bool(getattr(self, "_debt_active", False)) and getattr(self, "_debt_player_idx", None) == player.idx
+
+                    house_cost = prop.data.get("house_cost", 0)
+                    if isinstance(house_cost, tuple):
+                        house_cost = house_cost[0] if house_cost else 0
+                    houses = int(getattr(prop, "houses", 0) or 0)
+                    supply_ok = (self.hotels_remaining > 0) if houses == 4 else (self.houses_remaining > 0)
+                    can_build = (
+                        on_turn
+                        and houses < 5
+                        and (not bool(getattr(prop, "is_mortgaged", False)))
+                        and player.money >= int(house_cost or 0)
+                        and supply_ok
+                        and self._has_monopoly(player.idx, prop_idx)
+                        and self._can_build_on_property(player.idx, prop_idx)
+                    )
+
+                    if houses > 0 and (not debt_mode) and can_build:
+                        # Build a house/hotel
+                        if houses == 4 and self.hotels_remaining > 0:
+                            player.remove_money(int(house_cost or 0))
+                            prop.houses = 5
+                            self.hotels_remaining -= 1
+                            self.houses_remaining += 4
+                        elif houses < 4 and self.houses_remaining > 0:
+                            player.remove_money(int(house_cost or 0))
+                            prop.houses += 1
+                            self.houses_remaining -= 1
+                        self._show_mortgage_detail(player)
+                    elif houses == 0 and can_build:
+                        # Build a house
+                        if self.houses_remaining > 0:
+                            player.remove_money(int(house_cost or 0))
+                            prop.houses += 1
+                            self.houses_remaining -= 1
+                        self._show_mortgage_detail(player)
+                    elif houses > 0 and on_turn:
+                        # Sell to raise funds / reduce improvements
+                        ok = self._sell_house(player, prop_idx)
+                        if ok:
+                            paid = self._pay_debt_if_possible()
+                            if not paid:
+                                self._show_mortgage_detail(player)
+                    else:
+                        # Mortgage (only if no houses anywhere in the color group)
+                        if not self._group_has_buildings(prop_idx):
+                            mortgage_value = prop.data.get("mortgage_value", 0)
+                            player.add_money(mortgage_value)
+                            prop.is_mortgaged = True
+                            paid = self._pay_debt_if_possible()
+                            if not paid:
+                                self._show_mortgage_detail(player)
             elif popup_type == "trade_select":
                 # Select partner button
                 partner_idx = self.popup.data["partner_idx"]
@@ -855,8 +1175,11 @@ class MonopolyGame:
                 position = self.popup.data["position"]
                 
                 if self.properties[position].houses > 0:
-                    self._sell_house(player, position)
-                    self._show_build_prompt(player, position)  # Refresh popup
+                    ok = self._sell_house(player, position)
+                    if ok:
+                        paid = self._pay_debt_if_possible()
+                        if not paid:
+                            self._show_build_prompt(player, position)  # Refresh popup
             elif popup_type == "mortgage":
                 # Next property (►) or Done
                 player = self.popup.data["player"]
@@ -866,6 +1189,8 @@ class MonopolyGame:
                 else:
                     # Done - close popup
                     player_idx = self.popup.player_idx
+                    if bool(getattr(self, "_debt_active", False)) and getattr(self, "_debt_player_idx", None) == player_idx:
+                        return
                     self.popup.hide()
                     self._restore_default_buttons(player_idx)
             elif popup_type == "trade_select":
@@ -1012,6 +1337,35 @@ class MonopolyGame:
     
     def update(self, dt: float):
         """Update game state"""
+        # Auto-close card popups after a few seconds.
+        try:
+            if (
+                bool(getattr(self.popup, 'active', False))
+                and str(getattr(self.popup, 'popup_type', '') or '') == 'card'
+                and isinstance(getattr(self, '_card_popup_auto_close_at', None), (int, float))
+                and time.time() >= float(self._card_popup_auto_close_at)
+            ):
+                pidx = getattr(self.popup, 'player_idx', None)
+                self._card_popup_auto_close_at = None
+                self.popup.hide()
+                if pidx is not None:
+                    try:
+                        self._restore_default_buttons(int(pidx))
+                    except Exception:
+                        pass
+
+                pending_idx = getattr(self, '_pending_post_card_land_player_idx', None)
+                if pending_idx is not None:
+                    self._pending_post_card_land_player_idx = None
+                    try:
+                        self._land_on_space(self.players[int(pending_idx)])
+                    except Exception:
+                        self._finish_turn_or_allow_double()
+                else:
+                    self._finish_turn_or_allow_double()
+        except Exception:
+            pass
+
         # If a landing is pending, resolve it only after the pawn finishes moving
         # and no popup is currently active.
         try:
@@ -1084,8 +1438,16 @@ class MonopolyGame:
                                 # Defer landing resolution until movement completes.
                                 self._pending_land_player_idx = int(current.idx)
                             else:
-                                # Can't pay - bankrupt
-                                self._handle_bankruptcy(current)
+                                # Can't pay - allow raising funds before bankruptcy
+                                spaces = sum(self.dice_values)
+                                self._start_debt(
+                                    current,
+                                    50,
+                                    owed_to=None,
+                                    to_free_parking=True,
+                                    after="jail_release_move",
+                                    after_data={"spaces": spaces},
+                                )
                         else:
                             # Still in jail, turn ends
                             self.advance_turn()
@@ -1148,6 +1510,9 @@ class MonopolyGame:
     
     def _sell_house(self, player: Player, position: int):
         """Sell house/hotel back to bank for half price"""
+        if not self._can_sell_on_property(player.idx, position):
+            return False
+
         prop = self.properties[position]
         house_cost = prop.data.get("house_cost", 0)
         # Safety check: ensure house_cost is an integer
@@ -1166,13 +1531,14 @@ class MonopolyGame:
                 prop.houses = 0
                 # Still only pay for the hotel itself, not 5 houses
                 player.add_money(sell_price)
-                return
+                return True
         elif prop.houses > 0:
             # Selling house
             prop.houses -= 1
             self.houses_remaining += 1
         
         player.add_money(sell_price)
+        return True
     
     def _show_build_prompt(self, player: Player, position: int):
         """Show building prompt when landing on own property with monopoly"""
@@ -1224,15 +1590,15 @@ class MonopolyGame:
             # Buying house needs 1 house available
             can_build = can_build and self.houses_remaining > 0
         
-        can_sell = houses > 0
+        can_sell = houses > 0 and self._can_sell_on_property(player.idx, position)
         
         if houses == 5:
             # Hotel - can only sell
-            self._set_popup_buttons(player.idx, ["Pass", "Sell Hotel", ""], [True, can_sell, False])
+            self._set_popup_buttons(player.idx, ["Pass", "Sell Hotel" if can_sell else "Even Rule", ""], [True, can_sell, False])
         else:
             # Houses or empty
             self._set_popup_buttons(player.idx, 
-                                   ["Pass", "Buy" if can_build else "No Supply" if (houses < 4 and self.houses_remaining == 0) or (houses == 4 and self.hotels_remaining == 0) else "No $", "Sell" if can_sell else ""],
+                                   ["Pass", "Buy" if can_build else "No Supply" if (houses < 4 and self.houses_remaining == 0) or (houses == 4 and self.hotels_remaining == 0) else "No $", "Sell" if can_sell else "Even Rule" if houses > 0 else ""],
                                    [True, can_build, can_sell])
     
     def _show_card_popup(self, player: Player, card: Dict, deck_type: str):
@@ -1247,6 +1613,22 @@ class MonopolyGame:
         panel = self.panels[player.idx]
         
         text_lines = create_monopoly_card_popup(card.get("text", ""), deck_type)
+
+        # Also show on the Pyglet board (useful in board-only / Web-UI-first mode).
+        try:
+            self._last_card_banner = {
+                "deck": str(deck_type or ""),
+                "text": str(card.get("text", "") or ""),
+                "ts": float(time.time()),
+            }
+        except Exception:
+            self._last_card_banner = None
+
+        # Auto-close after a few seconds so play can continue without manual OK.
+        try:
+            self._card_popup_auto_close_at = float(time.time()) + 3.5
+        except Exception:
+            self._card_popup_auto_close_at = None
         
         self.popup.show(
             player.idx, panel.rect, panel.orientation, "card", text_lines,
@@ -1295,6 +1677,11 @@ class MonopolyGame:
             (name, 14, (255, 255, 255)),
             (f"Property {self.mortgage_scroll_index + 1}/{len(player.properties)}", 10, (200, 200, 200)),
         ]
+
+        group_has_buildings = self._group_has_buildings(prop_idx)
+        curr_turn = self._current_turn_seat()
+        on_turn = isinstance(curr_turn, int) and int(curr_turn) == int(player.idx)
+        debt_mode = bool(getattr(self, "_debt_active", False)) and getattr(self, "_debt_player_idx", None) == player.idx
         
         if prop.is_mortgaged:
             text_lines.append(("MORTGAGED", 12, (255, 100, 100)))
@@ -1302,7 +1689,7 @@ class MonopolyGame:
         else:
             if prop.houses > 0:
                 text_lines.append((f"Houses: {prop.houses}", 10, (100, 255, 100)))
-                text_lines.append(("Sell houses first", 9, (255, 200, 100)))
+                text_lines.append(("Sell houses", 9, (255, 200, 100)))
             else:
                 text_lines.append((f"Mortgage Value: ${mortgage_val}", 10, (100, 255, 100)))
         
@@ -1330,15 +1717,57 @@ class MonopolyGame:
                                    [left_btn, "Unmortgage" if can_unmortgage else "No $", right_btn],
                                    [left_enabled, can_unmortgage, right_enabled])
         elif prop.houses > 0:
-            # Property has houses - can't mortgage, show info
-            self._set_popup_buttons(player.idx,
-                                   [left_btn, "Has Houses", right_btn],
-                                   [left_enabled, False, right_enabled])
+            # Allow building on your turn; prioritize selling when resolving debt.
+            house_cost = prop_data.get("house_cost", 0)
+            if isinstance(house_cost, tuple):
+                house_cost = house_cost[0] if house_cost else 0
+            houses = int(getattr(prop, "houses", 0) or 0)
+            supply_ok = (self.hotels_remaining > 0) if houses == 4 else (self.houses_remaining > 0)
+            can_build = (
+                on_turn
+                and houses < 5
+                and (not bool(getattr(prop, "is_mortgaged", False)))
+                and player.money >= int(house_cost or 0)
+                and supply_ok
+                and self._has_monopoly(player.idx, prop_idx)
+                and self._can_build_on_property(player.idx, prop_idx)
+            )
+            can_sell = on_turn and self._can_sell_on_property(player.idx, prop_idx)
+            if (not debt_mode) and can_build:
+                self._set_popup_buttons(player.idx,
+                                       [left_btn, "Build", right_btn],
+                                       [left_enabled, True, right_enabled])
+            else:
+                self._set_popup_buttons(player.idx,
+                                       [left_btn, "Sell" if can_sell else "Even Rule", right_btn],
+                                       [left_enabled, can_sell, right_enabled])
         else:
-            # Can mortgage
-            self._set_popup_buttons(player.idx,
-                                   [left_btn, "Mortgage", right_btn],
-                                   [left_enabled, True, right_enabled])
+            house_cost = prop_data.get("house_cost", 0)
+            if isinstance(house_cost, tuple):
+                house_cost = house_cost[0] if house_cost else 0
+            houses = int(getattr(prop, "houses", 0) or 0)
+            supply_ok = (self.hotels_remaining > 0) if houses == 4 else (self.houses_remaining > 0)
+            can_build = (
+                on_turn
+                and houses < 5
+                and (not bool(getattr(prop, "is_mortgaged", False)))
+                and player.money >= int(house_cost or 0)
+                and supply_ok
+                and self._has_monopoly(player.idx, prop_idx)
+                and self._can_build_on_property(player.idx, prop_idx)
+            )
+            if can_build:
+                self._set_popup_buttons(player.idx,
+                                       [left_btn, "Build", right_btn],
+                                       [left_enabled, True, right_enabled])
+            elif group_has_buildings:
+                self._set_popup_buttons(player.idx,
+                                       [left_btn, "Group Built", right_btn],
+                                       [left_enabled, False, right_enabled])
+            else:
+                self._set_popup_buttons(player.idx,
+                                       [left_btn, "Mortgage", right_btn],
+                                       [left_enabled, True, right_enabled])
     
     def _start_trade(self, player: Player):
         """Start trade flow - select partner"""
@@ -1674,13 +2103,13 @@ class MonopolyGame:
             if prop_idx not in initiator.properties:
                 return False
             prop = self.properties[prop_idx]
-            if prop.is_mortgaged or prop.houses > 0:
+            if prop.is_mortgaged or prop.houses > 0 or self._group_has_buildings(prop_idx):
                 return False
         for prop_idx in request_prop_idxs:
             if prop_idx not in partner.properties:
                 return False
             prop = self.properties[prop_idx]
-            if prop.is_mortgaged or prop.houses > 0:
+            if prop.is_mortgaged or prop.houses > 0 or self._group_has_buildings(prop_idx):
                 return False
         
         # Transfer money (safe: validated above)
@@ -1714,6 +2143,10 @@ class MonopolyGame:
         """Handle landing on space"""
         if GameLogic.check_passed_go(player):
             player.add_money(PASSING_GO_MONEY)
+            try:
+                self._push_toast(f"P{player.idx + 1} received ${PASSING_GO_MONEY} (Go)")
+            except Exception:
+                pass
         
         pos = player.position
         space = self.properties[pos]
@@ -1721,6 +2154,10 @@ class MonopolyGame:
         
         if space_type == "go":
             player.add_money(PASSING_GO_MONEY)
+            try:
+                self._push_toast(f"P{player.idx + 1} received ${PASSING_GO_MONEY} (Go)")
+            except Exception:
+                pass
             self._finish_turn_or_allow_double()
         
         elif space_type in ("property", "railroad", "utility"):
@@ -1759,20 +2196,51 @@ class MonopolyGame:
         
         elif space_type == "income_tax":
             tax_amount = INCOME_TAX if isinstance(INCOME_TAX, int) else 200
-            player.remove_money(tax_amount)
-            self.free_parking_pot += tax_amount
-            self._finish_turn_or_allow_double()
+            if player.money >= tax_amount and player.remove_money(tax_amount):
+                self.free_parking_pot += tax_amount
+                try:
+                    self._push_toast(f"P{player.idx + 1} paid ${tax_amount} (Tax)")
+                except Exception:
+                    pass
+                self._finish_turn_or_allow_double()
+            else:
+                self._start_debt(
+                    player,
+                    tax_amount,
+                    owed_to=None,
+                    to_free_parking=True,
+                    after="finish_turn",
+                    auto_open_deeds=True,
+                )
         
         elif space_type == "luxury_tax":
             tax_amount = LUXURY_TAX if isinstance(LUXURY_TAX, int) else 100
-            player.remove_money(tax_amount)
-            self.free_parking_pot += tax_amount
-            self._finish_turn_or_allow_double()
+            if player.money >= tax_amount and player.remove_money(tax_amount):
+                self.free_parking_pot += tax_amount
+                try:
+                    self._push_toast(f"P{player.idx + 1} paid ${tax_amount} (Tax)")
+                except Exception:
+                    pass
+                self._finish_turn_or_allow_double()
+            else:
+                self._start_debt(
+                    player,
+                    tax_amount,
+                    owed_to=None,
+                    to_free_parking=True,
+                    after="finish_turn",
+                    auto_open_deeds=True,
+                )
         elif space_type == "free_parking":
             # Collect Free Parking pot
             if self.free_parking_pot > 0:
+                pot = int(self.free_parking_pot)
                 player.add_money(self.free_parking_pot)
                 self.free_parking_pot = 0
+                try:
+                    self._push_toast(f"P{player.idx + 1} received ${pot} (Free Parking)")
+                except Exception:
+                    pass
             self._finish_turn_or_allow_double()
         
         else:
@@ -1922,6 +2390,11 @@ class MonopolyGame:
             winner.remove_money(self.auction_current_bid)
             self.properties[self.auction_property].owner = self.auction_current_bidder
             winner.properties.append(self.auction_property)
+            try:
+                prop = self.properties[self.auction_property]
+                self._push_toast(f"P{winner.idx + 1} bought {prop.data.get('name', 'Property')} for ${self.auction_current_bid}")
+            except Exception:
+                pass
         
         # Reset auction state
         self.auction_active = False
@@ -1978,6 +2451,10 @@ class MonopolyGame:
         if player.remove_money(price):
             space.owner = player.idx
             player.properties.append(position)
+            try:
+                self._push_toast(f"P{player.idx + 1} bought {space.data.get('name', 'Property')} for ${price}")
+            except Exception:
+                pass
         
         self.popup.hide()
         # If the player rolled doubles, allow the extra roll; otherwise allow ending the turn.
@@ -2000,16 +2477,32 @@ class MonopolyGame:
         dice_sum = sum(self.dice_values) if space.data.get("type") == "utility" else None
         rent = GameLogic.calculate_rent(space, dice_sum, owner, self.properties)
         
-        if player.remove_money(rent):
+        if player.money >= rent and player.remove_money(rent):
             owner.add_money(rent)
-        else:
-            self._handle_bankruptcy(player, owed_to=owner)
-        
-        self._finish_turn_or_allow_double()
+            try:
+                self._push_toast(f"P{player.idx + 1} paid ${rent} to P{owner.idx + 1}")
+            except Exception:
+                pass
+            self._finish_turn_or_allow_double()
+            return
+
+        self._start_debt(
+            player,
+            rent,
+            owed_to=owner,
+            to_free_parking=False,
+            after="finish_turn",
+            auto_open_deeds=True,
+        )
+        # Do not finish the turn here; debt resolution will do so.
     
     def _send_to_jail(self, player: Player):
         """Send player to jail"""
         GameLogic.send_to_jail(player)
+        try:
+            self._restore_default_buttons(player.idx)
+        except Exception:
+            pass
         self.advance_turn()
     
     def _show_winner(self, winner_idx: int):
@@ -2033,6 +2526,34 @@ class MonopolyGame:
         # Handle property transfer
         bankrupt_properties = list(player.properties)
         player.properties = []
+
+        # Always return buildings to the bank supply before transferring/auctioning.
+        for prop_idx in bankrupt_properties:
+            try:
+                prop = self.properties[prop_idx]
+            except Exception:
+                continue
+            if prop is None:
+                continue
+            try:
+                houses = int(getattr(prop, "houses", 0) or 0)
+            except Exception:
+                houses = 0
+            if houses >= 5:
+                try:
+                    self.hotels_remaining += 1
+                    self.houses_remaining += 4
+                except Exception:
+                    pass
+            elif houses > 0:
+                try:
+                    self.houses_remaining += houses
+                except Exception:
+                    pass
+            try:
+                prop.houses = 0
+            except Exception:
+                pass
         
         if owed_to:
             # Owed to another player - transfer all assets
@@ -2040,20 +2561,11 @@ class MonopolyGame:
                 prop = self.properties[prop_idx]
                 prop.owner = owed_to.idx
                 owed_to.properties.append(prop_idx)
-                # Keep houses and mortgage status
+                # Mortgage status remains as-is.
         else:
             # Owed to bank - auction all properties
             for prop_idx in bankrupt_properties:
                 prop = self.properties[prop_idx]
-                # Return houses/hotels to bank supply
-                if prop.houses == 5:
-                    self.hotels_remaining += 1
-                    self.houses_remaining += 4  # Hotel returns as 4 houses
-                elif prop.houses > 0:
-                    self.houses_remaining += prop.houses
-                
-                # Remove houses, keep mortgaged status
-                prop.houses = 0
                 prop.owner = None
                 # Properties will be auctioned one by one
                 # For now, just return to bank
@@ -2079,10 +2591,18 @@ class MonopolyGame:
             amount = action[1]
             if amount > 0:
                 player.add_money(amount)
+                try:
+                    self._push_toast(f"P{player.idx + 1} received ${amount} (Card)")
+                except Exception:
+                    pass
             else:
                 player.remove_money(abs(amount))
                 # Add fines to Free Parking pot
                 self.free_parking_pot += abs(amount)
+                try:
+                    self._push_toast(f"P{player.idx + 1} paid ${abs(amount)} (Card)")
+                except Exception:
+                    pass
         
         # Advance to specific position (with optional Go collection)
         elif action_type == "advance":
@@ -2093,6 +2613,10 @@ class MonopolyGame:
             # Check if passing Go
             if collect_go and position < old_pos:
                 player.add_money(PASSING_GO_MONEY)
+                try:
+                    self._push_toast(f"P{player.idx + 1} received ${PASSING_GO_MONEY} (Go)")
+                except Exception:
+                    pass
             
             self._start_token_animation(player.idx, old_pos, position)
             player.position = position
@@ -2139,6 +2663,10 @@ class MonopolyGame:
             # Check if passing Go
             if nearest < old_pos:
                 player.add_money(PASSING_GO_MONEY)
+                try:
+                    self._push_toast(f"P{player.idx + 1} received ${PASSING_GO_MONEY} (Go)")
+                except Exception:
+                    pass
             
             self._start_token_animation(player.idx, old_pos, nearest)
             player.position = nearest
@@ -2147,27 +2675,42 @@ class MonopolyGame:
         # Collect from each other player
         elif action_type == "collect_from_each":
             amount = action[1]
+            total = 0
             for other_idx in self.active_players:
                 if other_idx != player.idx:
                     other = self.players[other_idx]
                     transfer = min(amount, other.money)
                     other.remove_money(transfer)
                     player.add_money(transfer)
+                    total += int(transfer)
+            if total > 0:
+                try:
+                    self._push_toast(f"P{player.idx + 1} received ${total} (from players)")
+                except Exception:
+                    pass
         
         # Pay each other player
         elif action_type == "pay_each_player":
             amount = action[1]
+            total = 0
             for other_idx in self.active_players:
                 if other_idx != player.idx:
                     other = self.players[other_idx]
                     if player.money >= amount:
                         player.remove_money(amount)
                         other.add_money(amount)
+                        total += int(amount)
                     else:
                         # Player can't afford, pay what they can
                         payment = player.money
                         player.remove_money(payment)
                         other.add_money(payment)
+                        total += int(payment)
+            if total > 0:
+                try:
+                    self._push_toast(f"P{player.idx + 1} paid ${total} (to players)")
+                except Exception:
+                    pass
         
         # Pay per house/hotel (repairs)
         elif action_type == "pay_per_house_hotel":
@@ -2188,6 +2731,11 @@ class MonopolyGame:
             player.remove_money(total_cost)
             # Add to Free Parking pot
             self.free_parking_pot += total_cost
+            if total_cost > 0:
+                try:
+                    self._push_toast(f"P{player.idx + 1} paid ${total_cost} (Repairs)")
+                except Exception:
+                    pass
     
     def draw(self):
         """Draw game"""
@@ -2226,6 +2774,9 @@ class MonopolyGame:
             if self.dice_rolling or self.dice_values != (0, 0):
                 self._draw_dice()
 
+            # Transaction toasts (draw after dice so they appear on top)
+            self._draw_toasts()
+
             # Hover indicators
             self._draw_hover_indicators()
             return
@@ -2242,6 +2793,9 @@ class MonopolyGame:
         # Dice - show during roll animation or when values are set
         if self.dice_rolling or self.dice_values != (0, 0):
             self._draw_dice()
+
+        # Transaction toasts (draw after dice so they appear on top)
+        self._draw_toasts()
         
         # Hover indicators
         self._draw_hover_indicators()
@@ -2395,8 +2949,30 @@ class MonopolyGame:
             # Draw owner border if property is owned
             if space.owner is not None and space_type in ["property", "railroad", "utility"]:
                 owner_color = PLAYER_COLORS[space.owner]
-                # Draw a thicker border on the inside
-                self.renderer.draw_rect(owner_color, (sx + 2, sy + 2, sw - 4, sh - 4), width=4)
+                # Draw a much thicker, more visible border.
+                inset = 1
+                self.renderer.draw_rect(owner_color, (sx + inset, sy + inset, sw - 2 * inset, sh - 2 * inset), width=10)
+                # Sub leading edge for contrast
+                self.renderer.draw_rect(owner_color, (sx + 3, sy + 3, sw - 6, sh - 6), width=2)
+
+            # Jail marker (colored emoji) on the Jail tile.
+            if i == JAIL_POSITION or space_type == "jail":
+                try:
+                    cx, cy = sx + sw // 2, sy + sh // 2
+                    # Prefer the Windows emoji font for a colored glyph.
+                    self.renderer.draw_text(
+                        "\U0001F512",  # 🔒
+                        cx,
+                        cy + int(sh * 0.20),
+                        "Segoe UI Emoji",
+                        max(12, int(min(sw, sh) * 0.22)),
+                        (0, 0, 0),
+                        anchor_x="center",
+                        anchor_y="center",
+                        rotation=0,
+                    )
+                except Exception:
+                    pass
             
             # Draw house/hotel indicators
             if space.houses > 0 and space_type == "property":
@@ -2442,7 +3018,7 @@ class MonopolyGame:
                         lines.append(f"Pot: ${self.free_parking_pot}")
                     
                     # Draw multi-line text (slightly larger for readability)
-                    font_size = 8
+                    font_size = 9
                     line_spacing = font_size + 2
                     total_height = len(lines) * line_spacing
                     start_y = cy - total_height // 2 + line_spacing // 2
@@ -2453,7 +3029,7 @@ class MonopolyGame:
                         color = (255, 215, 0) if idx_line == len(lines) - 1 and self.free_parking_pot > 0 else (0, 0, 0)
                         self.renderer.draw_text(
                             line, cx, ly,
-                            'Arial', font_size if idx_line < len(lines) - 1 else 7, color,
+                            'Arial', font_size if idx_line < len(lines) - 1 else 8, color,
                             anchor_x='center', anchor_y='center',
                             rotation=0
                         )
@@ -2477,7 +3053,7 @@ class MonopolyGame:
                         lines.append(current_line)
                     
                     # Draw multi-line text (reverse order because Y increases downward in pygame coords)
-                    font_size = 8 if space_type in ["property", "railroad", "utility"] else 7
+                    font_size = 10 if space_type in ["property", "railroad", "utility"] else 9
                     line_spacing = font_size + 2
                     total_height = len(lines) * line_spacing
                     start_y = cy - total_height // 2 + line_spacing // 2
@@ -2493,11 +3069,11 @@ class MonopolyGame:
                 else:
                     # Single word - adjust size if too long
                     if len(name) > 12:
-                        font_size = 7  # Smaller for long words (bumped +1)
-                    elif len(name) > 10:
                         font_size = 8
+                    elif len(name) > 10:
+                        font_size = 9
                     else:
-                        font_size = 9 if space_type in ["property", "railroad", "utility"] else 8
+                        font_size = 11 if space_type in ["property", "railroad", "utility"] else 10
                     
                     self.renderer.draw_text(
                         name, cx, cy,
@@ -2508,6 +3084,71 @@ class MonopolyGame:
             
             # Border
             self.renderer.draw_rect((80, 80, 80), (sx, sy, sw, sh), width=1)
+
+        # Board banner for last Chance/Community Chest card (Pyglet window).
+        try:
+            banner = getattr(self, "_last_card_banner", None)
+            if isinstance(banner, dict):
+                ts = float(banner.get("ts", 0.0) or 0.0)
+                if ts > 0 and (time.time() - ts) <= 10.0:
+                    deck = str(banner.get("deck", "") or "")
+                    raw_text = str(banner.get("text", "") or "").strip()
+                    if raw_text:
+                        title = "Chance" if deck == "chance" else "Community Chest" if deck == "community_chest" else "Card"
+                        icon = "\u2753" if deck == "chance" else "\U0001F381" if deck == "community_chest" else ""
+
+                        # Simple word-wrap for readability.
+                        words = raw_text.replace("\n", " ").split()
+                        lines: List[str] = []
+                        cur = ""
+                        for w in words:
+                            nxt = (cur + " " + w).strip()
+                            if len(nxt) <= 34:
+                                cur = nxt
+                            else:
+                                if cur:
+                                    lines.append(cur)
+                                cur = w
+                        if cur:
+                            lines.append(cur)
+                        lines = lines[:4]
+
+                        bw2 = int(bw * 0.56)
+                        bh2 = int(bh * 0.18)
+                        x2 = bx + (bw - bw2) // 2
+                        y2 = by + (bh - bh2) // 2
+
+                        self.renderer.draw_rect((255, 255, 240, 235), (x2, y2, bw2, bh2))
+                        self.renderer.draw_rect((80, 80, 80), (x2, y2, bw2, bh2), width=2)
+
+                        self.renderer.draw_text(
+                            f"{icon} {title}".strip(),
+                            x2 + bw2 // 2,
+                            y2 + int(bh2 * 0.70),
+                            "Arial",
+                            14,
+                            (20, 20, 20),
+                            bold=True,
+                            anchor_x="center",
+                            anchor_y="center",
+                            rotation=0,
+                        )
+
+                        base_y = y2 + int(bh2 * 0.48)
+                        for li, line in enumerate(lines):
+                            self.renderer.draw_text(
+                                line,
+                                x2 + bw2 // 2,
+                                base_y - li * 16,
+                                "Arial",
+                                11,
+                                (20, 20, 20),
+                                anchor_x="center",
+                                anchor_y="center",
+                                rotation=0,
+                            )
+        except Exception:
+            pass
     
     def _start_token_animation(self, player_idx: int, from_pos: int, to_pos: int):
         """Start sequential jumping animation for token movement (one property at a time)"""
@@ -2631,6 +3272,76 @@ class MonopolyGame:
             
             # Pips
             self._draw_pips(int(dx), int(dy), dice_size, value)
+
+    def _push_toast(self, text: str, color: Tuple[int, int, int] = (255, 255, 255), ttl: float = 3.0) -> None:
+        try:
+            msg = str(text or "").strip()
+            if not msg:
+                return
+            entry = {
+                "text": msg,
+                "color": tuple(color) if isinstance(color, tuple) else (255, 255, 255),
+                "ts": float(time.time()),
+                "ttl": float(ttl),
+            }
+            self._toasts.append(entry)
+            # Keep only the most recent few.
+            if len(self._toasts) > 5:
+                self._toasts = self._toasts[-5:]
+        except Exception:
+            return
+
+    def _draw_toasts(self) -> None:
+        try:
+            toasts = list(getattr(self, "_toasts", []) or [])
+            if not toasts:
+                return
+            now = float(time.time())
+            alive: List[Dict] = []
+            for t in toasts:
+                try:
+                    if now - float(t.get("ts", 0.0)) <= float(t.get("ttl", 0.0)):
+                        alive.append(t)
+                except Exception:
+                    continue
+            self._toasts = alive
+            if not alive:
+                return
+
+            bx, by, bw, bh = self.board_rect
+            cx, cy = bx + bw // 2, by + bh // 2
+            base_y = cy + 70
+
+            for i, t in enumerate(reversed(alive)):
+                text = str(t.get("text", ""))
+                color = t.get("color", (255, 255, 255))
+                y = base_y + (i * 22)
+                try:
+                    self.renderer.draw_text(
+                        text,
+                        cx,
+                        y,
+                        "Arial",
+                        14,
+                        color,
+                        anchor_x="center",
+                        anchor_y="center",
+                        bold=True,
+                    )
+                except Exception:
+                    # If bold isn't supported by the renderer implementation.
+                    self.renderer.draw_text(
+                        text,
+                        cx,
+                        y,
+                        "Arial",
+                        14,
+                        color,
+                        anchor_x="center",
+                        anchor_y="center",
+                    )
+        except Exception:
+            return
     
     def _draw_hover_indicators(self):
         """Draw circular progress indicators for button hovers"""

@@ -447,10 +447,14 @@ class BlackjackGame:
                 can_25 = player.chips >= (player.current_bet + 25)
                 can_100 = player.chips >= (player.current_bet + 100)
                 can_500 = player.chips >= (player.current_bet + 500)
+                can_all_in = player.chips >= 5 and player.current_bet < player.chips
                 can_ready = player.current_bet > 0
                 
-                self._set_popup_buttons(player_idx, ["$5", "$25", "$100", "$500", "Ready"],
-                                       [can_5, can_25, can_100, can_500, can_ready])
+                self._set_popup_buttons(
+                    player_idx,
+                    ["$5", "$25", "$100", "$500", "All-in" if can_all_in else "", "Ready"],
+                    [can_5, can_25, can_100, can_500, can_all_in, can_ready],
+                )
         
         # Check for game end after auto-readying broke players
         if all(self.players[i].is_ready for i in self.active_players):
@@ -792,6 +796,21 @@ class BlackjackGame:
     
     def _show_player_actions(self):
         """Show action buttons for all players who need to act"""
+        # If a player has no chips remaining, they cannot take further actions.
+        # Auto-stand their active hands so the round cannot softlock waiting on input.
+        try:
+            for player_idx in list(self.active_players or []):
+                player = self.players[int(player_idx)]
+                if not getattr(player, "hands", None):
+                    continue
+                if int(getattr(player, "chips", 0) or 0) > 0:
+                    continue
+                for h in list(getattr(player, "hands", []) or []):
+                    if not bool(getattr(h, "is_standing", False)) and not bool(getattr(h, "is_busted", False)):
+                        h.is_standing = True
+        except Exception:
+            pass
+
         # Check if all players are done (all hands are standing or busted)
         all_done = True
         
@@ -937,6 +956,38 @@ class BlackjackGame:
             dealer_value = 0
             dealer_busted = True
             dealer_bj = False
+
+        # Create a must-close Web UI result popup for *every* active player.
+        # This guarantees all players must press Next hand before a new round starts.
+        try:
+            rid = int(getattr(self, "_web_round_id", 0) or 0)
+        except Exception:
+            rid = 0
+        try:
+            dealer_cards = [str(c) for c in (getattr(self.dealer_hand, "cards", []) or [])]
+        except Exception:
+            dealer_cards = []
+        if not hasattr(self, "_web_result_popups"):
+            self._web_result_popups = {}
+        for idx in list(self.active_players or []):
+            try:
+                pidx = int(idx)
+            except Exception:
+                continue
+            # Only create if missing / stale; results for hands append later.
+            existing = (self._web_result_popups or {}).get(pidx)
+            if existing and int(existing.get("round_id", -1) or -1) == rid:
+                continue
+            self._web_result_popups[pidx] = {
+                "round_id": rid,
+                "dealer": {
+                    "cards": dealer_cards,
+                    "value": int(dealer_value) if isinstance(dealer_value, int) else dealer_value,
+                    "busted": bool(dealer_busted),
+                    "blackjack": bool(dealer_bj),
+                },
+                "hands": [],
+            }
         
         for idx in self.active_players:
             player = self.players[idx]
@@ -1220,10 +1271,10 @@ class BlackjackGame:
         player = self.players[player_idx]
         
         if popup_type == "betting":
-            # Betting buttons: $5, $25, $100, $500, Ready
+            # Betting buttons: $5, $25, $100, $500, All-in, Ready
             btn_idx = int(button_name.split('_')[1])
             
-            if btn_idx == 4:  # Ready button
+            if btn_idx == 5:  # Ready button
                 if player.current_bet > 0 and not player.is_ready:
                     player.is_ready = True
                     # Refresh buttons to show ready state
@@ -1242,6 +1293,14 @@ class BlackjackGame:
                             self._end_game(f"Player {winner_idx + 1} wins!")
                         else:
                             self._start_dealing()
+            elif btn_idx == 4:  # All-in
+                try:
+                    chips = int(getattr(player, "chips", 0) or 0)
+                except Exception:
+                    chips = 0
+                if chips >= 5:
+                    player.current_bet = max(0, chips)
+                    self._show_betting_for_all_players()
             else:  # Bet amount buttons - additive
                 amounts = [5, 25, 100, 500]
                 if btn_idx < len(amounts):

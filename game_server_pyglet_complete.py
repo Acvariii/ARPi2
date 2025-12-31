@@ -17,7 +17,11 @@ import time
 import ctypes
 import threading
 import http.server
+import ipaddress
+import os
+import socket
 import socketserver
+import subprocess
 import functools
 import hashlib
 from pathlib import Path
@@ -123,8 +127,128 @@ class PygletGameServer:
         # Lobby gating
         self.min_connected_players = 2
 
+        # Lobby connection info caching (avoid running IP detection every frame)
+        self._connect_info_cache_time: float = 0.0
+        self._connect_info_cache_lines: List[str] = []
+        self._connect_info_cache_ttl_s: float = 5.0
+
         # Finish initializing networking/window/rendering.
         self._finish_init()
+
+    def _is_valid_ipv4_for_connect(self, addr: str) -> bool:
+        try:
+            ip = ipaddress.ip_address((addr or "").strip())
+        except Exception:
+            return False
+        if ip.version != 4:
+            return False
+        if ip.is_loopback or ip.is_unspecified or ip.is_multicast or ip.is_link_local:
+            return False
+        return True
+
+    def _collect_ipv4_candidates(self) -> List[str]:
+        addrs: List[str] = []
+
+        def add(addr: str) -> None:
+            a = (addr or "").strip()
+            if not a:
+                return
+            if not self._is_valid_ipv4_for_connect(a):
+                return
+            if a not in addrs:
+                addrs.append(a)
+
+        # 1) Route-based local IP (most reliable for "local" LAN address)
+        s = None
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            add(s.getsockname()[0])
+        except Exception:
+            pass
+        finally:
+            try:
+                if s is not None:
+                    s.close()
+            except Exception:
+                pass
+
+        # 2) Hostname-resolved addresses (can include VPN adapters)
+        try:
+            _, _, host_addrs = socket.gethostbyname_ex(socket.gethostname())
+            for a in (host_addrs or []):
+                add(a)
+        except Exception:
+            pass
+
+        # 3) Windows adapter enumeration (best effort; no extra deps)
+        if os.name == "nt":
+            try:
+                txt = subprocess.check_output(
+                    ["ipconfig"],
+                    text=True,
+                    encoding="utf-8",
+                    errors="ignore",
+                )
+                for a in re.findall(r"IPv4 Address[^:]*:\s*([0-9]+(?:\.[0-9]+){3})", txt, flags=re.IGNORECASE):
+                    add(a)
+            except Exception:
+                pass
+
+        return addrs
+
+    def _get_lobby_connect_lines(self) -> List[str]:
+        now = float(time.time())
+        ttl = float(getattr(self, "_connect_info_cache_ttl_s", 5.0) or 5.0)
+        if (now - float(getattr(self, "_connect_info_cache_time", 0.0) or 0.0)) < ttl:
+            cached = getattr(self, "_connect_info_cache_lines", None)
+            if isinstance(cached, list) and cached:
+                return cached
+
+        http_port = int(getattr(self, "http_server_port", 8000) or 8000)
+        ws_port = int(getattr(self, "port", 8765) or 8765)
+
+        candidates = self._collect_ipv4_candidates()
+
+        hamachi_ip: Optional[str] = None
+        local_ip: Optional[str] = None
+
+        for ip in candidates:
+            if ip.startswith("25."):
+                if hamachi_ip is None:
+                    hamachi_ip = ip
+                continue
+            try:
+                if local_ip is None and ipaddress.ip_address(ip).is_private:
+                    local_ip = ip
+            except Exception:
+                continue
+
+        if local_ip is None:
+            for ip in candidates:
+                if not ip.startswith("25."):
+                    local_ip = ip
+                    break
+
+        lines: List[str] = []
+
+        def add_block(label: str, ip: Optional[str]) -> None:
+            if not ip:
+                return
+            lines.append(f"{label} Web UI:  http://{ip}:{http_port}")
+
+        add_block("Local", local_ip)
+        if hamachi_ip and hamachi_ip != local_ip:
+            add_block("Hamachi", hamachi_ip)
+
+        if not lines:
+            # Last resort: show the bound host (often 0.0.0.0)
+            host = (getattr(self, "host", "") or "0.0.0.0").strip()
+            lines.append(f"Web UI:  http://{host}:{http_port}")
+
+        self._connect_info_cache_lines = lines
+        self._connect_info_cache_time = now
+        return lines
 
     def _sounds_dir(self) -> Path:
         return (Path(__file__).parent / "sounds").resolve()
@@ -1378,13 +1502,26 @@ class PygletGameServer:
                 name = str(data.get("name", ""))
                 mortgaged = bool(getattr(prop, "is_mortgaged", False))
                 houses = int(getattr(prop, "houses", 0) or 0)
+                group = data.get("group")
+                group_has_buildings = False
+                try:
+                    if group is not None:
+                        for p2 in (getattr(game, "properties", []) or []):
+                            d2 = getattr(p2, "data", {}) or {}
+                            if d2.get("group") != group:
+                                continue
+                            if int(getattr(p2, "houses", 0) or 0) > 0:
+                                group_has_buildings = True
+                                break
+                except Exception:
+                    group_has_buildings = False
                 return {
                     "idx": int(prop_idx),
                     "name": name,
                     "color": _hex(data.get("color")),
                     "mortgaged": mortgaged,
                     "houses": houses,
-                    "tradable": (not mortgaged) and houses == 0,
+                    "tradable": (not mortgaged) and houses == 0 and (not group_has_buildings),
                 }
 
             if self.state == "monopoly" and popup_type.startswith("trade_"):
@@ -4046,6 +4183,23 @@ class PygletGameServer:
             color=(200, 200, 200),
             anchor_x='center', anchor_y='center'
         )
+
+        # Connection info (local LAN + Hamachi)
+        connect_title_y = int(h * 0.30)
+
+        try:
+            connect_lines = self._get_lobby_connect_lines() or []
+        except Exception:
+            connect_lines = []
+
+        for i, line in enumerate(connect_lines[:6]):
+            self.renderer.draw_text(
+                str(line),
+                center_x, connect_title_y - 26 - i * 22,
+                font_name='Arial', font_size=18,
+                color=(230, 230, 230),
+                anchor_x='center', anchor_y='center'
+            )
 
         # Lobby status (Web UI players)
         try:

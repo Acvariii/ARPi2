@@ -29,6 +29,7 @@ export default function TexasHoldemPanel({ snapshot, seatLabel, send, playerColo
 
   const ctrlCheckCall = buttonById.get('check_call');
   const ctrlBetRaise = buttonById.get('bet_raise');
+  const ctrlAllIn = buttonById.get('all_in');
   const ctrlFold = buttonById.get('fold');
   const ctrlNextHand = buttonById.get('next_hand');
   const ctrlToggleReveal = buttonById.get('toggle_reveal');
@@ -93,6 +94,11 @@ export default function TexasHoldemPanel({ snapshot, seatLabel, send, playerColo
       <Typography variant="subtitle1" gutterBottom align="center">
         Actions
       </Typography>
+      {!!ctrlNextHand && (
+        <Typography variant="caption" color="text.secondary" display="block" align="center" sx={{ mb: 1 }}>
+          All players must press Next Hand.
+        </Typography>
+      )}
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="center" sx={{ mb: 2 }}>
         {ctrlCheckCall && (
           <Button variant="contained" onClick={() => sendClick(ctrlCheckCall.id)} disabled={!ctrlCheckCall.enabled || !!snapshot.popup?.active}>
@@ -102,6 +108,11 @@ export default function TexasHoldemPanel({ snapshot, seatLabel, send, playerColo
         {ctrlBetRaise && (
           <Button variant="contained" onClick={() => sendClick(ctrlBetRaise.id)} disabled={!ctrlBetRaise.enabled || !!snapshot.popup?.active}>
             {ctrlBetRaise.text}
+          </Button>
+        )}
+        {ctrlAllIn && (
+          <Button variant="contained" onClick={() => sendClick(ctrlAllIn.id)} disabled={!ctrlAllIn.enabled || !!snapshot.popup?.active}>
+            {ctrlAllIn.text}
           </Button>
         )}
         {ctrlFold && (
