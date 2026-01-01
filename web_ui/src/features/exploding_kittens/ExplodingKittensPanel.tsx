@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Paper, Stack, Typography } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import type { Snapshot } from '../../types';
+import EmojiCardTile from '../../components/EmojiCardTile';
 
 type Props = {
   snapshot: Snapshot;
@@ -27,14 +28,6 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
   const ctrlFavorTargets = panelButtons.filter((b) => b.id.startsWith('favor_target:'));
 
   const sendClick = (id: string) => send({ type: 'click_button', id });
-
-  const cardStyle = {
-    width: 74,
-    aspectRatio: '5 / 7',
-    borderRadius: 1.25,
-    overflow: 'hidden',
-    userSelect: 'none' as const,
-  };
 
   const ekCardFace = (text: string): { emoji: string; title: string; corner: string; accent: string; isBack?: boolean } => {
     const t = String(text || '').trim();
@@ -69,64 +62,17 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
     const face = ekCardFace(opts.text);
 
     return (
-      <Paper
-        key={opts.key}
-        variant="outlined"
-        onClick={clickable ? opts.onClick : undefined}
-        sx={{
-          ...cardStyle,
-          cursor: clickable ? 'pointer' : 'default',
-          opacity: clickable ? 1 : 0.45,
-          borderColor: clickable ? theme.palette.text.primary : 'divider',
-          bgcolor: face.isBack ? theme.palette.primary.main : theme.palette.background.paper,
-          color: theme.palette.text.primary,
-          position: 'relative',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        {/* Accent border */}
-        <Box
-          sx={{
-            position: 'absolute',
-            inset: 0,
-            border: `2px solid ${face.accent}`,
-            borderRadius: 1.25,
-            pointerEvents: 'none',
-            opacity: 0.9,
-          }}
-        />
-
-        {/* Corners */}
-        <Box sx={{ position: 'absolute', top: 6, left: 7, lineHeight: 1 }}>
-          <Typography variant="caption" sx={{ fontWeight: 900, color: face.isBack ? theme.palette.common.white : theme.palette.text.primary }}>
-            {face.corner}
-          </Typography>
-        </Box>
-        <Box sx={{ position: 'absolute', bottom: 6, right: 7, lineHeight: 1, transform: 'rotate(180deg)' }}>
-          <Typography variant="caption" sx={{ fontWeight: 900, color: face.isBack ? theme.palette.common.white : theme.palette.text.primary }}>
-            {face.corner}
-          </Typography>
-        </Box>
-
-        <Stack spacing={0.5} alignItems="center" sx={{ px: 1, textAlign: 'center' }}>
-          <Typography variant="h5" sx={{ lineHeight: 1 }}>
-            {face.emoji}
-          </Typography>
-          <Typography
-            variant="caption"
-            sx={{
-              fontWeight: 900,
-              letterSpacing: 0.3,
-              color: face.isBack ? theme.palette.common.white : theme.palette.text.secondary,
-              lineHeight: 1.1,
-            }}
-          >
-            {face.title}
-          </Typography>
-        </Stack>
-      </Paper>
+      <EmojiCardTile
+        key={String(opts.key)}
+        emoji={face.emoji}
+        title={face.title}
+        corner={face.corner}
+        accent={face.accent}
+        isBack={!!face.isBack}
+        enabled={clickable}
+        onClick={opts.onClick}
+        width={74}
+      />
     );
   };
 

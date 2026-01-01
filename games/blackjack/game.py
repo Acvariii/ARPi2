@@ -13,6 +13,7 @@ import time
 import random
 from typing import List, Dict, Tuple, Optional
 from core.renderer import PygletRenderer
+from core.card_rendering import draw_playing_card
 from config import PLAYER_COLORS, Colors, HOVER_TIME_THRESHOLD
 from core.player_selection import PlayerSelectionUI
 from core.ui_components import PygletButton, PlayerPanel, calculate_all_panels
@@ -1867,55 +1868,16 @@ class BlackjackGame:
     
     def _draw_card(self, card: Card, x: int, y: int, w: int, h: int, player_color: Tuple[int, int, int] = None):
         """Draw a playing card with optional player color outline"""
-        # Subtle shadow
-        self.renderer.draw_rect((0, 0, 0), (x + 3, y + 3, w, h), alpha=55)
-
-        # Card background
-        self.renderer.draw_rect((248, 248, 248), (x, y, w, h))
-
-        # Colored outline if player card, black if no color specified
         outline_color = player_color if player_color else (20, 20, 20)
         outline_width = 3 if player_color else 2
-        self.renderer.draw_rect(outline_color, (x, y, w, h), width=outline_width)
-        self.renderer.draw_rect((210, 210, 210), (x + 3, y + 3, w - 6, h - 6), width=1)
 
-        # Suit color
-        color = (220, 20, 20) if card.suit in ['♥', '♦'] else (20, 20, 20)
-
-        # Corners
-        self.renderer.draw_text(
+        draw_playing_card(
+            self.renderer,
+            (int(x), int(y), int(w), int(h)),
             f"{card.rank}{card.suit}",
-            x + 9,
-            y + 10,
-            'Arial',
-            14,
-            color,
-            bold=True,
-            anchor_x='left',
-            anchor_y='top',
-        )
-        self.renderer.draw_text(
-            f"{card.rank}{card.suit}",
-            x + w - 9,
-            y + h - 10,
-            'Arial',
-            14,
-            color,
-            bold=True,
-            anchor_x='right',
-            anchor_y='bottom',
-        )
-
-        # Suit (center)
-        self.renderer.draw_text(
-            card.suit,
-            x + w // 2,
-            y + h // 2,
-            'Arial',
-            40,
-            color,
-            anchor_x='center',
-            anchor_y='center',
+            face_up=True,
+            border_rgb=outline_color,
+            border_width=outline_width,
         )
     
     def _draw_card_back(self, x: int, y: int, w: int, h: int):

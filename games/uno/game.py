@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple
 
 from core.player_selection import PlayerSelectionUI
+from core.card_rendering import draw_label_card
 
 
 @dataclass(frozen=True)
@@ -834,21 +835,22 @@ class UnoGame:
         try:
             self.renderer.draw_rect((35, 35, 45), (int(x), int(y), int(w), int(h)), alpha=230)
             self.renderer.draw_rect((90, 90, 110), (int(x), int(y), int(w), int(h)), width=2, alpha=230)
-            # diagonal accent
             self.renderer.draw_line((120, 120, 150), (int(x + 10), int(y + 12)), (int(x + w - 10), int(y + h - 12)), width=2, alpha=200)
             if label:
                 self.renderer.draw_text(label, int(x + w / 2), int(y + h / 2), font_size=12, color=(230, 230, 230), anchor_x="center", anchor_y="center")
         except Exception:
-            pass
+            return
 
     def _draw_card_face(self, rect: Tuple[float, float, float, float], text: str, face_color: Tuple[int, int, int]) -> None:
         x, y, w, h = rect
-        try:
-            self.renderer.draw_rect(face_color, (int(x), int(y), int(w), int(h)), alpha=235)
-            self.renderer.draw_rect((20, 20, 25), (int(x), int(y), int(w), int(h)), width=2, alpha=240)
-            self.renderer.draw_text(text, int(x + w / 2), int(y + h / 2), font_size=14, color=(15, 15, 15), anchor_x="center", anchor_y="center")
-        except Exception:
-            pass
+        if not self.renderer:
+            return
+        draw_label_card(
+            self.renderer,
+            (int(x), int(y), int(w), int(h)),
+            str(text or ""),
+            face_color=tuple(int(v) for v in (face_color or (160, 160, 160))),
+        )
 
     def _draw_discard(self, rect: Tuple[float, float, float, float]) -> None:
         top = self.top_card

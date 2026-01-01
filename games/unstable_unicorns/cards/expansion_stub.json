@@ -1,0 +1,10 @@
+{
+  "meta": {
+    "name": "ARPi2 Unstable Unicorns (generic expansion stub)",
+    "notes": "Placeholder expansion set. Add your own cards here."
+  },
+  "cards": [
+    { "id": "magic_sac_draw", "name": "Magic: Sacrifice & Draw", "kind": "magic", "emoji": "\ud83d\udd25", "color": "#b84dff", "count": 2, "effect": { "type": "SACRIFICE_ONE_DRAW", "amount": 2 } },
+    { "id": "downgrade_tax", "name": "Downgrade: Tax", "kind": "downgrade", "emoji": "\ud83e\uddfe", "color": "#ff6b6b", "count": 2, "effect": { "type": "PASSIVE_DRAW_BONUS", "amount": -1 } }
+  ]
+}

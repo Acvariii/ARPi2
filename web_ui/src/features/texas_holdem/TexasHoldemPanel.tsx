@@ -1,5 +1,5 @@
-import React from 'react';
-import { Box, Button, Paper, Stack, Typography } from '@mui/material';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Box, Button, Paper, Slider, Stack, TextField, Typography } from '@mui/material';
 import type { Snapshot } from '../../types';
 import PlayingCard from '../../components/PlayingCard';
 
@@ -20,6 +20,7 @@ export default function TexasHoldemPanel({ snapshot, seatLabel, send, playerColo
   const buttonById = new Map(panelButtons.map((b) => [b.id, b] as const));
 
   const sendClick = (id: string) => send({ type: 'click_button', id });
+  const sendBet = (raiseBy: number) => send({ type: 'texas_holdem_bet', raise_by: raiseBy });
 
   const community = Array.isArray(th.community) ? th.community : [];
   const myHole = Array.isArray(th.your_hole) ? th.your_hole : [];
@@ -35,6 +36,22 @@ export default function TexasHoldemPanel({ snapshot, seatLabel, send, playerColo
   const ctrlToggleReveal = buttonById.get('toggle_reveal');
 
   const players = Array.isArray(th.players) ? th.players : [];
+  const myPlayer = useMemo(() => {
+    if (typeof mySeat !== 'number') return null;
+    return players.find((p: any) => typeof p?.seat === 'number' && p.seat === mySeat) ?? null;
+  }, [players, mySeat]);
+
+  const myStack = typeof myPlayer?.stack === 'number' ? myPlayer.stack : 0;
+  const callAmount = typeof th.call_amount === 'number' ? th.call_amount : 0;
+  const maxRaiseBy = Math.max(0, myStack - callAmount);
+
+  const defaultRaiseBy = Math.min(Math.max(0, 10), maxRaiseBy);
+  const [raiseBy, setRaiseBy] = useState<number>(defaultRaiseBy);
+
+  useEffect(() => {
+    // Keep selection valid as stack/call changes.
+    setRaiseBy((v) => Math.max(0, Math.min(maxRaiseBy, Number.isFinite(v) ? v : 0)));
+  }, [maxRaiseBy]);
   const revealed = (th.revealed_holes || {}) as Record<string, string[]>;
 
   return (
@@ -99,6 +116,42 @@ export default function TexasHoldemPanel({ snapshot, seatLabel, send, playerColo
           All players must press Next Hand.
         </Typography>
       )}
+
+      {!!ctrlBetRaise?.enabled && !ctrlNextHand && (
+        <Paper variant="outlined" sx={{ p: 1.25, mb: 2 }}>
+          <Stack spacing={1} alignItems="center">
+            <Typography variant="body2" color="text.secondary" align="center">
+              Raise by: {raiseBy} {' · '}Call: {callAmount} {' · '}Total: {callAmount + raiseBy}
+            </Typography>
+
+            <Box sx={{ width: '100%', maxWidth: 520 }}>
+              <Slider
+                value={raiseBy}
+                min={0}
+                max={maxRaiseBy}
+                step={5}
+                onChange={(_, v) => setRaiseBy(Array.isArray(v) ? v[0] : (v as number))}
+                disabled={!!snapshot.popup?.active}
+              />
+            </Box>
+
+            <TextField
+              label="Raise by"
+              type="number"
+              value={raiseBy}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                if (!Number.isFinite(n)) return;
+                setRaiseBy(Math.max(0, Math.min(maxRaiseBy, Math.floor(n))));
+              }}
+              inputProps={{ min: 0, max: maxRaiseBy, step: 1 }}
+              size="small"
+              disabled={!!snapshot.popup?.active}
+            />
+          </Stack>
+        </Paper>
+      )}
+
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="center" sx={{ mb: 2 }}>
         {ctrlCheckCall && (
           <Button variant="contained" onClick={() => sendClick(ctrlCheckCall.id)} disabled={!ctrlCheckCall.enabled || !!snapshot.popup?.active}>
@@ -106,7 +159,11 @@ export default function TexasHoldemPanel({ snapshot, seatLabel, send, playerColo
           </Button>
         )}
         {ctrlBetRaise && (
-          <Button variant="contained" onClick={() => sendClick(ctrlBetRaise.id)} disabled={!ctrlBetRaise.enabled || !!snapshot.popup?.active}>
+          <Button
+            variant="contained"
+            onClick={() => (ctrlBetRaise.enabled ? sendBet(raiseBy) : sendClick(ctrlBetRaise.id))}
+            disabled={!ctrlBetRaise.enabled || !!snapshot.popup?.active}
+          >
             {ctrlBetRaise.text}
           </Button>
         )}

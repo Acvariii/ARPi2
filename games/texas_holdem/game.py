@@ -7,6 +7,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from core.player_selection import PlayerSelectionUI
 from config import PLAYER_COLORS
+from core.card_rendering import draw_playing_card
 
 
 @dataclass(frozen=True)
@@ -527,6 +528,57 @@ class TexasHoldemGame:
             self._after_action(seat)
             return
 
+    def handle_bet_amount(self, player_idx: int, raise_by: int) -> None:
+        """Web-UI payload action: bet/raise by a chosen amount.
+
+        Semantics: `raise_by` is the extra amount on top of calling.
+        - If raise_by == 0: acts like check/call.
+        - If raise_by >= stack: effectively all-in.
+
+        MVP constraints: no side pots, no min-raise enforcement beyond existing logic.
+        """
+        seat = int(player_idx) if isinstance(player_idx, int) else -1
+        if self.state != "playing":
+            return
+        if not isinstance(self.turn_seat, int) or seat != self.turn_seat:
+            return
+        if not bool(self.in_hand.get(seat, False)):
+            return
+
+        stack = int(self.stacks.get(seat, 0) or 0)
+        if stack <= 0:
+            return
+
+        try:
+            raise_by_i = int(raise_by)
+        except Exception:
+            raise_by_i = 0
+        if raise_by_i < 0:
+            return
+
+        call_amt = max(0, int(self.current_bet) - int(self.bet_in_round.get(seat, 0) or 0))
+        pay = min(int(stack), int(call_amt) + int(raise_by_i))
+
+        if pay <= 0:
+            # Check.
+            self.acted.add(seat)
+            self._after_action(seat)
+            return
+
+        # Apply payment
+        self.stacks[seat] = int(stack) - int(pay)
+        self.bet_in_round[seat] = int(self.bet_in_round.get(seat, 0) or 0) + int(pay)
+        self.pot += int(pay)
+
+        # If this exceeds current bet, it's a raise; otherwise it's just a call.
+        if int(self.bet_in_round.get(seat, 0) or 0) > int(self.current_bet):
+            self.current_bet = int(self.bet_in_round.get(seat, 0) or 0)
+            self.acted = {seat}
+        else:
+            self.acted.add(seat)
+
+        self._after_action(seat)
+
     def _do_check_call(self, seat: int) -> None:
         need = max(0, int(self.current_bet) - int(self.bet_in_round.get(seat, 0) or 0))
         if need <= 0:
@@ -938,52 +990,6 @@ class TexasHoldemGame:
                 pass
 
     def _draw_card(self, rect: Tuple[int, int, int, int], label: str = "", face: bool = True) -> None:
-        x, y, cw, ch = rect
-        try:
-            # Subtle shadow
-            self.renderer.draw_rect((0, 0, 0), (x + 3, y + 3, cw, ch), alpha=55)
-
-            if not face:
-                # Card back
-                self.renderer.draw_rect((50, 70, 150), (x, y, cw, ch))
-                self.renderer.draw_rect((230, 230, 230), (x, y, cw, ch), width=2)
-                # Simple pattern
-                for i in range(5):
-                    self.renderer.draw_line((200, 200, 240), (x + 6, y + 10 + i * 18), (x + cw - 6, y + 2 + i * 18), width=2, alpha=70)
-                try:
-                    self.renderer.draw_text("🂠", x + cw // 2, y + ch // 2, font_size=22, color=(235, 235, 235), anchor_x="center", anchor_y="center")
-                except Exception:
-                    pass
-                return
-
-            # Face-up
-            self.renderer.draw_rect((248, 248, 248), (x, y, cw, ch))
-            self.renderer.draw_rect((30, 30, 30), (x, y, cw, ch), width=2)
-            self.renderer.draw_rect((210, 210, 210), (x + 3, y + 3, cw - 6, ch - 6), width=1)
-
-            if not label:
-                return
-
-            t = str(label).strip()
-            suit_raw = t[-1:] if t else ""
-            rank_raw = t[:-1] if len(t) >= 2 else t
-            suit_map = {"S": "♠", "H": "♥", "D": "♦", "C": "♣", "♠": "♠", "♥": "♥", "♦": "♦", "♣": "♣"}
-            suit = suit_map.get(suit_raw, suit_raw)
-            rank = "10" if rank_raw == "T" else rank_raw
-            is_red = suit in ("♥", "♦")
-            color = (220, 20, 20) if is_red else (20, 20, 20)
-
-            # Scale text based on card size to avoid overlaps.
-            corner_fs = max(11, min(16, int(cw * 0.20)))
-            center_fs = max(22, min(42, int(ch * 0.42)))
-            corner_pad = max(7, int(cw * 0.12))
-            corner = f"{rank}{suit}"
-
-            # Corners (keep fully inside)
-            self.renderer.draw_text(corner, x + corner_pad, y + corner_pad, font_size=corner_fs, color=color, bold=True, anchor_x="left", anchor_y="top")
-            self.renderer.draw_text(corner, x + cw - corner_pad, y + ch - corner_pad, font_size=corner_fs, color=color, bold=True, anchor_x="right", anchor_y="bottom")
-
-            # Center suit
-            self.renderer.draw_text(suit, x + cw // 2, y + ch // 2, font_size=center_fs, color=color, anchor_x="center", anchor_y="center")
-        except Exception:
+        if not self.renderer:
             return
+        draw_playing_card(self.renderer, rect, str(label or ""), face_up=bool(face))

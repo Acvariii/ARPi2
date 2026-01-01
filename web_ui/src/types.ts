@@ -235,6 +235,29 @@ export type Snapshot = {
       reason?: string;
     } | null;
   };
+  unstable_unicorns?: {
+    state?: string;
+    active_players?: number[];
+    current_turn_seat?: number | null;
+    turn_phase?: string;
+    action_taken?: boolean;
+    deck_count?: number;
+    discard_count?: number;
+    goal_unicorns?: number;
+    winner?: number | null;
+    your_hand?: Array<{ idx: number; id: string; name: string; kind: string; emoji?: string; color?: string; playable: boolean }>;
+    // keys are stringified in JSON
+    stables?: Record<string, Array<{ id: string; name: string; kind: string; emoji?: string; color?: string }>>;
+    protected_turns?: Record<string, number>;
+    hand_counts?: Record<string, number>;
+    reaction?: {
+      actor?: number | null;
+      card?: { id: string; name: string; kind: string; emoji?: string; color?: string };
+      awaiting_seat?: number | null;
+      stack?: Array<{ id: string; name: string; kind: string; emoji?: string; color?: string }>;
+    } | null;
+    prompt?: any;
+  };
   cluedo?: {
     game_id?: number;
     state?: string;

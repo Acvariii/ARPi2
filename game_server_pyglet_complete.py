@@ -38,6 +38,7 @@ from games.blackjack import BlackjackGame
 from games.uno import UnoGame
 from games.exploding_kittens import ExplodingKittensGame
 from games.texas_holdem import TexasHoldemGame
+from games.unstable_unicorns import UnstableUnicornsGame
 from games.cluedo import CluedoGame
 from games.risk import RiskGame
 from games.catan import CatanGame
@@ -273,10 +274,15 @@ class PygletGameServer:
             p.push_handlers(on_eos=lambda: self._on_bg_eos())
         except Exception:
             pass
+        # Prefer handling looping ourselves via on_eos for reliability.
+        try:
+            p.eos_action = pyglet.media.Player.EOS_STOP
+        except Exception:
+            pass
         return p
 
     def _on_bg_eos(self) -> None:
-        # Defensive fallback: some platforms/codecs don't loop reliably.
+        # Loop background music by restarting the current track.
         if bool(getattr(self, "_bg_restart_in_progress", False)):
             return
         self._bg_restart_in_progress = True
@@ -287,36 +293,9 @@ class PygletGameServer:
             if bool(getattr(self, "_music_muted", False)):
                 return
 
-            p = getattr(self, "_bg_player", None)
-            if p is None:
-                return
-
-            # Looping is more reliable with non-streaming sources (seekable).
-            src = self._audio_load(track, streaming=False)
-            if src is None:
-                return
-
-            try:
-                group = pyglet.media.SourceGroup(src.audio_format, None)
-                group.loop = True
-                group.queue(src)
-                p.queue(group)
-            except Exception:
-                try:
-                    p.queue(src)
-                except Exception:
-                    return
-
-            # Belt-and-braces loop hint.
-            try:
-                p.eos_action = pyglet.media.Player.EOS_LOOP
-            except Exception:
-                pass
-
-            try:
-                p.play()
-            except Exception:
-                return
+            # Force a restart even if the desired track matches the previous track.
+            self._bg_track = None
+            self._set_bg_music(track)
         finally:
             self._bg_restart_in_progress = False
 
@@ -411,26 +390,14 @@ class PygletGameServer:
         p = getattr(self, "_bg_player", None)
         if p is None:
             return
-
-        # Prefer SourceGroup looping; fallback to eos_action + on_eos restart if needed.
+        # Queue the source and rely on on_eos to restart.
         try:
-            group = pyglet.media.SourceGroup(src.audio_format, None)
-            group.loop = True
-            group.queue(src)
-            p.queue(group)
+            p.queue(src)
         except Exception:
-            try:
-                p.queue(src)
-                try:
-                    p.eos_action = pyglet.media.Player.EOS_LOOP
-                except Exception:
-                    pass
-            except Exception:
-                return
+            return
 
-        # Belt-and-braces: set loop action even when SourceGroup is used.
         try:
-            p.eos_action = pyglet.media.Player.EOS_LOOP
+            p.eos_action = pyglet.media.Player.EOS_STOP
         except Exception:
             pass
 
@@ -880,6 +847,7 @@ class PygletGameServer:
         self.uno_game = UnoGame(self.window.width, self.window.height, self.renderer)
         self.exploding_kittens_game = ExplodingKittensGame(self.window.width, self.window.height, self.renderer)
         self.texas_holdem_game = TexasHoldemGame(self.window.width, self.window.height, self.renderer)
+        self.unstable_unicorns_game = UnstableUnicornsGame(self.window.width, self.window.height, self.renderer)
         self.cluedo_game = CluedoGame(self.window.width, self.window.height, self.renderer)
         self.risk_game = RiskGame(self.window.width, self.window.height, self.renderer)
         self.catan_game = CatanGame(self.window.width, self.window.height, self.renderer)
@@ -908,6 +876,12 @@ class PygletGameServer:
             pass
 
         try:
+            if hasattr(self.unstable_unicorns_game, "set_name_provider"):
+                self.unstable_unicorns_game.set_name_provider(self._player_display_name)
+        except Exception:
+            pass
+
+        try:
             if hasattr(self.cluedo_game, "set_name_provider"):
                 self.cluedo_game.set_name_provider(self._player_display_name)
         except Exception:
@@ -925,6 +899,7 @@ class PygletGameServer:
         setattr(self.uno_game, "web_ui_only_player_select", True)
         setattr(self.exploding_kittens_game, "web_ui_only_player_select", True)
         setattr(self.texas_holdem_game, "web_ui_only_player_select", True)
+        setattr(self.unstable_unicorns_game, "web_ui_only_player_select", True)
         setattr(self.cluedo_game, "web_ui_only_player_select", True)
         setattr(self.risk_game, "web_ui_only_player_select", True)
         setattr(self.catan_game, "web_ui_only_player_select", True)
@@ -934,6 +909,7 @@ class PygletGameServer:
         setattr(self.uno_game, "board_only_mode", True)
         setattr(self.exploding_kittens_game, "board_only_mode", True)
         setattr(self.texas_holdem_game, "board_only_mode", True)
+        setattr(self.unstable_unicorns_game, "board_only_mode", True)
         setattr(self.cluedo_game, "board_only_mode", True)
         setattr(self.risk_game, "board_only_mode", True)
         setattr(self.catan_game, "board_only_mode", True)
@@ -1266,6 +1242,10 @@ class PygletGameServer:
             self.state = "texas_holdem"
             self.texas_holdem_game.state = "player_select"
             self.texas_holdem_game.selection_ui.reset()
+        elif key == "unstable_unicorns":
+            self.state = "unstable_unicorns"
+            self.unstable_unicorns_game.state = "player_select"
+            self.unstable_unicorns_game.selection_ui.reset()
         elif key == "cluedo":
             self.state = "cluedo"
             self.cluedo_game.state = "player_select"
@@ -1355,6 +1335,8 @@ class PygletGameServer:
             return self.exploding_kittens_game
         if self.state == "texas_holdem":
             return self.texas_holdem_game
+        if self.state == "unstable_unicorns":
+            return self.unstable_unicorns_game
         if self.state == "cluedo":
             return self.cluedo_game
         if self.state == "risk":
@@ -2139,6 +2121,15 @@ class PygletGameServer:
             except Exception:
                 pass
 
+        if self.state == "unstable_unicorns":
+            try:
+                ug = self.unstable_unicorns_game
+                st = ug.get_public_state(player_idx) if hasattr(ug, "get_public_state") else None
+                if isinstance(st, dict):
+                    snap["unstable_unicorns"] = st
+            except Exception:
+                pass
+
         if self.state == "cluedo":
             try:
                 cg = self.cluedo_game
@@ -2515,6 +2506,25 @@ class PygletGameServer:
                 bg = self.blackjack_game
                 if hasattr(bg, "close_web_result"):
                     bg.close_web_result(pidx)
+            except Exception:
+                return
+            return
+
+        # Web UI: Texas Hold'em custom bet/raise amount (payload-driven).
+        if self.state == "texas_holdem" and msg_type == "texas_holdem_bet":
+            pidx = self.ui_client_player.get(client_id, -1)
+            if not (isinstance(pidx, int) and pidx >= 0):
+                return
+            try:
+                raise_by = int(data.get("raise_by", 0) or 0)
+            except Exception:
+                raise_by = 0
+            if raise_by < 0:
+                return
+            try:
+                tg = self.texas_holdem_game
+                if hasattr(tg, "handle_bet_amount"):
+                    tg.handle_bet_amount(pidx, raise_by)
             except Exception:
                 return
             return
@@ -3292,6 +3302,7 @@ class PygletGameServer:
             ("Uno", "uno"),
             ("Exploding Kittens", "exploding_kittens"),
             ("Texas Hold'em", "texas_holdem"),
+            ("Unstable Unicorns", "unstable_unicorns"),
             ("Cluedo", "cluedo"),
             ("Risk", "risk"),
             ("Catan", "catan"),
@@ -3356,6 +3367,7 @@ class PygletGameServer:
             getattr(self, "uno_game", None),
             getattr(self, "exploding_kittens_game", None),
             getattr(self, "texas_holdem_game", None),
+            getattr(self, "unstable_unicorns_game", None),
             getattr(self, "cluedo_game", None),
             getattr(self, "risk_game", None),
             getattr(self, "catan_game", None),
@@ -3393,6 +3405,8 @@ class PygletGameServer:
             self.exploding_kittens_game.draw()
         elif self.state == "texas_holdem":
             self.texas_holdem_game.draw()
+        elif self.state == "unstable_unicorns":
+            self.unstable_unicorns_game.draw()
         elif self.state == "cluedo":
             self.cluedo_game.draw()
         elif self.state == "risk":
@@ -3735,6 +3749,11 @@ class PygletGameServer:
             except Exception:
                 pass
             try:
+                self.unstable_unicorns_game.state = "player_select"
+                self.unstable_unicorns_game.selection_ui.reset()
+            except Exception:
+                pass
+            try:
                 self.cluedo_game.state = "player_select"
                 self.cluedo_game.selection_ui.reset()
             except Exception:
@@ -3819,6 +3838,8 @@ class PygletGameServer:
             self.exploding_kittens_game.update(dt)
         elif self.state == "texas_holdem":
             self.texas_holdem_game.update(dt)
+        elif self.state == "unstable_unicorns":
+            self.unstable_unicorns_game.update(dt)
         elif self.state == "cluedo":
             self.cluedo_game.update(dt)
             # Allow games to request a return-to-lobby flow (same as pressing ESC).
