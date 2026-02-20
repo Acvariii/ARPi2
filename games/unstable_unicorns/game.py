@@ -8,6 +8,10 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from core.player_selection import PlayerSelectionUI
 from core.card_rendering import draw_emoji_card, draw_game_background
+from core.animation import (
+    ParticleSystem, CardFlyAnim, TextPopAnim, PulseRing, ScreenFlash,
+    _RAINBOW_PALETTE as _UU_FW_COLORS,
+)
 
 
 @dataclass(frozen=True)
@@ -94,6 +98,20 @@ class UnstableUnicornsGame:
 
         # Seat-name provider for rendering
         self._seat_name_provider: Optional[Callable[[int], str]] = None
+
+        # --- Animation state ---
+        self._particles: ParticleSystem = ParticleSystem()
+        self._card_flips: List[CardFlyAnim] = []
+        self._text_pops: List[TextPopAnim] = []
+        self._pulse_rings: List[PulseRing] = []
+        self._flashes: List[ScreenFlash] = []
+        # Zone centres updated each draw() frame so animations know where players are
+        self._zone_centers: Dict[int, Tuple[int, int]] = {}
+        # State-change detection for reactive animations
+        self._anim_prev_turn: Optional[int] = None
+        self._anim_prev_reaction: bool = False
+        self._anim_prev_winner: Optional[int] = None
+        self._anim_fw_timer: float = 0.0
 
         self._load_card_sets(include_expansions=True)
         self._rebuild_buttons()
@@ -225,8 +243,105 @@ class UnstableUnicornsGame:
                 self.current_player_idx = 0
         self._rebuild_buttons()
 
+    _SEAT_COLORS: List[Tuple[int,int,int]] = [
+        (255, 80,  80),   # red
+        (80,  180, 255),  # blue
+        (80,  255, 130),  # green
+        (255, 200, 50),   # gold
+        (200, 80,  255),  # violet
+        (255, 140, 50),   # orange
+    ]
+
     def update(self, dt: float) -> None:
-        return
+        # --- Tick all animation objects ---
+        self._particles.update(dt)
+
+        live_flips: List[CardFlyAnim] = []
+        for a in self._card_flips:
+            a.update(dt)
+            if not a.done:
+                live_flips.append(a)
+        self._card_flips = live_flips
+
+        live_pops: List[TextPopAnim] = []
+        for a in self._text_pops:
+            a.update(dt)
+            if not a.done:
+                live_pops.append(a)
+        self._text_pops = live_pops
+
+        live_rings: List[PulseRing] = []
+        for a in self._pulse_rings:
+            a.update(dt)
+            if not a.done:
+                live_rings.append(a)
+        self._pulse_rings = live_rings
+
+        live_flash: List[ScreenFlash] = []
+        for a in self._flashes:
+            a.update(dt)
+            if not a.done:
+                live_flash.append(a)
+        self._flashes = live_flash
+
+        # --- Detect turn change ---
+        curr_turn = self.current_turn_seat
+        if (
+            self.state == "playing"
+            and isinstance(curr_turn, int)
+            and curr_turn != self._anim_prev_turn
+            and isinstance(self._anim_prev_turn, int)   # skip game-start
+        ):
+            center = self._zone_centers.get(curr_turn, (self.width // 2, self.height // 2))
+            col = self._SEAT_COLORS[curr_turn % len(self._SEAT_COLORS)]
+            self._pulse_rings.append(
+                PulseRing(center[0], center[1], col,
+                          max_radius=min(self.width, self.height) // 5, duration=0.8)
+            )
+            # Sparkle at the newly active zone
+            self._particles.emit_sparkle(center[0], center[1], col, count=18)
+        self._anim_prev_turn = curr_turn
+
+        # --- Detect reaction window opening ---
+        if self.reaction_active and not self._anim_prev_reaction:
+            cx, cy = self.width // 2, self.height // 2
+            self._flashes.append(ScreenFlash((220, 30, 30), peak_alpha=90, duration=0.4))
+            self._text_pops.append(
+                TextPopAnim("NEIGH? 🚫", cx, cy + 55,
+                            color=(255, 90, 80), font_size=44, duration=1.8)
+            )
+        self._anim_prev_reaction = bool(self.reaction_active)
+
+        # --- Detect winner ---
+        if self.winner is not None and self._anim_prev_winner is None:
+            cx, cy = self.width // 2, self.height // 2
+            name = self._seat_label(self.winner)
+            self._text_pops.append(
+                TextPopAnim(f"🦄 {name} WINS! 🦄", cx, cy,
+                            color=(255, 220, 50), font_size=50, duration=5.0)
+            )
+            self._flashes.append(ScreenFlash((255, 255, 180), peak_alpha=140, duration=0.65))
+            # Initial firework burst
+            for fx, fy in [(0.25, 0.30), (0.50, 0.20), (0.75, 0.30),
+                           (0.38, 0.55), (0.62, 0.55), (0.50, 0.70)]:
+                self._particles.emit_firework(
+                    int(self.width * fx), int(self.height * fy),
+                    _UU_FW_COLORS, total=70
+                )
+            self._anim_fw_timer = 0.85
+        self._anim_prev_winner = self.winner
+
+        # --- Ongoing winner fireworks ---
+        if self.winner is not None:
+            self._anim_fw_timer -= dt
+            if self._anim_fw_timer <= 0.0:
+                fx = random.uniform(0.12, 0.88)
+                fy = random.uniform(0.15, 0.70)
+                self._particles.emit_firework(
+                    int(self.width * fx), int(self.height * fy),
+                    _UU_FW_COLORS, total=55
+                )
+                self._anim_fw_timer = random.uniform(0.70, 1.20)
 
     @property
     def current_turn_seat(self) -> Optional[int]:
@@ -408,6 +523,17 @@ class UnstableUnicornsGame:
                     self.discard_pile.append("super_neigh")
                     self.reaction_stack.append("super_neigh")
 
+                # Animate the neigh card flying to centre
+                if btn_id in ("uu_react_neigh", "uu_react_super"):
+                    cx, cy = self.width // 2, self.height // 2
+                    src = self._zone_centers.get(seat, (cx, cy))
+                    self._card_flips.append(CardFlyAnim(src, (cx, cy), color=(220, 30, 30)))
+                    self._flashes.append(ScreenFlash((220, 30, 30), peak_alpha=110, duration=0.38))
+                    self._text_pops.append(
+                        TextPopAnim("NEIGH! 🚫", cx, cy - 20,
+                                    color=(255, 80, 60), font_size=52, duration=1.6)
+                    )
+
                 self.reaction_idx += 1
                 if self.reaction_idx >= len(self.reaction_order):
                     self._resolve_reaction()
@@ -451,6 +577,10 @@ class UnstableUnicornsGame:
             self._draw_to_hand(seat, 1)
             self.action_taken = True
             self.turn_phase = "discard" if len(self.hands.get(seat, [])) > self._hand_limit(seat) else "action"
+            # Sparkle at player zone centre
+            ctr = self._zone_centers.get(seat, (self.width // 2, self.height // 2))
+            col = self._SEAT_COLORS[seat % len(self._SEAT_COLORS)]
+            self._particles.emit_sparkle(ctr[0], ctr[1], col, count=14)
             self._rebuild_buttons()
             return
 
@@ -484,6 +614,12 @@ class UnstableUnicornsGame:
             except Exception:
                 return
             self._play_from_hand(seat, idx)
+            # Animate the card flying to the play area (centre top-third)
+            src = self._zone_centers.get(seat, (self.width // 2, self.height // 2))
+            dst = (self.width // 2, self.height // 3)
+            col = self._SEAT_COLORS[seat % len(self._SEAT_COLORS)]
+            self._card_flips.append(CardFlyAnim(src, dst, color=col))
+            self._particles.emit_sparkle(dst[0], dst[1], col, count=20)
             self._rebuild_buttons()
             return
 
@@ -943,6 +1079,9 @@ class UnstableUnicornsGame:
             except Exception:
                 pass
 
+            # Store zone centre for animation system
+            self._zone_centers[int(s)] = (zx + zone_w // 2, zy + zone_h // 2)
+
             stable = list(self.stables.get(int(s), []) or [])
             cx = zx + 10
             cy = zy + 10
@@ -952,6 +1091,32 @@ class UnstableUnicornsGame:
                 if x + card_w > zx + zone_w - 6 or y + card_h > zy + zone_h - 6:
                     break
                 self._draw_card_face(self._card_rect(x, y, card_w, card_h), cid)
+
+        # ── Animation layers (drawn on top of cards, below reaction overlay) ──
+        try:
+            self._particles.draw(self.renderer)
+        except Exception:
+            pass
+        try:
+            for ring in self._pulse_rings:
+                ring.draw(self.renderer)
+        except Exception:
+            pass
+        try:
+            for fly in self._card_flips:
+                fly.draw(self.renderer)
+        except Exception:
+            pass
+        try:
+            for flash in self._flashes:
+                flash.draw(self.renderer, w, h)
+        except Exception:
+            pass
+        try:
+            for pop in self._text_pops:
+                pop.draw(self.renderer)
+        except Exception:
+            pass
 
         if self.reaction_active:
             try:
