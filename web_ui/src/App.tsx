@@ -30,6 +30,7 @@ import UnstableUnicornsPanel from './features/unstable_unicorns/UnstableUnicorns
 import CluedoPanel from './features/cluedo/CluedoPanel';
 import RiskPanel from './features/risk/RiskPanel';
 import CatanPanel from './features/catan/CatanPanel';
+import GameBanner, { getGameTheme } from './components/GameBanner';
 
 type ConnStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -576,8 +577,8 @@ export default function App(): React.ReactElement {
 
             {snapshot.server_state === 'menu' && (
               <>
-                <Typography variant="subtitle1" gutterBottom>
-                  Choose Game (Vote)
+                <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 700 }}>
+                  🎲 Choose Game — Vote Now
                 </Typography>
                 {!snapshot.lobby?.all_ready ? (
                   <Typography variant="body2" color="text.secondary">
@@ -589,36 +590,81 @@ export default function App(): React.ReactElement {
                       sx={{
                         display: 'grid',
                         gridTemplateColumns: { xs: 'repeat(2, 1fr)', sm: 'repeat(3, 1fr)' },
-                        gap: 1,
+                        gap: 1.5,
                       }}
                     >
                       {(snapshot.menu_games || []).map((g) => {
                         const selected = normalizeVoteKey(myGameVote) === normalizeVoteKey(g.key);
+                        const theme = getGameTheme(g.key);
+                        const voteCount = (snapshot.lobby?.votes as any)?.[g.key] ?? 0;
                         return (
-                          <Button
+                          <Box
                             key={g.key}
-                            fullWidth
-                            variant="contained"
-                            color={selected ? 'success' : 'primary'}
-                            onClick={() => send({ type: 'vote_game', key: g.key })}
-                            disabled={status !== 'connected' || !isSeated || !isReady}
-                            sx={{ minHeight: 44 }}
+                            onClick={() =>
+                              status === 'connected' && isSeated && isReady
+                                ? send({ type: 'vote_game', key: g.key })
+                                : undefined
+                            }
+                            sx={{
+                              cursor: status === 'connected' && isSeated && isReady ? 'pointer' : 'default',
+                              opacity: status !== 'connected' || !isSeated || !isReady ? 0.5 : 1,
+                              borderRadius: 2,
+                              overflow: 'hidden',
+                              border: selected ? `3px solid ${theme.accent}` : '3px solid transparent',
+                              boxShadow: selected ? `0 0 12px ${theme.accent}88` : 'none',
+                              transition: 'all 0.2s ease',
+                              '&:hover': status === 'connected' && isSeated && isReady ? { transform: 'translateY(-2px)', boxShadow: `0 4px 16px ${theme.accent}66` } : {},
+                              position: 'relative',
+                            }}
                           >
-                            {g.label}
-                          </Button>
+                            <GameBanner game={g.key} compact />
+                            {voteCount > 0 && (
+                              <Box
+                                sx={{
+                                  position: 'absolute',
+                                  top: 6,
+                                  right: 6,
+                                  background: theme.accent,
+                                  color: '#fff',
+                                  borderRadius: '50%',
+                                  width: 22,
+                                  height: 22,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
+                                }}
+                              >
+                                {voteCount}
+                              </Box>
+                            )}
+                            {selected && (
+                              <Box
+                                sx={{
+                                  position: 'absolute',
+                                  bottom: 0,
+                                  left: 0,
+                                  right: 0,
+                                  textAlign: 'center',
+                                  background: `${theme.accent}cc`,
+                                  color: '#fff',
+                                  fontSize: 10,
+                                  fontWeight: 700,
+                                  py: 0.25,
+                                  letterSpacing: 1,
+                                }}
+                              >
+                                ✓ YOUR VOTE
+                              </Box>
+                            )}
+                          </Box>
                         );
                       })}
                     </Box>
 
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                      Votes: Monopoly {snapshot.lobby?.votes?.monopoly ?? 0} · Blackjack{' '}
-                      {snapshot.lobby?.votes?.blackjack ?? 0} · Uno {snapshot.lobby?.votes?.uno ?? 0} · Exploding Kittens{' '}
-                      {snapshot.lobby?.votes?.exploding_kittens ?? 0} · Texas Hold'em {snapshot.lobby?.votes?.texas_holdem ?? 0} · Unstable Unicorns{' '}
-                      {snapshot.lobby?.votes?.unstable_unicorns ?? 0} · Cluedo{' '}
-                      {snapshot.lobby?.votes?.cluedo ?? 0} · Risk {snapshot.lobby?.votes?.risk ?? 0} · Catan {snapshot.lobby?.votes?.catan ?? 0} · D&D{' '}
-                      {(snapshot.lobby?.votes?.['d&d'] ?? 0) + (snapshot.lobby?.votes?.dnd ?? 0)}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
                       Majority wins. For 2 players, both must vote the same.
                     </Typography>
                   </>

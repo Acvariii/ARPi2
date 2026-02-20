@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 from core.player_selection import PlayerSelectionUI
-from core.card_rendering import draw_emoji_card
+from core.card_rendering import draw_emoji_card, draw_game_background
 
 
 @dataclass(frozen=True)
@@ -867,12 +867,8 @@ class UnstableUnicornsGame:
     # --- Rendering (Pyglet board) ---
 
     def _draw_background(self, w: int, h: int) -> None:
-        try:
-            self.renderer.draw_rect((12, 10, 14), (0, 0, w, h))
-            self.renderer.draw_rect((255, 255, 255), (0, int(h * 0.86), w, int(h * 0.14)), alpha=8)
-            self.renderer.draw_circle((180, 90, 220), (int(w * 0.52), int(h * 0.52)), int(min(w, h) * 0.38), alpha=6)
-        except Exception:
-            pass
+        """Draw the magical Unstable Unicorns background."""
+        draw_game_background(self.renderer, w, h, "unstable_unicorns")
 
     def _card_rect(self, x: float, y: float, w: float, h: float) -> Tuple[int, int, int, int]:
         return (int(x), int(y), int(w), int(h))
@@ -886,9 +882,10 @@ class UnstableUnicornsGame:
             self.renderer,
             rect,
             emoji=str(c.emoji or ""),
-            title=str(c.name or ""),
+            title="",
             accent_rgb=rgb,
             corner=str(c.kind or "").upper()[:4],
+            max_title_font_size=11,
         )
 
     def draw(self) -> None:
@@ -901,24 +898,18 @@ class UnstableUnicornsGame:
 
         self._draw_background(w, h)
 
+        # --- Rainbow centered title ---
         title = "UNSTABLE UNICORNS"
-        turn = self.current_turn_seat
-        status = f"Turn: {self._seat_label(turn)}" if isinstance(turn, int) else "Turn: —"
         if isinstance(self.winner, int):
-            status = f"Winner: {self._seat_label(self.winner)}"
-
+            title = f"WINNER: {self._seat_label(self.winner)}"
         try:
-            self.renderer.draw_text(title, 24, 24, font_size=22, color=(235, 235, 235), anchor_x="left", anchor_y="top")
-            self.renderer.draw_text(status, 24, 52, font_size=16, color=(200, 200, 200), anchor_x="left", anchor_y="top")
-            self.renderer.draw_text(
-                f"Deck: {len(self.draw_pile)}  Discard: {len(self.discard_pile)}  Goal: {self.goal_unicorns}",
-                24,
-                76,
-                font_size=14,
-                color=(200, 200, 200),
-                anchor_x="left",
-                anchor_y="top",
-            )
+            _rainbow = [(255, 55, 55), (255, 140, 0), (255, 220, 0), (55, 200, 55), (70, 130, 255), (200, 55, 255)]
+            _fsz = 22
+            _cw = 16  # wider spacing between characters
+            _tx = w // 2 - (len(title) * _cw) // 2
+            for _i, _ch in enumerate(title):
+                _col = _rainbow[_i % len(_rainbow)]
+                self.renderer.draw_text(_ch, _tx + _i * _cw, 12, font_size=_fsz, color=_col, bold=True, anchor_x="left", anchor_y="top")
         except Exception:
             pass
 
@@ -930,13 +921,15 @@ class UnstableUnicornsGame:
         cols = 2 if len(seats) > 2 else 1
         rows = (len(seats) + cols - 1) // cols
         pad = 18
-        top = int(h * 0.14)
+        top = 48  # title line height
         zone_w = int((w - pad * (cols + 1)) / cols)
         zone_h = int((h - top - pad * (rows + 1)) / max(1, rows))
 
-        card_w = 92
-        card_h = 122
         gap = 10
+        cards_per_row = 5
+        # Size cards to fill the zone nicely — minimum 92 px wide
+        card_w = max(92, min(130, (zone_w - 10 - gap * (cards_per_row - 1)) // cards_per_row))
+        card_h = int(card_w * 1.35)
 
         for idx, s in enumerate(seats):
             r = idx // cols
@@ -950,20 +943,12 @@ class UnstableUnicornsGame:
             except Exception:
                 pass
 
-            try:
-                label = f"{self._seat_label(int(s))}  (Hand: {len(self.hands.get(int(s), []))})  Unicorns: {self._unicorn_count(int(s))}"
-                if int(self.protected_turns.get(int(s), 0) or 0) > 0:
-                    label += "  🛡"
-                self.renderer.draw_text(label, zx + 10, zy + 12, font_size=14, color=(235, 235, 235), anchor_x="left", anchor_y="top")
-            except Exception:
-                pass
-
             stable = list(self.stables.get(int(s), []) or [])
             cx = zx + 10
-            cy = zy + 34
-            for ci, cid in enumerate(stable[:10]):
-                x = cx + (ci % 5) * (card_w + gap)
-                y = cy + (ci // 5) * (card_h + gap)
+            cy = zy + 10
+            for ci, cid in enumerate(stable[:cards_per_row * 2]):
+                x = cx + (ci % cards_per_row) * (card_w + gap)
+                y = cy + (ci // cards_per_row) * (card_h + gap)
                 if x + card_w > zx + zone_w - 6 or y + card_h > zy + zone_h - 6:
                     break
                 self._draw_card_face(self._card_rect(x, y, card_w, card_h), cid)

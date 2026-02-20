@@ -12,6 +12,7 @@ import {
   Typography,
 } from '@mui/material';
 import type { Snapshot } from '../../types';
+import GameBanner from '../../components/GameBanner';
 
 export default function RiskPanel(props: {
   snapshot: Snapshot;
@@ -93,10 +94,8 @@ export default function RiskPanel(props: {
 
   return (
     <Stack spacing={1.25}>
+      <GameBanner game="risk" />
       <Paper variant="outlined" sx={{ p: 1.25 }}>
-        <Typography variant="h6" align="center">
-          Risk
-        </Typography>
         <Typography variant="body2" color="text.secondary" align="center">
           {typeof st?.winner === 'number'
             ? `Winner: ${seatLabel(st.winner)}`

@@ -7,7 +7,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from core.player_selection import PlayerSelectionUI
 from config import PLAYER_COLORS
-from core.card_rendering import draw_playing_card
+from core.card_rendering import draw_playing_card, draw_game_background
 
 
 @dataclass(frozen=True)
@@ -972,22 +972,8 @@ class TexasHoldemGame:
                 pass
 
     def _draw_background(self, w: int, h: int) -> None:
-        try:
-            self.renderer.draw_rect((10, 10, 12), (0, 0, w, h))
-            self.renderer.draw_rect((180, 80, 235), (0, int(h * 0.78), w, int(h * 0.22)), alpha=10)
-            self.renderer.draw_rect((240, 180, 90), (0, 0, w, int(h * 0.18)), alpha=6)
-
-            r = int(min(w, h) * 0.40)
-            self.renderer.draw_circle((100, 60, 160), (int(w * 0.50), int(h * 0.52)), r, alpha=7)
-            self.renderer.draw_circle((60, 140, 235), (int(w * 0.50), int(h * 0.52)), int(r * 0.70), alpha=6)
-
-            self.renderer.draw_line((200, 200, 220), (int(w * 0.08), int(h * 0.88)), (int(w * 0.30), int(h * 0.68)), width=3, alpha=22)
-            self.renderer.draw_line((200, 200, 220), (int(w * 0.92), int(h * 0.12)), (int(w * 0.70), int(h * 0.32)), width=3, alpha=18)
-        except Exception:
-            try:
-                self.renderer.draw_rect((10, 10, 12), (0, 0, w, h))
-            except Exception:
-                pass
+        """Draw the poker-table Texas Hold'em background."""
+        draw_game_background(self.renderer, w, h, "texas_holdem")
 
     def _draw_card(self, rect: Tuple[int, int, int, int], label: str = "", face: bool = True) -> None:
         if not self.renderer:

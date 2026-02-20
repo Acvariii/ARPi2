@@ -1,5 +1,6 @@
 import React from 'react';
 import { Button, Stack, Typography } from '@mui/material';
+import GameBanner from '../../components/GameBanner';
 
 type Props = {
   send: (obj: unknown) => void;
@@ -8,6 +9,7 @@ type Props = {
 export default function DndDicePanel({ send }: Props): React.ReactElement {
   return (
     <>
+      <GameBanner game="dnd" />
       <Typography variant="subtitle2" sx={{ mt: 2 }}>
         Dice
       </Typography>

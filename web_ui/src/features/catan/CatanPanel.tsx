@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useRef } from 'react';
 import { Box, Button, Paper, Stack, Typography } from '@mui/material';
 import type { Snapshot } from '../../types';
+import GameBanner from '../../components/GameBanner';
 
 export default function CatanPanel(props: {
   snapshot: Snapshot;
@@ -123,10 +124,8 @@ export default function CatanPanel(props: {
 
   return (
     <Stack spacing={1.25}>
+      <GameBanner game="catan" />
       <Paper variant="outlined" sx={{ p: 1.25 }}>
-        <Typography variant="h6" align="center">
-          Catan
-        </Typography>
         <Typography variant="body2" color="text.secondary" align="center">
           Turn: {typeof turnSeat === 'number' ? seatLabel(turnSeat) : '—'} · Expansion: {st.expansion_mode || '—'}
         </Typography>

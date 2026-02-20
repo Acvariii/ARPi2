@@ -3,6 +3,7 @@ import { Box, Paper, Stack, Typography } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import type { Snapshot } from '../../types';
 import EmojiCardTile from '../../components/EmojiCardTile';
+import GameBanner from '../../components/GameBanner';
 
 type Props = {
   snapshot: Snapshot;
@@ -81,11 +82,9 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
 
   return (
     <>
+      <GameBanner game="exploding_kittens" />
       <Paper variant="outlined" sx={{ p: 1.5, mb: 2 }}>
         <Stack spacing={1}>
-          <Typography variant="subtitle1" align="center">
-            Exploding Kittens
-          </Typography>
           <Typography variant="body2" color="text.secondary" align="center">
             Deck: {ek.deck_count ?? '—'} {' · '}Discard: {ek.discard_top ?? '—'} {' · '}Draws: {ek.pending_draws ?? 1}
           </Typography>

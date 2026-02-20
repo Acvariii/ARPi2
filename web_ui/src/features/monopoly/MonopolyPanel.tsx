@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Button, Paper, Stack, Typography } from '@mui/material';
 import type { Snapshot } from '../../types';
+import GameBanner from '../../components/GameBanner';
 
 type Props = {
   snapshot: Snapshot;
@@ -14,6 +15,7 @@ export default function MonopolyPanel({ snapshot, seatLabel, send, playerColors 
 
   return (
     <>
+      <GameBanner game="monopoly" />
       {!!snapshot.panel_buttons?.length && !snapshot.popup?.active && (
         <>
           {typeof snapshot.monopoly?.current_turn_seat === 'number' && (

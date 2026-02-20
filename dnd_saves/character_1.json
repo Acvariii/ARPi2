@@ -1,14 +1,14 @@
 {
-  "name": "Aelrindel Starweaver",
+  "name": "Liriel the Spellweaver",
   "player_color": [
     40,
     120,
     200
   ],
   "race": "Elf",
-  "char_class": "Fighter",
+  "char_class": "Wizard",
   "level": 1,
-  "alignment": "Lawful Good",
+  "alignment": "Neutral Evil",
   "abilities": {
     "Strength": 15,
     "Dexterity": 15,
@@ -17,35 +17,40 @@
     "Wisdom": 8,
     "Charisma": 8
   },
-  "max_hp": 12,
-  "current_hp": 12,
-  "armor_class": 18,
+  "max_hp": 8,
+  "current_hp": 8,
+  "armor_class": 12,
   "skills": [
-    "Athletics",
-    "Intimidation",
     "Arcana",
-    "Sleight of Hand"
+    "History",
+    "Persuasion",
+    "Deception"
   ],
   "inventory": [
     {
-      "id": "1766916445079_7481",
-      "name": "Chain Mail",
+      "id": "1771612820205_4397",
+      "name": "Padded Robes",
       "kind": "gear",
       "slot": "chest",
-      "ac_bonus": 6
+      "ac_bonus": 0
     },
     {
-      "id": "1766916445079_5374",
-      "name": "Longsword",
+      "id": "1771612820205_2916",
+      "name": "Staff",
       "kind": "misc"
     },
     {
-      "id": "1766916445079_8240",
-      "name": "Adventurer's Pack",
+      "id": "1771612820205_6312",
+      "name": "Spellbook",
       "kind": "misc"
     },
     {
-      "id": "1766916445079_3341",
+      "id": "1771612820205_4367",
+      "name": "Component Pouch",
+      "kind": "misc"
+    },
+    {
+      "id": "1771612820205_8282",
       "name": "Healing Potion",
       "kind": "consumable",
       "effect": {
@@ -55,42 +60,43 @@
     }
   ],
   "equipment": {
-    "chest": "1766916445079_7481"
+    "chest": "1771612820205_4397",
+    "staff": "1771612820205_2916"
   },
   "gold": 0,
   "experience": 0,
-  "background": "You were shaped by long nights, short tempers, and longer roads.\n\nYou grew up in city alleys, and you learned to lean on honor\u2014even when it made you stubborn. When revenge pulled you onto the road, you didn\u2019t hesitate for long. A stranger\u2019s words lodged in your mind like a splinter.\n\nYour greatest flaw is impulsiveness, and you\u2019re not proud of the damage it\u2019s caused. Still, a person keeps you standing when the odds turn. You carry a map as a reminder of who you were before you became a fighter.\n\nUnique detail: Test\n\nYou don\u2019t seek glory\u2014only a reason to believe you can make things right.",
+  "background": "You were shaped by long nights, short tempers, and longer roads.\n\nYou grew up in quiet village, and you learned to lean on compassion\u2014even when it made you stubborn. When curiosity pulled you onto the road, you didn\u2019t hesitate for long. An old debt still casts a long shadow.\n\nYour greatest flaw is suspicion, and you\u2019re not proud of the damage it\u2019s caused. Still, a cause keeps you standing when the odds turn. You carry a token as a reminder of who you were before you became a wizard.\n\nUnique detail: Boobs\n\nYou measure your life in promises kept, not battles won.",
   "background_answers": {
-    "style": "Use tricks",
-    "origin": "City alleys",
+    "origin": "Quiet village",
     "family": "Large and chaotic",
-    "mentor": "No one",
-    "turning_point": "Revenge",
-    "virtue": "Honor",
-    "flaw": "Impulsiveness",
-    "fear": "Losing control",
-    "bond": "A person",
+    "mentor": "A priest",
+    "turning_point": "Curiosity",
+    "virtue": "Compassion",
+    "flaw": "Suspicion",
+    "fear": "Being forgotten",
+    "bond": "A cause",
+    "style": "Talk first",
     "reputation": "Troublemaker",
-    "secret": "A forbidden truth",
-    "magic": "I study it",
-    "faith": "Haunted",
-    "social": "A leader",
+    "secret": "A lineage",
+    "magic": "I distrust it",
+    "faith": "Skeptical",
+    "social": "A listener",
     "travel": "To learn",
-    "weapon": "My words",
-    "keepsake": "A map",
-    "scar": "A ritual",
-    "goal": "Break a curse",
+    "weapon": "Bow",
+    "keepsake": "A token",
+    "scar": "Hard labor",
+    "goal": "Earn status",
     "companions": "Competence",
-    "conflict": "De-escalate",
-    "craft": "Herbalism",
-    "hook": "Test"
+    "conflict": "End it fast",
+    "craft": "Woodcraft",
+    "hook": "Boobs"
   },
   "feats": [
-    "Bookish"
+    "Wilderness Blood"
   ],
   "features": [
-    "Combat Training",
-    "Steel Nerve",
-    "Calm Under Pressure"
+    "Arcane Study",
+    "Ritual Habit",
+    "Uncanny Luck"
   ]
 }

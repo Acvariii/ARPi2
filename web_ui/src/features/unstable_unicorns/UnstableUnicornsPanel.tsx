@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { Box, Button, Divider, Paper, Stack, Typography } from '@mui/material';
 import type { Snapshot } from '../../types';
 import EmojiCardTile from '../../components/EmojiCardTile';
+import GameBanner from '../../components/GameBanner';
 
 type Props = {
   snapshot: Snapshot;
@@ -49,13 +50,15 @@ export default function UnstableUnicornsPanel({ snapshot, seatLabel, send, playe
   const reaction = uu.reaction as any;
   const prompt = uu.prompt as any;
 
+  const actionButtons = panelButtons.filter(
+    (b) => !b.id.startsWith('uu_play:') && !b.id.startsWith('uu_discard:')
+  );
+
   return (
     <>
+      <GameBanner game="unstable_unicorns" />
       <Paper variant="outlined" sx={{ p: 1.5, mb: 2 }}>
         <Stack spacing={1}>
-          <Typography variant="subtitle1" align="center">
-            Unstable Unicorns
-          </Typography>
           <Typography variant="body2" color="text.secondary" align="center">
             Goal: {goal} unicorns {' · '}Deck: {uu.deck_count ?? 0} {' · '}Discard: {uu.discard_count ?? 0}
           </Typography>
@@ -86,12 +89,12 @@ export default function UnstableUnicornsPanel({ snapshot, seatLabel, send, playe
         Actions
       </Typography>
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="center" sx={{ mb: 2, flexWrap: 'wrap' }}>
-        {panelButtons.map((b) => (
+        {actionButtons.map((b) => (
           <Button key={b.id} variant="contained" onClick={() => sendClick(b.id)} disabled={!b.enabled || !!snapshot.popup?.active}>
             {b.text}
           </Button>
         ))}
-        {!panelButtons.length && <Typography variant="caption" color="text.secondary">No actions available.</Typography>}
+        {!actionButtons.length && <Typography variant="caption" color="text.secondary">No actions available.</Typography>}
       </Stack>
 
       <Divider sx={{ mb: 2 }} />
@@ -117,7 +120,7 @@ export default function UnstableUnicornsPanel({ snapshot, seatLabel, send, playe
               accent={c.color}
               enabled={!!c.playable && !snapshot.popup?.active}
               onClick={() => typeof c.idx === 'number' && sendClick(`uu_play:${c.idx}`)}
-              width={74}
+              width={90}
             />
           ))}
           {!myHand.length && <Typography variant="caption" color="text.secondary">No cards.</Typography>}
@@ -160,7 +163,7 @@ export default function UnstableUnicornsPanel({ snapshot, seatLabel, send, playe
                     corner={String(c.kind || '').toUpperCase().slice(0, 4)}
                     accent={c.color}
                     enabled={false}
-                    width={74}
+                    width={90}
                   />
                 ))}
                 {!stable.length && <Typography variant="caption" color="text.secondary">Empty stable.</Typography>}

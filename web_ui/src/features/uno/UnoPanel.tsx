@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Button, Paper, Stack, Typography } from '@mui/material';
 import type { Snapshot } from '../../types';
 import UnoCardTile from '../../components/UnoCardTile';
+import GameBanner from '../../components/GameBanner';
 
 type Props = {
   snapshot: Snapshot;
@@ -53,11 +54,9 @@ export default function UnoPanel({ snapshot, seatLabel, send, playerColors }: Pr
 
   return (
     <>
+      <GameBanner game="uno" />
       <Paper variant="outlined" sx={{ p: 1.5, mb: 2 }}>
         <Stack spacing={1}>
-          <Typography variant="subtitle1" align="center">
-            Uno
-          </Typography>
           <Typography variant="body2" color="text.secondary" align="center">
             Top: {uno.top_card ?? '—'} {' · '}Color: {uno.current_color ?? '—'}
           </Typography>

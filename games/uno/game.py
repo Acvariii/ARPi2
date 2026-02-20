@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple
 
 from core.player_selection import PlayerSelectionUI
-from core.card_rendering import draw_label_card
+from core.card_rendering import draw_label_card, draw_game_background
 
 
 @dataclass(frozen=True)
@@ -303,27 +303,8 @@ class UnoGame:
             pass
 
     def _draw_background(self, w: int, h: int) -> None:
-        """Draw a subtle table/background (no external assets)."""
-        try:
-            # Base
-            self.renderer.draw_rect((10, 10, 12), (0, 0, w, h))
-            # Soft top/bottom bands
-            self.renderer.draw_rect((180, 80, 235), (0, int(h * 0.78), w, int(h * 0.22)), alpha=10)
-            self.renderer.draw_rect((240, 180, 90), (0, 0, w, int(h * 0.18)), alpha=6)
-
-            # Center glow
-            r = int(min(w, h) * 0.42)
-            self.renderer.draw_circle((120, 60, 160), (int(w * 0.50), int(h * 0.52)), r, alpha=7)
-            self.renderer.draw_circle((80, 140, 235), (int(w * 0.50), int(h * 0.52)), int(r * 0.72), alpha=6)
-
-            # Diagonal accents
-            self.renderer.draw_line((200, 200, 220), (int(w * 0.08), int(h * 0.88)), (int(w * 0.30), int(h * 0.68)), width=3, alpha=25)
-            self.renderer.draw_line((200, 200, 220), (int(w * 0.92), int(h * 0.12)), (int(w * 0.70), int(h * 0.32)), width=3, alpha=22)
-        except Exception:
-            try:
-                self.renderer.draw_rect((10, 10, 12), (0, 0, w, h))
-            except Exception:
-                pass
+        """Draw the colourful UNO background."""
+        draw_game_background(self.renderer, w, h, "uno")
 
         # Seat zones + counts
         for seat in self.active_players:

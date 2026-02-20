@@ -12,6 +12,7 @@ import {
   Typography,
 } from '@mui/material';
 import type { Snapshot } from '../../types';
+import GameBanner from '../../components/GameBanner';
 
 type Props = {
   snapshot: Snapshot;
@@ -30,6 +31,7 @@ export default function BlackjackPanel({ snapshot, status, isSeated, send, CardR
 
   return (
     <>
+      <GameBanner game="blackjack" />
       <Paper variant="outlined" sx={{ p: 1.5, mb: 2 }}>
         <Stack spacing={1}>
           <Typography variant="subtitle1">Blackjack</Typography>

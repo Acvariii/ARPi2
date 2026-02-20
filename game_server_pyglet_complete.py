@@ -3226,6 +3226,9 @@ class PygletGameServer:
             elif self.state == "texas_holdem":
                 if hasattr(game, "handle_click"):
                     game.handle_click(pidx, btn_id)
+            elif self.state == "unstable_unicorns":
+                if hasattr(game, "handle_click"):
+                    game.handle_click(pidx, btn_id)
             elif self.state == "cluedo":
                 if hasattr(game, "handle_click"):
                     if btn_id == "roll":

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Paper, Stack, TextField, Typography } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import type { Snapshot } from '../../types';
+import GameBanner from '../../components/GameBanner';
 
 type Props = {
   snapshot: Snapshot;
@@ -91,11 +92,9 @@ export default function CluedoPanel({ snapshot, seatLabel, send, playerColors }:
 
   return (
     <>
+      <GameBanner game="cluedo" />
       <Paper variant="outlined" sx={{ p: 1.5, mb: 2 }}>
         <Stack spacing={0.75}>
-          <Typography variant="subtitle1" align="center">
-            Cluedo
-          </Typography>
           <Typography variant="body2" color="text.secondary" align="center">
             Turn: {turnSeat !== null ? seatLabel(turnSeat) : '—'}
             {dice ? ` · Roll: ${dice[0]}+${dice[1]}=${typeof cl.last_roll === 'number' ? cl.last_roll : dice[0] + dice[1]}` : ''}

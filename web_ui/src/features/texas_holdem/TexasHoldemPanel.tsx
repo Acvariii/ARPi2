@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Box, Button, Paper, Slider, Stack, TextField, Typography } from '@mui/material';
 import type { Snapshot } from '../../types';
 import PlayingCard from '../../components/PlayingCard';
+import GameBanner from '../../components/GameBanner';
 
 type Props = {
   snapshot: Snapshot;
@@ -56,11 +57,9 @@ export default function TexasHoldemPanel({ snapshot, seatLabel, send, playerColo
 
   return (
     <>
+      <GameBanner game="texas_holdem" />
       <Paper variant="outlined" sx={{ p: 1.5, mb: 2 }}>
         <Stack spacing={1}>
-          <Typography variant="subtitle1" align="center">
-            Texas Hold&apos;em
-          </Typography>
           <Typography variant="body2" color="text.secondary" align="center">
             Street: {th.street ?? '—'} {' · '}Pot: {th.pot ?? 0} {' · '}Current bet: {th.current_bet ?? 0}
           </Typography>
