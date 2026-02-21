@@ -1820,8 +1820,7 @@ class CatanGame:
         }
 
     def _draw_pips(self, cx: int, cy: int, size: int, value: int, *, layer: int) -> None:
-        # Bigger pips for wall visibility.
-        r = max(3, size // 8)
+        r = max(4, size // 8)
         off = size // 4
         pips = {
             1: [(0, 0)],
@@ -1832,21 +1831,21 @@ class CatanGame:
             6: [(-off, -off), (off, -off), (-off, 0), (off, 0), (-off, off), (off, off)],
         }
         for dx, dy in pips.get(int(value), []):
-            self.renderer.draw_circle_immediate((0, 0, 0), (int(cx + dx), int(cy + dy)), int(r), width=0, alpha=255, layer=layer)
+            px, py = int(cx + dx), int(cy + dy)
+            self.renderer.draw_circle_immediate((0, 0, 0), (px + 1, py + 1), int(r), width=0, alpha=50, layer=layer)
+            self.renderer.draw_circle_immediate((15, 15, 22), (px, py), int(r), width=0, alpha=245, layer=layer + 2)
+            self.renderer.draw_circle_immediate((60, 60, 70), (px - 1, py - 1), max(1, int(r) - 2), width=0, alpha=70, layer=layer + 4)
 
     def _draw_dice_overlay(self) -> None:
         now = float(time.time())
-        # Show while rolling OR whenever a roll result is available (persistent until next round).
         show = bool(self.dice_rolling) or isinstance(self.last_roll, int)
         if not show:
             return
 
         w = int(self.width)
-        # Position under the header, top-right.
         cx = int(w - 180)
         cy = 122
-        # Bigger dice so pips are visible from a distance.
-        dice_size = 86
+        ds = 86
         gap = 16
 
         if self.dice_rolling:
@@ -1860,71 +1859,80 @@ class CatanGame:
             except Exception:
                 display_values = (1, 1)
 
+        # Resolve glow
+        glow = 0.0
+        if not self.dice_rolling and isinstance(self.last_roll, int):
+            since = now - (float(self._dice_roll_start or 0) + float(self._dice_roll_duration))
+            if 0 <= since < 0.55:
+                glow = 1.0 - since / 0.55
+
         for i, value in enumerate(display_values):
-            # Simple animation: slight jitter while rolling (Monopoly-like feel).
-            jx = 0
-            jy = 0
+            jx, jy, bounce = 0, 0, 0
             if self.dice_rolling:
                 try:
-                    jx = int(6 * math.sin(now * 38.0 + i * 1.7))
-                    jy = int(6 * math.cos(now * 41.0 + i * 2.3))
+                    ph = now * 34 + i * 2.3
+                    jx = int(7 * math.sin(ph))
+                    jy = int(6 * math.cos(ph * 1.35 + 0.8))
                 except Exception:
-                    jx = jy = 0
+                    pass
+            if 0.25 < glow <= 1.0:
+                bounce = int(12 * math.sin(math.pi * (glow - 0.25) / 0.75))
 
-            dx = int(cx + (i - 0.5) * (dice_size + gap)) + jx
-            dy = int(cy) + jy
-            half = int(dice_size // 2)
-            shadow = 3
+            dx = int(cx + (i - 0.5) * (ds + gap)) + jx
+            dy = int(cy) + jy - bounce
+            half = ds // 2
 
-            # Shadow
+            def _quad(ox, oy, sz, ly, col, al):
+                x0, y0 = dx - half + ox, dy - half + oy
+                self.renderer.draw_polygon_immediate(
+                    col, [(x0, y0), (x0 + sz, y0), (x0 + sz, y0 + sz), (x0, y0 + sz)],
+                    alpha=al, layer=ly)
+
+            def _outline(ox, oy, sz, ly, col, al, lw=2):
+                x0, y0 = dx - half + ox, dy - half + oy
+                self.renderer.draw_polyline_immediate(
+                    col, [(x0, y0), (x0 + sz, y0), (x0 + sz, y0 + sz), (x0, y0 + sz)],
+                    width=lw, alpha=al, closed=True, layer=ly)
+
+            # Multi-layer shadow
+            _quad(6, 6, ds, 194, (0, 0, 0), 45)
+            _quad(3, 3, ds, 196, (0, 0, 0), 70)
+            # Die face
+            _quad(0, 0, ds, 200, (250, 250, 255), 255)
+            # Bottom shading
+            y_third = ds * 2 // 3
             self.renderer.draw_polygon_immediate(
-                (100, 100, 100),
-                [(dx - half + shadow, dy - half + shadow), (dx + half + shadow, dy - half + shadow), (dx + half + shadow, dy + half + shadow), (dx - half + shadow, dy + half + shadow)],
-                alpha=180,
-                layer=200,
-            )
-            # Face
+                (210, 210, 220),
+                [(dx - half + 2, dy - half + y_third), (dx + half - 2, dy - half + y_third),
+                 (dx + half - 2, dy + half - 2), (dx - half + 2, dy + half - 2)],
+                alpha=35, layer=202)
+            # Top highlight
             self.renderer.draw_polygon_immediate(
                 (255, 255, 255),
-                [(dx - half, dy - half), (dx + half, dy - half), (dx + half, dy + half), (dx - half, dy + half)],
-                alpha=255,
-                layer=210,
-            )
+                [(dx - half + 3, dy - half + 2), (dx + half - 3, dy - half + 2),
+                 (dx + half - 3, dy - half + 9), (dx - half + 3, dy - half + 9)],
+                alpha=140, layer=204)
             # Border
-            self.renderer.draw_polyline_immediate(
-                (0, 0, 0),
-                [(dx - half, dy - half), (dx + half, dy - half), (dx + half, dy + half), (dx - half, dy + half)],
-                width=3,
-                alpha=255,
-                closed=True,
-                layer=220,
-            )
-            self._draw_pips(int(dx), int(dy), int(dice_size), int(value), layer=230)
+            _outline(0, 0, ds, 210, (40, 40, 48), 230, 2)
+            # Inner bevel
+            _outline(4, 4, ds - 8, 212, (180, 180, 195), 55, 1)
+            # Resolve glow
+            if glow > 0:
+                ga = int(90 * glow)
+                _outline(-4, -4, ds + 8, 215, (255, 215, 0), ga, 3)
+            self._draw_pips(int(dx), int(dy), int(ds), int(value), layer=220)
 
         if isinstance(self.last_roll, int) and not self.dice_rolling:
-            # Shadow
             self.renderer.draw_text_immediate(
                 f"= {int(self.last_roll)}",
-                int(cx + dice_size + 40),
-                int(cy) + 4,
-                font_size=22,
-                color=(30, 20, 10),
-                anchor_x="left",
-                anchor_y="center",
-                alpha=160,
-                layer=239,
-            )
+                int(cx + ds + 40), int(cy) + 4,
+                font_size=22, color=(30, 20, 10),
+                anchor_x="left", anchor_y="center", alpha=160, layer=239)
             self.renderer.draw_text_immediate(
                 f"= {int(self.last_roll)}",
-                int(cx + dice_size + 38),
-                int(cy) + 2,
-                font_size=22,
-                color=(255, 235, 80),
-                anchor_x="left",
-                anchor_y="center",
-                alpha=255,
-                layer=240,
-            )
+                int(cx + ds + 38), int(cy) + 2,
+                font_size=22, color=(255, 235, 80),
+                anchor_x="left", anchor_y="center", alpha=255, layer=240)
 
     # --- Drawing ---
 
@@ -2024,8 +2032,7 @@ class CatanGame:
         # Header
         title = "Catan"
         if self.state == "playing":
-            turn = self._seat_label(int(self.current_turn_seat)) if isinstance(self.current_turn_seat, int) else "—"
-            subtitle = f"Turn: {turn}  ·  Expansion: {self.expansion_mode}  ·  Players: {len(self.active_players)}"
+            subtitle = f"Expansion: {self.expansion_mode}  ·  Players: {len(self.active_players)}"
         else:
             subtitle = "Select players in Web UI"
 

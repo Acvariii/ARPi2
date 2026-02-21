@@ -177,22 +177,6 @@ def _bg_blackjack(r, w: int, h: int) -> None:
     # Gold outer rail
     r.draw_rect((200, 158, 18), (int(pad * 0.25), int(pad * 0.25), w - int(pad * 0.5), h - int(pad * 0.5)), width=8, alpha=200)
     r.draw_rect((240, 200, 50), (int(pad * 0.55), int(pad * 0.55), w - int(pad * 1.1), h - int(pad * 1.1)), width=2, alpha=80)
-    # Corner suit symbols
-    try:
-        for sym, sx, sy, col in [
-            ("♠", int(w * 0.07), int(h * 0.09), (210, 210, 210)),
-            ("♥", int(w * 0.93), int(h * 0.09), (200, 40, 40)),
-            ("♦", int(w * 0.07), int(h * 0.91), (200, 40, 40)),
-            ("♣", int(w * 0.93), int(h * 0.91), (210, 210, 210)),
-        ]:
-            r.draw_text(sym, sx, sy, font_size=28, color=col, alpha=130, anchor_x="center", anchor_y="center")
-    except Exception:
-        pass
-    # Watermark
-    try:
-        r.draw_text("BLACKJACK", w // 2, h // 2, font_size=62, color=(0, 55, 14), alpha=35, bold=True, anchor_x="center", anchor_y="center")
-    except Exception:
-        pass
     # Chip stacks
     for cx2, cy2, col in [
         (int(w * 0.10), int(h * 0.82), (200, 30, 30)),
@@ -232,11 +216,6 @@ def _bg_texas_holdem(r, w: int, h: int) -> None:
     # Pot marker
     r.draw_circle((200, 160, 28), (w // 2, int(h * 0.62)), 16, alpha=65)
     r.draw_circle((240, 200, 60), (w // 2, int(h * 0.62)), 16, width=2, alpha=80)
-    # Watermark
-    try:
-        r.draw_text("TEXAS HOLD'EM", w // 2, int(h * 0.36), font_size=26, color=(0, 45, 10), alpha=28, bold=True, anchor_x="center", anchor_y="center")
-    except Exception:
-        pass
 
 
 def _bg_uno(r, w: int, h: int) -> None:
@@ -258,11 +237,6 @@ def _bg_uno(r, w: int, h: int) -> None:
     # Colour ring
     for col in [(220, 40, 40), (40, 180, 40), (40, 80, 220), (230, 190, 0)]:
         r.draw_circle(col, (w // 2, h // 2), int(min(w, h) * 0.30), width=4, alpha=110)
-    # Watermark
-    try:
-        r.draw_text("UNO", w // 2, h // 2, font_size=80, color=(255, 255, 255), alpha=11, bold=True, anchor_x="center", anchor_y="center")
-    except Exception:
-        pass
 
 
 def _bg_exploding_kittens(r, w: int, h: int) -> None:
@@ -279,17 +253,6 @@ def _bg_exploding_kittens(r, w: int, h: int) -> None:
         r.draw_circle((255, 220, 0), (bx, by), int(min(w, h) * 0.03), alpha=55)
     # Centre dark zone
     r.draw_circle((12, 6, 20), (w // 2, h // 2), int(min(w, h) * 0.35), alpha=90)
-    # Side cat / explosion emoji
-    try:
-        r.draw_text("🐱", int(w * 0.06), int(h * 0.50), font_size=28, color=(255, 165, 0), alpha=65, anchor_x="center", anchor_y="center")
-        r.draw_text("💥", int(w * 0.94), int(h * 0.50), font_size=28, color=(255, 120, 0), alpha=65, anchor_x="center", anchor_y="center")
-    except Exception:
-        pass
-    # Watermark
-    try:
-        r.draw_text("EXPLODING KITTENS", w // 2, h // 2, font_size=27, color=(110, 8, 0), alpha=22, bold=True, anchor_x="center", anchor_y="center")
-    except Exception:
-        pass
 
 
 def _bg_monopoly(r, w: int, h: int) -> None:
@@ -303,11 +266,6 @@ def _bg_monopoly(r, w: int, h: int) -> None:
     # Corner dots
     for cx2, cy2 in [(18, 18), (w - 18, 18), (18, h - 18), (w - 18, h - 18)]:
         r.draw_circle((22, 116, 56), (cx2, cy2), 10, alpha=150)
-    # Watermark
-    try:
-        r.draw_text("MONOPOLY", w // 2, h // 2, font_size=50, color=(18, 72, 32), alpha=16, bold=True, anchor_x="center", anchor_y="center")
-    except Exception:
-        pass
 
 
 def _bg_unstable_unicorns(r, w: int, h: int) -> None:
@@ -328,28 +286,6 @@ def _bg_unstable_unicorns(r, w: int, h: int) -> None:
     r.draw_circle((180, 80, 240), (w // 2, h // 2), int(min(w, h) * 0.40), alpha=10)
     r.draw_circle((255, 180, 100), (w // 2, h // 2), int(min(w, h) * 0.26), alpha=7)
     r.draw_circle((200, 100, 255), (w // 2, h // 2), int(min(w, h) * 0.12), alpha=9)
-    # Star sparkles
-    star_pts = [
-        (0.12, 0.20), (0.88, 0.20), (0.12, 0.80), (0.88, 0.80),
-        (0.25, 0.11), (0.75, 0.11), (0.25, 0.89), (0.75, 0.89),
-        (0.50, 0.09), (0.50, 0.91),
-    ]
-    for fx, fy in star_pts:
-        try:
-            r.draw_text("✦", int(w * fx), int(h * fy), font_size=13, color=(255, 255, 200), alpha=85, anchor_x="center", anchor_y="center")
-        except Exception:
-            pass
-    # Side unicorn emojis
-    try:
-        r.draw_text("🦄", int(w * 0.06), int(h * 0.50), font_size=30, color=(255, 200, 255), alpha=75, anchor_x="center", anchor_y="center")
-        r.draw_text("🦄", int(w * 0.94), int(h * 0.50), font_size=30, color=(255, 200, 255), alpha=75, anchor_x="center", anchor_y="center")
-    except Exception:
-        pass
-    # Watermark
-    try:
-        r.draw_text("UNSTABLE UNICORNS", w // 2, h // 2, font_size=26, color=(70, 0, 110), alpha=20, bold=True, anchor_x="center", anchor_y="center")
-    except Exception:
-        pass
 
 
 def _bg_catan(r, w: int, h: int) -> None:
@@ -366,11 +302,6 @@ def _bg_catan(r, w: int, h: int) -> None:
             hy = int(h * 0.25 + row * hs * 1.54)
             if 0 < hx < w and 0 < hy < h:
                 r.draw_circle((158, 128, 58), (hx, hy), hs - 2, width=1, alpha=28)
-    # Watermark
-    try:
-        r.draw_text("CATAN", w // 2, int(h * 0.54), font_size=60, color=(90, 65, 18), alpha=18, bold=True, anchor_x="center", anchor_y="center")
-    except Exception:
-        pass
 
 
 def _bg_risk(r, w: int, h: int) -> None:
@@ -393,11 +324,6 @@ def _bg_risk(r, w: int, h: int) -> None:
     for i in range(12):
         r.draw_line((100, 140, 200), (int(w * i / 12), 0), (int(w * i / 12), h), width=1, alpha=18)
     r.draw_rect((178, 138, 58), (0, 0, w, h), width=6, alpha=145)
-    # Watermark
-    try:
-        r.draw_text("RISK", w // 2, h // 2, font_size=80, color=(18, 38, 110), alpha=18, bold=True, anchor_x="center", anchor_y="center")
-    except Exception:
-        pass
 
 
 def _bg_cluedo(r, w: int, h: int) -> None:
@@ -418,17 +344,6 @@ def _bg_cluedo(r, w: int, h: int) -> None:
                      (int(w * 0.07), int(h * 0.93)), (int(w * 0.93), int(h * 0.93))]:
         r.draw_circle((200, 158, 28), (cx2, cy2), 11, alpha=115)
         r.draw_circle((240, 198, 58), (cx2, cy2), 7, alpha=95)
-    # Side emoji
-    try:
-        r.draw_text("🔍", int(w * 0.07), int(h * 0.50), font_size=28, color=(218, 178, 48), alpha=75, anchor_x="center", anchor_y="center")
-        r.draw_text("🕯️", int(w * 0.93), int(h * 0.50), font_size=26, color=(218, 178, 48), alpha=75, anchor_x="center", anchor_y="center")
-    except Exception:
-        pass
-    # Watermark
-    try:
-        r.draw_text("CLUEDO", w // 2, h // 2, font_size=64, color=(78, 8, 8), alpha=22, bold=True, anchor_x="center", anchor_y="center")
-    except Exception:
-        pass
 
 
 def _bg_dnd(r, w: int, h: int) -> None:
@@ -446,17 +361,6 @@ def _bg_dnd(r, w: int, h: int) -> None:
         rx = int(cx + math.cos(angle_rad) * min(w, h) * 0.38)
         ry = int(cy + math.sin(angle_rad) * min(w, h) * 0.38)
         r.draw_circle((148, 78, 218), (rx, ry), 5, alpha=88)
-    # Side emoji
-    try:
-        r.draw_text("🐉", int(w * 0.07), int(h * 0.50), font_size=30, color=(148, 78, 218), alpha=78, anchor_x="center", anchor_y="center")
-        r.draw_text("⚔️", int(w * 0.93), int(h * 0.50), font_size=28, color=(178, 148, 48), alpha=78, anchor_x="center", anchor_y="center")
-    except Exception:
-        pass
-    # Watermark
-    try:
-        r.draw_text("D&D", w // 2, h // 2, font_size=80, color=(28, 8, 58), alpha=18, bold=True, anchor_x="center", anchor_y="center")
-    except Exception:
-        pass
 
 
 def _bg_default(r, w: int, h: int) -> None:

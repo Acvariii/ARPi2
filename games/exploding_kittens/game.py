@@ -1089,11 +1089,6 @@ class ExplodingKittensGame:
             if is_turn:
                 self.renderer.draw_rect(outline, (int(rx - 2), int(ry - 2), int(rw + 4), int(rh + 4)), width=2, alpha=50)
             self.renderer.draw_rect(outline, (int(rx), int(ry), int(rw), int(rh)), width=2 if is_turn else 1, alpha=200)
-            # Cat emoji watermark
-            self.renderer.draw_text(
-                "😺", int(rx + rw / 2), int(ry + rh / 2 + 12),
-                font_size=18, color=(200, 200, 200), anchor_x="center", anchor_y="center", alpha=40,
-            )
             # Count badge
             self.renderer.draw_text(
                 str(count), int(rx + rw / 2), int(ry + rh / 2 - 4),

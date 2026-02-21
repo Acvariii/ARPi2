@@ -2480,6 +2480,24 @@ class RiskGame:
                 self.buttons[seat]["end_turn"] = _WebButton("Deploying", enabled=False)
                 continue
 
+            # Defend-choose: defender acts regardless of whose "turn" it is.
+            if self.phase == "defend_choose":
+                is_def = isinstance(self._defend_pending_seat, int) and int(seat) == int(self._defend_pending_seat)
+                pend = dict(self._pending_attack or {})
+                max_d = 1
+                if pend:
+                    try:
+                        max_d = max(1, min(2, int(pend.get("max_d", 1) or 1)))
+                    except Exception:
+                        max_d = 1
+                d_choice = _clamp_int(int(self._defend_dice_choice or max_d), 1, int(max_d))
+                self.buttons[seat]["defend_dice_1"] = _WebButton("D Dice: 1", enabled=is_def and max_d >= 1)
+                self.buttons[seat]["defend_dice_2"] = _WebButton("D Dice: 2", enabled=is_def and max_d >= 2)
+                self.buttons[seat]["defend_confirm"] = _WebButton(f"Defend ({d_choice})", enabled=is_def)
+                if not is_def:
+                    self.buttons[seat]["end_turn"] = _WebButton("Waiting for Defender", enabled=False)
+                continue
+
             is_turn = self._is_my_turn(seat)
             if not is_turn:
                 self.buttons[seat]["end_turn"] = _WebButton("Waiting", enabled=False)
@@ -2525,22 +2543,6 @@ class RiskGame:
                 self.buttons[seat]["attack"] = _WebButton(f"Attack ({a_choice}v{d_choice})", enabled=can_attack)
                 self.buttons[seat]["attack_back"] = _WebButton("Change Attack From", enabled=True)
                 self.buttons[seat]["end_attack"] = _WebButton("End Attack", enabled=True)
-            elif self.phase == "defend_choose":
-                # Only the defender chooses dice; others wait.
-                is_def = isinstance(self._defend_pending_seat, int) and int(seat) == int(self._defend_pending_seat)
-                pend = dict(self._pending_attack or {})
-                max_d = 1
-                if pend:
-                    try:
-                        max_d = max(1, min(2, int(pend.get("max_d", 1) or 1)))
-                    except Exception:
-                        max_d = 1
-                d_choice = _clamp_int(int(self._defend_dice_choice or max_d), 1, int(max_d))
-                self.buttons[seat]["defend_dice_1"] = _WebButton("D Dice: 1", enabled=is_def and max_d >= 1)
-                self.buttons[seat]["defend_dice_2"] = _WebButton("D Dice: 2", enabled=is_def and max_d >= 2)
-                self.buttons[seat]["defend_confirm"] = _WebButton(f"Defend ({d_choice})", enabled=is_def)
-                if not is_def:
-                    self.buttons[seat]["end_turn"] = _WebButton("Waiting for Defender", enabled=False)
             elif self.phase == "conquer_move":
                 # Require resolving move-in after conquest.
                 can_confirm = bool(
@@ -2870,33 +2872,36 @@ class RiskGame:
                         label, x, y, font_size=13, color=col,
                         anchor_x=align, anchor_y="top", bold=True,
                     )
-                    # Square dice
-                    ds = 26  # die size
-                    gap = 4
-                    dx = -(ds + gap) if align == "right" else (ds + gap)
-                    cx = x - ds // 2 if align == "right" else x - ds // 2
-                    cy = y + 20
+                    # Square dice with pips
+                    ds = 28
+                    die_gap = 5
+                    step = -(ds + die_gap) if align == "right" else (ds + die_gap)
+                    bx = x - ds // 2 if align == "right" else x - ds // 2
+                    by = y + 22
                     for r in rolls:
-                        ix, iy = int(cx), int(cy)
+                        ix, iy = int(bx), int(by)
+                        dcx, dcy = ix + ds // 2, iy + ds // 2
                         # Shadow
-                        self.renderer.draw_rect((0, 0, 0), (ix + 3, iy + 3, ds, ds), width=0, alpha=90)
-                        # White face
-                        self.renderer.draw_rect((255, 255, 255), (ix, iy, ds, ds), width=0, alpha=240)
+                        self.renderer.draw_rect((0, 0, 0), (ix + 3, iy + 3, ds, ds), alpha=60)
+                        # Die face
+                        self.renderer.draw_rect((250, 250, 255), (ix, iy, ds, ds), alpha=250)
+                        # Top highlight
+                        self.renderer.draw_rect((255, 255, 255), (ix + 2, iy + 2, ds - 4, 4), alpha=120)
                         # Coloured border
                         self.renderer.draw_rect(col, (ix, iy, ds, ds), width=2, alpha=220)
-                        # Inner highlight
-                        self.renderer.draw_rect((255, 255, 255), (ix + 2, iy + 2, ds - 4, 3), width=0, alpha=100)
-                        # Value text (shadow + bright)
-                        tx, ty = ix + ds // 2, iy + ds // 2
-                        self.renderer.draw_text(
-                            str(int(r)), tx + 1, ty + 1, font_size=14,
-                            color=(0, 0, 0), anchor_x="center", anchor_y="center", bold=True,
-                        )
-                        self.renderer.draw_text(
-                            str(int(r)), tx, ty, font_size=14,
-                            color=(40, 40, 40), anchor_x="center", anchor_y="center", bold=True,
-                        )
-                        cx += dx
+                        # Pips
+                        pr = max(2, ds // 9)
+                        po = ds // 4
+                        _pm = {1: [(0, 0)], 2: [(-po, -po), (po, po)],
+                               3: [(-po, -po), (0, 0), (po, po)],
+                               4: [(-po, -po), (po, -po), (-po, po), (po, po)],
+                               5: [(-po, -po), (po, -po), (0, 0), (-po, po), (po, po)],
+                               6: [(-po, -po), (po, -po), (-po, 0), (po, 0), (-po, po), (po, po)]}
+                        for pdx, pdy in _pm.get(int(r), []):
+                            px, py = dcx + pdx, dcy + pdy
+                            self.renderer.draw_circle((0, 0, 0), (px + 1, py + 1), pr, alpha=40)
+                            self.renderer.draw_circle((15, 15, 22), (px, py), pr, alpha=245)
+                        bx += step
 
                 y = int(map_y + 8)
                 _draw_dice_block(int(map_x + 28), y, int(a_seat) if isinstance(a_seat, int) else None, a_roll, "left")
@@ -3116,6 +3121,33 @@ class RiskGame:
                 font_size=12, color=(200, 200, 210),
                 anchor_x="left", anchor_y="center",
             )
+
+        # Defend-choose overlay — prominent banner so spectators see the wait
+        if self.phase == "defend_choose" and isinstance(getattr(self, '_defend_pending_seat', None), int):
+            try:
+                dname = self._seat_label(int(self._defend_pending_seat))
+                dcol = PLAYER_COLORS[int(self._defend_pending_seat) % len(PLAYER_COLORS)]
+                ow, oh = 360, 56
+                ox = (int(self.width) - ow) // 2
+                oy = int(self.height) // 2 - oh // 2
+                self.renderer.draw_rect((0, 0, 0), (ox + 5, oy + 5, ow, oh), alpha=100)
+                self.renderer.draw_rect((10, 10, 18), (ox, oy, ow, oh), alpha=225)
+                self.renderer.draw_rect(dcol, (ox, oy, ow, oh), width=3, alpha=180)
+                self.renderer.draw_circle(dcol, (ox + ow // 2, oy + oh // 2), 26, alpha=14)
+                self.renderer.draw_text(
+                    f"\u2694\uFE0F  {dname}: Choose Defense Dice",
+                    ox + ow // 2 + 1, oy + oh // 2 + 1,
+                    font_size=16, color=(0, 0, 0),
+                    anchor_x="center", anchor_y="center", bold=True,
+                )
+                self.renderer.draw_text(
+                    f"\u2694\uFE0F  {dname}: Choose Defense Dice",
+                    ox + ow // 2, oy + oh // 2,
+                    font_size=16, color=(255, 230, 140),
+                    anchor_x="center", anchor_y="center", bold=True,
+                )
+            except Exception:
+                pass
 
         # ── Animation render layer ──────────────────────────────────────────
         try:

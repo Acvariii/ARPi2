@@ -5,7 +5,8 @@ Carbon copy of Pygame version with full UI and game logic
 
 import time
 import random
-from typing import List, Dict, Tuple, Optional
+import math
+from typing import List, Dict, Tuple, Optional, Callable
 from core.renderer import PygletRenderer
 from config import PLAYER_COLORS, Colors, HOVER_TIME_THRESHOLD
 from games.monopoly.data import (
@@ -115,6 +116,8 @@ class MonopolyGame:
         # Pyglet UX: transient transaction messages (shown near the dice).
         # List[Dict]: {"text": str, "color": (r,g,b), "ts": float, "ttl": float}
         self._toasts: List[Dict] = []
+        # Sparkle particles around toasts: [{"x", "y", "vx", "vy", "ts", "ttl", "size", "color"}]
+        self._toast_sparkles: List[Dict] = []
 
         # Auto-close timer for Chance/Community Chest card popups.
         self._card_popup_auto_close_at: Optional[float] = None
@@ -141,6 +144,13 @@ class MonopolyGame:
         self._flashes: list = []
         self._anim_prev_game_over = False
         self._anim_fw_timer: float = 0.0
+
+        # ── Name provider ───────────────────────────────────────────────
+        self._seat_name_provider: Optional[Callable[[int], str]] = None
+
+        # ── Dice fly-in animation ───────────────────────────────────────
+        self._dice_fly_start: float = 0.0
+        self._dice_fly_from: Tuple[int, int] = (0, 0)
     
     def _calculate_board_geometry(self):
         """Calculate board position"""
@@ -157,6 +167,22 @@ class MonopolyGame:
         
         self.board_rect = (x, y, size, size)
         self._calculate_spaces()
+
+    # ── Name provider ───────────────────────────────────────────────────
+
+    def set_name_provider(self, provider: Optional[Callable[[int], str]]) -> None:
+        self._seat_name_provider = provider
+
+    def _seat_label(self, seat) -> str:
+        """Return a short display name for a player seat."""
+        if not isinstance(seat, int):
+            return "—"
+        if self._seat_name_provider:
+            try:
+                return str(self._seat_name_provider(int(seat)))
+            except Exception:
+                pass
+        return f"Player {int(seat) + 1}"
     
     def _calculate_spaces(self):
         """Calculate all 40 space positions"""
@@ -361,9 +387,9 @@ class MonopolyGame:
 
         try:
             if isinstance(owed_to_idx, int) and 0 <= owed_to_idx < len(self.players):
-                self._push_toast(f"P{pidx + 1} paid ${amt} to P{owed_to_idx + 1}")
+                self._push_toast(f"{self._seat_label(pidx)} paid ${amt} to {self._seat_label(owed_to_idx)}")
             else:
-                self._push_toast(f"P{pidx + 1} paid ${amt}")
+                self._push_toast(f"{self._seat_label(pidx)} paid ${amt}")
         except Exception:
             pass
 
@@ -409,7 +435,7 @@ class MonopolyGame:
                     if new_pos < old_pos:
                         player.add_money(PASSING_GO_MONEY)
                         try:
-                            self._push_toast(f"P{player.idx + 1} received ${PASSING_GO_MONEY} (Go)")
+                            self._push_toast(f"{self._seat_label(player.idx)} received ${PASSING_GO_MONEY} (Go)")
                         except Exception:
                             pass
                     self._pending_land_player_idx = int(player.idx)
@@ -859,6 +885,14 @@ class MonopolyGame:
                 player.in_jail = False
                 player.jail_turns = 0
                 self._restore_default_buttons(player_idx)
+                # 🔓 Paid to leave jail animation
+                try:
+                    sx, sy, sw, sh = self.spaces[JAIL_POSITION]
+                    jpx, jpy = sx + sw // 2, sy + sh // 2
+                    self._text_pops.append(TextPopAnim("🔓 $50 Bail!", jpx, jpy - 30, (80, 220, 120), font_size=22))
+                    self._pulse_rings.append(PulseRing(jpx, jpy, (80, 220, 120), max_radius=50, duration=0.5))
+                except Exception:
+                    pass
             else:
                 # Prevent non-current players from opening props during game-critical popups
                 if self.popup.active and self.popup.popup_type in ["buy_prompt", "card"]:
@@ -873,6 +907,14 @@ class MonopolyGame:
                 player.in_jail = False
                 player.jail_turns = 0
                 self._restore_default_buttons(player_idx)
+                # 🔓 Used card to leave jail animation
+                try:
+                    sx, sy, sw, sh = self.spaces[JAIL_POSITION]
+                    jpx, jpy = sx + sw // 2, sy + sh // 2
+                    self._text_pops.append(TextPopAnim("🔓 Card Used!", jpx, jpy - 30, (80, 220, 120), font_size=22))
+                    self._pulse_rings.append(PulseRing(jpx, jpy, (80, 220, 120), max_radius=50, duration=0.5))
+                except Exception:
+                    pass
             else:
                 self._start_trade(player)
     
@@ -1054,11 +1096,26 @@ class MonopolyGame:
                         prop.houses = 5
                         self.hotels_remaining -= 1
                         self.houses_remaining += 4
+                        # 🏨 Hotel animation
+                        try:
+                            sx, sy, sw, sh = self.spaces[position]
+                            bpx, bpy = sx + sw // 2, sy + sh // 2
+                            self._text_pops.append(TextPopAnim("🏨 Hotel!", bpx, bpy - 25, (255, 50, 50), font_size=20))
+                            self._pulse_rings.append(PulseRing(bpx, bpy, (255, 50, 50), max_radius=50, duration=0.6))
+                        except Exception:
+                            pass
                     elif prop.houses < 4 and self.houses_remaining > 0:
                         # Building house
                         player.remove_money(house_cost)
                         prop.houses += 1
                         self.houses_remaining -= 1
+                        # 🏠 House animation
+                        try:
+                            sx, sy, sw, sh = self.spaces[position]
+                            bpx, bpy = sx + sw // 2, sy + sh // 2
+                            self._text_pops.append(TextPopAnim(f"🏠 House {prop.houses}", bpx, bpy - 25, (50, 180, 50), font_size=18))
+                        except Exception:
+                            pass
                     self._show_build_prompt(player, position)  # Refresh popup
             elif popup_type == "mortgage":
                 # Mortgage or Unmortgage button
@@ -1100,10 +1157,23 @@ class MonopolyGame:
                             prop.houses = 5
                             self.hotels_remaining -= 1
                             self.houses_remaining += 4
+                            try:
+                                sx, sy, sw, sh = self.spaces[prop_idx]
+                                bpx, bpy = sx + sw // 2, sy + sh // 2
+                                self._text_pops.append(TextPopAnim("🏨 Hotel!", bpx, bpy - 25, (255, 50, 50), font_size=20))
+                                self._pulse_rings.append(PulseRing(bpx, bpy, (255, 50, 50), max_radius=50, duration=0.6))
+                            except Exception:
+                                pass
                         elif houses < 4 and self.houses_remaining > 0:
                             player.remove_money(int(house_cost or 0))
                             prop.houses += 1
                             self.houses_remaining -= 1
+                            try:
+                                sx, sy, sw, sh = self.spaces[prop_idx]
+                                bpx, bpy = sx + sw // 2, sy + sh // 2
+                                self._text_pops.append(TextPopAnim(f"🏠 House {prop.houses}", bpx, bpy - 25, (50, 180, 50), font_size=18))
+                            except Exception:
+                                pass
                         self._show_mortgage_detail(player)
                     elif houses == 0 and can_build:
                         # Build a house
@@ -1331,6 +1401,27 @@ class MonopolyGame:
         self.dice_roll_start = time.time()
         self.can_roll = False
 
+        # ── Dice fly-in: determine origin based on current player's board side ──
+        try:
+            bx, by, bw, bh = self.board_rect
+            cx_b, cy_b = bx + bw // 2, by + bh // 2
+            pidx = self.active_players[self.current_player_idx]
+            side = PlayerPanel.POSITIONS.get(pidx, ("bottom", 0, 0))[0]
+            if side == "bottom":
+                self._dice_fly_from = (cx_b, by + bh + 60)
+            elif side == "top":
+                self._dice_fly_from = (cx_b, by - 60)
+            elif side == "left":
+                self._dice_fly_from = (bx - 60, cy_b)
+            elif side == "right":
+                self._dice_fly_from = (bx + bw + 60, cy_b)
+            else:
+                self._dice_fly_from = (cx_b, by + bh + 60)
+            self._dice_fly_start = time.time()
+        except Exception:
+            self._dice_fly_from = (0, 0)
+            self._dice_fly_start = 0.0
+
         # Ensure the UI label flips immediately (Web UI snapshots are async).
         self._sync_default_action_button_text()
     
@@ -1372,11 +1463,7 @@ class MonopolyGame:
                         _FW_COLORS)
                 self._flashes.append(ScreenFlash((255, 220, 80), 80, 1.2))
                 if isinstance(self.winner_idx, int) and self.winner_idx < len(self.players):
-                    _wname = f"P{self.winner_idx + 1}"
-                    try:
-                        _wname = self.players[self.winner_idx].name
-                    except Exception:
-                        pass
+                    _wname = self._seat_label(self.winner_idx)
                     self._text_pops.append(TextPopAnim(f"🏆 {_wname} wins!", _cx, _cy - 70, (255, 220, 80), font_size=40))
                 self._anim_fw_timer = 8.0
             if not _is_win:
@@ -1469,6 +1556,14 @@ class MonopolyGame:
                         current.in_jail = False
                         current.jail_turns = 0
                         current.consecutive_doubles = 0  # Don't count jail doubles
+                        # 🔓 Jail escape animation
+                        try:
+                            sx, sy, sw, sh = self.spaces[JAIL_POSITION]
+                            jpx, jpy = sx + sw // 2, sy + sh // 2
+                            self._text_pops.append(TextPopAnim("🔓 FREE!", jpx, jpy - 30, (80, 220, 120), font_size=24))
+                            self._pulse_rings.append(PulseRing(jpx, jpy, (80, 220, 120), max_radius=55, duration=0.5))
+                        except Exception:
+                            pass
                         
                         spaces = sum(self.dice_values)
                         old_pos = current.position
@@ -1525,6 +1620,14 @@ class MonopolyGame:
                         current.in_jail = True
                         current.jail_turns = 0
                         current.consecutive_doubles = 0
+                        # 🔒 Third doubles → jail animation
+                        try:
+                            sx, sy, sw, sh = self.spaces[JAIL_POSITION]
+                            jpx, jpy = sx + sw // 2, sy + sh // 2
+                            self._text_pops.append(TextPopAnim("🔒 3× DOUBLES!", jpx, jpy - 30, (255, 80, 80), font_size=24))
+                            self._flashes.append(ScreenFlash((200, 60, 60), 40, 0.4))
+                        except Exception:
+                            pass
                         self.advance_turn()
                         return
                 else:
@@ -1867,7 +1970,7 @@ class MonopolyGame:
         
         text_lines = [
             ("Select Trade Partner", 14, (255, 255, 255)),
-            (f"Player {partner_idx + 1}", 12, PLAYER_COLORS[partner_idx]),
+            (f"{self._seat_label(partner_idx)}", 12, PLAYER_COLORS[partner_idx]),
             (f"${partner.money}", 10, (100, 255, 100)),
             (f"{len(partner.properties)} Properties", 10, (200, 200, 200)),
         ]
@@ -1954,7 +2057,7 @@ class MonopolyGame:
             giving += f" + {len(self.trade_request['properties'])} prop(s)"
         
         text_lines = [
-            (f"P{initiator.idx + 1} offers trade", 14, PLAYER_COLORS[initiator.idx]),
+            (f"{self._seat_label(initiator.idx)} offers trade", 14, PLAYER_COLORS[initiator.idx]),
             (f"You get: {getting}", 10, (100, 255, 100)),
             (f"You give: {giving}", 10, (255, 100, 100)),
             ("Accept or Decline?", 9, (200, 200, 200)),
@@ -1996,7 +2099,7 @@ class MonopolyGame:
 
         panel = self.panels[partner.idx]
         text_lines = [
-            (f"P{initiator.idx + 1} offers a trade", 14, PLAYER_COLORS[initiator.idx]),
+            (f"{self._seat_label(initiator.idx)} offers a trade", 14, PLAYER_COLORS[initiator.idx]),
             ("Review in the Web UI", 9, (200, 200, 200)),
         ]
 
@@ -2106,7 +2209,7 @@ class MonopolyGame:
         request_prop_idxs = list(self.trade_request["properties"])
         
         text_lines = [
-            (f"P{initiator.idx + 1}'s Offer", 12, PLAYER_COLORS[initiator.idx]),
+            (f"{self._seat_label(initiator.idx)}'s Offer", 12, PLAYER_COLORS[initiator.idx]),
             (f"${self.trade_offer['money']}", 10, (100, 255, 100)),
         ]
         if offer_prop_idxs:
@@ -2200,6 +2303,17 @@ class MonopolyGame:
                 initiator.properties.append(prop_idx)
                 self.properties[prop_idx].owner = initiator.idx
 
+        # 🤝 Trade completed animation
+        try:
+            bx, by, bw, bh = self.board_rect
+            tcx, tcy = bx + bw // 2, by + bh // 2
+            self._push_toast(f"🤝 {self._seat_label(initiator.idx)} traded with {self._seat_label(partner.idx)}", (120, 255, 180), 4.0)
+            self._text_pops.append(TextPopAnim("🤝 Trade!", tcx, tcy - 30, (120, 255, 180), font_size=26))
+            self._pulse_rings.append(PulseRing(tcx, tcy, (120, 255, 180), max_radius=80, duration=0.7))
+            self._particles.emit_sparkle(tcx, tcy, (120, 255, 180))
+        except Exception:
+            pass
+
         return True
     
     def _land_on_space(self, player: Player):
@@ -2207,7 +2321,7 @@ class MonopolyGame:
         if GameLogic.check_passed_go(player):
             player.add_money(PASSING_GO_MONEY)
             try:
-                self._push_toast(f"P{player.idx + 1} received ${PASSING_GO_MONEY} (Go)")
+                self._push_toast(f"{self._seat_label(player.idx)} received ${PASSING_GO_MONEY} (Go)")
             except Exception:
                 pass
             # 🎉 Pass Go animation
@@ -2227,7 +2341,7 @@ class MonopolyGame:
         if space_type == "go":
             player.add_money(PASSING_GO_MONEY)
             try:
-                self._push_toast(f"P{player.idx + 1} received ${PASSING_GO_MONEY} (Go)")
+                self._push_toast(f"{self._seat_label(player.idx)} received ${PASSING_GO_MONEY} (Go)")
             except Exception:
                 pass
             # Land directly on Go = double celebration
@@ -2279,7 +2393,7 @@ class MonopolyGame:
             if player.money >= tax_amount and player.remove_money(tax_amount):
                 self.free_parking_pot += tax_amount
                 try:
-                    self._push_toast(f"P{player.idx + 1} paid ${tax_amount} (Tax)")
+                    self._push_toast(f"{self._seat_label(player.idx)} paid ${tax_amount} (Tax)")
                 except Exception:
                     pass
                 # 💸 Tax animation
@@ -2306,7 +2420,7 @@ class MonopolyGame:
             if player.money >= tax_amount and player.remove_money(tax_amount):
                 self.free_parking_pot += tax_amount
                 try:
-                    self._push_toast(f"P{player.idx + 1} paid ${tax_amount} (Tax)")
+                    self._push_toast(f"{self._seat_label(player.idx)} paid ${tax_amount} (Tax)")
                 except Exception:
                     pass
                 # 💸 Tax animation
@@ -2334,7 +2448,7 @@ class MonopolyGame:
                 player.add_money(self.free_parking_pot)
                 self.free_parking_pot = 0
                 try:
-                    self._push_toast(f"P{player.idx + 1} received ${pot} (Free Parking)")
+                    self._push_toast(f"{self._seat_label(player.idx)} received ${pot} (Free Parking)")
                 except Exception:
                     pass
                 # 🎉 Free Parking jackpot
@@ -2496,7 +2610,18 @@ class MonopolyGame:
             winner.properties.append(self.auction_property)
             try:
                 prop = self.properties[self.auction_property]
-                self._push_toast(f"P{winner.idx + 1} bought {prop.data.get('name', 'Property')} for ${self.auction_current_bid}")
+                self._push_toast(f"{self._seat_label(winner.idx)} bought {prop.data.get('name', 'Property')} for ${self.auction_current_bid}")
+            except Exception:
+                pass
+            # ✨ Auction win animation
+            try:
+                sx, sy, sw, sh = self.spaces[self.auction_property]
+                px, py = sx + sw // 2, sy + sh // 2
+                pcol = PLAYER_COLORS[winner.idx % len(PLAYER_COLORS)]
+                self._pulse_rings.append(PulseRing(px, py, pcol, max_radius=70, duration=0.8))
+                prop_name = prop.data.get('name', 'Property')
+                self._text_pops.append(TextPopAnim(f"🏠 {prop_name}!", px, py - 25, pcol, font_size=20))
+                self._particles.emit_sparkle(px, py, pcol)
             except Exception:
                 pass
         
@@ -2556,7 +2681,7 @@ class MonopolyGame:
             space.owner = player.idx
             player.properties.append(position)
             try:
-                self._push_toast(f"P{player.idx + 1} bought {space.data.get('name', 'Property')} for ${price}")
+                self._push_toast(f"{self._seat_label(player.idx)} bought {space.data.get('name', 'Property')} for ${price}")
             except Exception:
                 pass
             # ✨ Property purchase animations
@@ -2594,7 +2719,7 @@ class MonopolyGame:
         if player.money >= rent and player.remove_money(rent):
             owner.add_money(rent)
             try:
-                self._push_toast(f"P{player.idx + 1} paid ${rent} to P{owner.idx + 1}")
+                self._push_toast(f"{self._seat_label(player.idx)} paid ${rent} to {self._seat_label(owner.idx)}")
             except Exception:
                 pass
             # 💸 Rent animations
@@ -2723,7 +2848,7 @@ class MonopolyGame:
             if amount > 0:
                 player.add_money(amount)
                 try:
-                    self._push_toast(f"P{player.idx + 1} received ${amount} (Card)")
+                    self._push_toast(f"{self._seat_label(player.idx)} received ${amount} (Card)")
                 except Exception:
                     pass
             else:
@@ -2731,7 +2856,7 @@ class MonopolyGame:
                 # Add fines to Free Parking pot
                 self.free_parking_pot += abs(amount)
                 try:
-                    self._push_toast(f"P{player.idx + 1} paid ${abs(amount)} (Card)")
+                    self._push_toast(f"{self._seat_label(player.idx)} paid ${abs(amount)} (Card)")
                 except Exception:
                     pass
         
@@ -2745,7 +2870,7 @@ class MonopolyGame:
             if collect_go and position < old_pos:
                 player.add_money(PASSING_GO_MONEY)
                 try:
-                    self._push_toast(f"P{player.idx + 1} received ${PASSING_GO_MONEY} (Go)")
+                    self._push_toast(f"{self._seat_label(player.idx)} received ${PASSING_GO_MONEY} (Go)")
                 except Exception:
                     pass
             
@@ -2795,7 +2920,7 @@ class MonopolyGame:
             if nearest < old_pos:
                 player.add_money(PASSING_GO_MONEY)
                 try:
-                    self._push_toast(f"P{player.idx + 1} received ${PASSING_GO_MONEY} (Go)")
+                    self._push_toast(f"{self._seat_label(player.idx)} received ${PASSING_GO_MONEY} (Go)")
                 except Exception:
                     pass
             
@@ -2816,7 +2941,7 @@ class MonopolyGame:
                     total += int(transfer)
             if total > 0:
                 try:
-                    self._push_toast(f"P{player.idx + 1} received ${total} (from players)")
+                    self._push_toast(f"{self._seat_label(player.idx)} received ${total} (from players)")
                 except Exception:
                     pass
         
@@ -2839,7 +2964,7 @@ class MonopolyGame:
                         total += int(payment)
             if total > 0:
                 try:
-                    self._push_toast(f"P{player.idx + 1} paid ${total} (to players)")
+                    self._push_toast(f"{self._seat_label(player.idx)} paid ${total} (to players)")
                 except Exception:
                     pass
         
@@ -2864,7 +2989,7 @@ class MonopolyGame:
             self.free_parking_pot += total_cost
             if total_cost > 0:
                 try:
-                    self._push_toast(f"P{player.idx + 1} paid ${total_cost} (Repairs)")
+                    self._push_toast(f"{self._seat_label(player.idx)} paid ${total_cost} (Repairs)")
                 except Exception:
                     pass
     
@@ -3235,9 +3360,10 @@ class MonopolyGame:
                         lines = lines[:4]
 
                         bw2 = int(bw * 0.56)
-                        bh2 = int(bh * 0.18)
+                        bh2 = int(bh * 0.15)
                         x2 = bx + (bw - bw2) // 2
-                        y2 = by + (bh - bh2) // 2
+                        # Place ABOVE the dice/toast centre – top quarter of the inner board
+                        y2 = by + int(bh * 0.22) + bh2 // 2
 
                         self.renderer.draw_rect((255, 255, 240, 235), (x2, y2, bw2, bh2))
                         self.renderer.draw_rect((80, 80, 80), (x2, y2, bw2, bh2), width=2)
@@ -3371,33 +3497,69 @@ class MonopolyGame:
             self.renderer.draw_circle_immediate((0, 0, 0), (cx, cy), 16, width=2)
     
     def _draw_dice(self):
-        """Draw dice with shadow, highlight, and animation."""
+        """Draw stylish 3D dice with fly-in from player's side, jitter, and resolve glow."""
         bx, by, bw, bh = self.board_rect
         cx, cy = bx + bw // 2, by + bh // 2
-
         dice_size = 64
         gap = 18
+        now = time.time()
 
         if self.dice_rolling:
             display_values = (random.randint(1, 6), random.randint(1, 6))
         else:
             display_values = self.dice_values
 
-        for i, value in enumerate(display_values):
-            dx = int(cx + (i - 0.5) * (dice_size + gap))
-            dy = cy
+        # ── Fly-in interpolation ────────────────────────────────────────
+        fly_t = 1.0  # fully arrived by default
+        fly_dur = 0.35  # seconds for fly-in
+        fly_from = getattr(self, "_dice_fly_from", (cx, cy))
+        fly_start = getattr(self, "_dice_fly_start", 0.0)
+        if fly_start > 0 and now - fly_start < fly_dur:
+            raw = (now - fly_start) / fly_dur
+            # ease-out cubic
+            fly_t = 1.0 - (1.0 - raw) ** 3
 
+        fly_cx = int(fly_from[0] + (cx - fly_from[0]) * fly_t)
+        fly_cy = int(fly_from[1] + (cy - fly_from[1]) * fly_t)
+
+        # ── Resolve glow: golden flash when dice just stopped ───────────
+        glow = 0.0
+        if not self.dice_rolling and self.dice_values != (0, 0):
+            since = now - (self.dice_roll_start + 1.2)
+            if 0 <= since < 0.55:
+                glow = 1.0 - since / 0.55
+
+        for i, value in enumerate(display_values):
+            jx, jy, bounce = 0, 0, 0
+            if self.dice_rolling:
+                ph = now * 34 + i * 2.3
+                jx = int(6 * math.sin(ph))
+                jy = int(5 * math.cos(ph * 1.35 + 0.8))
+            if 0.25 < glow <= 1.0:
+                bounce = int(10 * math.sin(math.pi * (glow - 0.25) / 0.75))
+
+            dx = int(fly_cx + (i - 0.5) * (dice_size + gap)) + jx
+            dy = fly_cy + jy - bounce
             hx = dx - dice_size // 2
             hy = dy - dice_size // 2
 
-            # Shadow
-            self.renderer.draw_rect((0, 0, 0), (hx + 4, hy + 4, dice_size, dice_size), alpha=70)
-            # Die body
-            self.renderer.draw_rect((255, 255, 255), (hx, hy, dice_size, dice_size))
-            # Inner highlight
-            self.renderer.draw_rect((245, 245, 250), (hx + 3, hy + dice_size - 8, dice_size - 6, 5), alpha=60)
+            # Multi-layer shadow
+            self.renderer.draw_rect((0, 0, 0), (hx + 6, hy + 6, dice_size, dice_size), alpha=45)
+            self.renderer.draw_rect((0, 0, 0), (hx + 3, hy + 3, dice_size, dice_size), alpha=70)
+            # Die face
+            self.renderer.draw_rect((250, 250, 255), (hx, hy, dice_size, dice_size), alpha=255)
+            # Bottom shading
+            self.renderer.draw_rect((210, 210, 220), (hx + 2, hy + dice_size * 2 // 3, dice_size - 4, dice_size // 3 - 2), alpha=35)
+            # Top highlight
+            self.renderer.draw_rect((255, 255, 255), (hx + 3, hy + 2, dice_size - 6, 7), alpha=140)
             # Border
-            self.renderer.draw_rect((60, 60, 60), (hx, hy, dice_size, dice_size), width=3)
+            self.renderer.draw_rect((40, 40, 48), (hx, hy, dice_size, dice_size), width=2, alpha=230)
+            # Inner bevel
+            self.renderer.draw_rect((180, 180, 195), (hx + 4, hy + 4, dice_size - 8, dice_size - 8), width=1, alpha=55)
+            # Resolve glow
+            if glow > 0:
+                ga = int(90 * glow)
+                self.renderer.draw_rect((255, 215, 0), (hx - 4, hy - 4, dice_size + 8, dice_size + 8), width=3, alpha=ga)
 
             self._draw_pips(dx, dy, dice_size, value)
 
@@ -3420,11 +3582,13 @@ class MonopolyGame:
             return
 
     def _draw_toasts(self) -> None:
+        """Draw transaction toasts below the dice – big, cinematic, sparkly."""
         try:
             toasts = list(getattr(self, "_toasts", []) or [])
-            if not toasts:
-                return
             now = float(time.time())
+            sparkles = getattr(self, "_toast_sparkles", [])
+
+            # Prune expired toasts
             alive: List[Dict] = []
             for t in toasts:
                 try:
@@ -3433,32 +3597,129 @@ class MonopolyGame:
                 except Exception:
                     continue
             self._toasts = alive
-            if not alive:
+
+            # Prune expired sparkles
+            sparkles = [s for s in sparkles if now - s["ts"] < s["ttl"]]
+            self._toast_sparkles = sparkles
+
+            if not alive and not sparkles:
                 return
 
             bx, by, bw, bh = self.board_rect
-            cx, cy = bx + bw // 2, by + bh // 2
-            base_y = cy + 70
+            cx = bx + bw // 2
+            cy = by + bh // 2
 
-            for i, t in enumerate(reversed(alive)):
+            # ── Dark overlay across the ENTIRE screen ──────────────────
+            if alive:
+                newest_age = min(now - float(t.get("ts", now)) for t in alive)
+                oldest_remain = min(float(t.get("ttl", 3.0)) - (now - float(t.get("ts", now))) for t in alive)
+                dim_in = min(1.0, newest_age / 0.12)  # fade-in 0.12s
+                dim_out = min(1.0, oldest_remain / 0.4) if oldest_remain < 0.4 else 1.0
+                dim_alpha = int(100 * dim_in * dim_out)
+                if dim_alpha > 1:
+                    self.renderer.draw_rect((0, 0, 0), (0, 0, self.width, self.height), alpha=dim_alpha)
+
+            # ── Layout constants ───────────────────────────────────────
+            base_y = cy + 55
+            max_visible = 4
+            row_h = 22  # half-height rows – compact vertical stacking
+            font_size = 20  # bigger text
+            slide_in_dur = 0.28  # seconds
+            slide_out_dur = 0.35
+            slide_dist = self.width // 2 + 120  # full screen slide distance
+
+            for i, t in enumerate(reversed(alive[-max_visible:])):
                 text = str(t.get("text", ""))
                 color = t.get("color", (255, 255, 255))
-                y = base_y + (i * 26)
-                tw = min(int(bw * 0.6), max(200, len(text) * 9))
-                th = 22
-                tx = cx - tw // 2
-                self.renderer.draw_rect((0, 0, 0), (tx, y - th // 2, tw, th), alpha=140)
-                self.renderer.draw_rect((200, 170, 40), (tx, y - th // 2, tw, th), width=1, alpha=60)
+                age = now - float(t.get("ts", now))
+                ttl = float(t.get("ttl", 3.0))
+                remain = ttl - age
+
+                # ── Slide-in from the LEFT (ease-out cubic) ────────────
+                slide_x = 0.0
+                alpha_mult = 1.0
+                if age < slide_in_dur:
+                    raw = age / slide_in_dur
+                    ease = 1.0 - (1.0 - raw) ** 3
+                    slide_x = -(1.0 - ease) * slide_dist
+                # ── Slide-out to the RIGHT (ease-in quad) ──────────────
+                elif remain < slide_out_dur:
+                    raw = 1.0 - max(0.0, remain / slide_out_dur)
+                    ease = raw * raw  # ease-in quadratic
+                    slide_x = ease * slide_dist
+                    alpha_mult = max(0.0, 1.0 - raw)
+
+                y = base_y + i * row_h
+                tw = int(bw * 0.92)  # nearly full board width
+                th = 18  # half-height bar
+                tx = cx - tw // 2 + int(slide_x)
+                a_bg = int(200 * alpha_mult)
+                a_border = int(90 * alpha_mult)
+                a_glow = int(45 * alpha_mult)
+                a_text = int(255 * alpha_mult)
+
+                # Outer glow
+                self.renderer.draw_rect((255, 200, 50), (tx - 2, y - th // 2 - 2, tw + 4, th + 4), alpha=max(1, a_glow))
+                # Shadow
+                self.renderer.draw_rect((0, 0, 0), (tx + 3, y - th // 2 + 3, tw, th), alpha=max(1, a_bg // 2))
+                # Background
+                self.renderer.draw_rect((15, 12, 8), (tx, y - th // 2, tw, th), alpha=a_bg)
+                # Top highlight line
+                self.renderer.draw_rect((255, 220, 100), (tx + 2, y - th // 2, tw - 4, 1), alpha=max(1, a_border))
+                # Border
+                self.renderer.draw_rect((200, 170, 40), (tx, y - th // 2, tw, th), width=1, alpha=a_border)
+
                 try:
                     self.renderer.draw_text(
-                        text, cx, y, "Arial", 13, color,
-                        anchor_x="center", anchor_y="center", bold=True,
+                        text, cx + int(slide_x), y, "Arial", font_size, color,
+                        anchor_x="center", anchor_y="center", bold=True, alpha=a_text,
                     )
                 except Exception:
                     self.renderer.draw_text(
-                        text, cx, y, "Arial", 13, color,
+                        text, cx + int(slide_x), y, "Arial", font_size, color,
                         anchor_x="center", anchor_y="center",
                     )
+
+                # ── Spawn sparkles along toast edges ───────────────────
+                if alpha_mult > 0.3 and random.random() < 0.45:
+                    # Left edge sparkle
+                    sx = tx + random.randint(-12, 6)
+                    sy = y + random.randint(-th // 2 - 8, th // 2 + 8)
+                    sparkles.append({"x0": float(sx), "y0": float(sy),
+                                     "vx": random.uniform(-18, -4), "vy": random.uniform(-22, 22),
+                                     "ts": now, "ttl": random.uniform(0.3, 0.7),
+                                     "size": random.uniform(2.0, 5.0),
+                                     "color": random.choice([(255, 230, 80), (255, 200, 50), (255, 255, 180), (255, 180, 40)])})
+                if alpha_mult > 0.3 and random.random() < 0.45:
+                    # Right edge sparkle
+                    sx = tx + tw + random.randint(-6, 12)
+                    sy = y + random.randint(-th // 2 - 8, th // 2 + 8)
+                    sparkles.append({"x0": float(sx), "y0": float(sy),
+                                     "vx": random.uniform(4, 18), "vy": random.uniform(-22, 22),
+                                     "ts": now, "ttl": random.uniform(0.3, 0.7),
+                                     "size": random.uniform(2.0, 5.0),
+                                     "color": random.choice([(255, 230, 80), (255, 200, 50), (255, 255, 180), (255, 180, 40)])})
+
+            # ── Draw all sparkle particles (time-based, framerate-independent) ──
+            for s in sparkles:
+                s_age = now - s["ts"]
+                s_life = s_age / s["ttl"]
+                if s_life >= 1.0:
+                    continue
+                # Position from initial + velocity * elapsed (smooth at any FPS)
+                px = s["x0"] + s["vx"] * s_age
+                py = s["y0"] + s["vy"] * s_age
+                s_alpha = int(220 * (1.0 - s_life))
+                s_size = max(1, int(s["size"] * (1.0 - s_life * 0.6)))
+                sc = s["color"]
+                self.renderer.draw_circle_immediate(sc, (int(px), int(py)), s_size, alpha=s_alpha)
+                # Tiny bright core
+                if s_size > 2:
+                    self.renderer.draw_circle_immediate((255, 255, 255), (int(px), int(py)), max(1, s_size // 2), alpha=min(255, s_alpha + 40))
+
+            # Cap sparkle count
+            if len(sparkles) > 80:
+                self._toast_sparkles = sparkles[-60:]
         except Exception:
             return
     
@@ -3473,21 +3734,22 @@ class MonopolyGame:
         pass  # This method is deprecated but kept for compatibility
     
     def _draw_pips(self, cx: int, cy: int, size: int, value: int):
-        """Draw dice pips"""
-        r = size // 10
+        """Draw dice pips with 3D shadow and highlight."""
+        r = max(3, size // 9)
         off = size // 4
-        
         pips = {
             1: [(0, 0)],
             2: [(-off, -off), (off, off)],
             3: [(-off, -off), (0, 0), (off, off)],
             4: [(-off, -off), (off, -off), (-off, off), (off, off)],
             5: [(-off, -off), (off, -off), (0, 0), (-off, off), (off, off)],
-            6: [(-off, -off), (off, -off), (-off, 0), (off, 0), (-off, off), (off, off)]
+            6: [(-off, -off), (off, -off), (-off, 0), (off, 0), (-off, off), (off, off)],
         }
-        
-        for dx, dy in pips.get(value, []):
-            self.renderer.draw_circle((0, 0, 0), (cx + dx, cy + dy), r)
+        for dx, dy in pips.get(int(value), []):
+            px, py = cx + dx, cy + dy
+            self.renderer.draw_circle((0, 0, 0), (px + 1, py + 1), r, alpha=45)
+            self.renderer.draw_circle((15, 15, 22), (px, py), r, alpha=245)
+            self.renderer.draw_circle((55, 55, 65), (px - 1, py - 1), max(1, r - 2), alpha=70)
     
     def _draw_winner_screen(self):
         """Draw winner celebration with glow banner and particles."""
@@ -3515,9 +3777,9 @@ class MonopolyGame:
         self.renderer.draw_circle(winner_color, (cx, cy), int(min(banner_w, banner_h) * 0.28), alpha=25)
 
         # Shadow text
-        self.renderer.draw_text(f"PLAYER {self.winner_idx + 1} WINS!", cx + 3, cy - 47, 'Arial', 56, (0, 0, 0),
+        self.renderer.draw_text(f"{self._seat_label(self.winner_idx)} WINS!", cx + 3, cy - 47, 'Arial', 56, (0, 0, 0),
                                 bold=True, anchor_x='center', anchor_y='center', alpha=120)
-        self.renderer.draw_text(f"PLAYER {self.winner_idx + 1} WINS!", cx, cy - 50, 'Arial', 56, (255, 255, 255),
+        self.renderer.draw_text(f"{self._seat_label(self.winner_idx)} WINS!", cx, cy - 50, 'Arial', 56, (255, 255, 255),
                                 bold=True, anchor_x='center', anchor_y='center')
         self.renderer.draw_text("MONOPOLY CHAMPION", cx, cy + 20, 'Arial', 36, (255, 255, 200),
                                 bold=True, anchor_x='center', anchor_y='center')

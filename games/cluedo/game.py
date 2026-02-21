@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import random
 import time
+import math
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -1617,29 +1618,58 @@ class CluedoGame:
                 d1, d2 = self._dice_preview_values()
             else:
                 d1, d2 = (int(self.last_dice[0]), int(self.last_dice[1])) if self.last_dice else (int(self.last_roll or 0), 0)
-            dx = margin + 18
-            dy = footer_y + int((footer_pad - 16) * 0.44)
-            self.renderer.draw_text(
-                f"🎲 {d1}  🎲 {d2}",
-                int(dx) + 2,
-                int(dy) + 2,
-                font_name="Segoe UI Emoji",
-                font_size=28,
-                color=(0, 0, 0),
-                anchor_x="left",
-                anchor_y="center",
-                alpha=140,
-            )
-            self.renderer.draw_text(
-                f"🎲 {d1}  🎲 {d2}",
-                int(dx),
-                int(dy),
-                font_name="Segoe UI Emoji",
-                font_size=28,
-                color=(255, 255, 255),
-                anchor_x="left",
-                anchor_y="center",
-            )
+            die_s = 38
+            die_gap = 10
+            dice_cx = margin + 18 + die_s
+            dice_cy = footer_y + int((footer_pad - 16) * 0.44)
+            now_d = time.time()
+            # Resolve glow
+            d_glow = 0.0
+            if not self.dice_rolling and self.last_dice is not None:
+                d_since = now_d - (float(self.dice_roll_start) + 1.2)
+                if 0 <= d_since < 0.55:
+                    d_glow = 1.0 - d_since / 0.55
+            for di, dv in enumerate([d1, d2]):
+                djx, djy, db = 0, 0, 0
+                if self.dice_rolling:
+                    dph = now_d * 34 + di * 2.3
+                    djx = int(4 * math.sin(dph))
+                    djy = int(3 * math.cos(dph * 1.35 + 0.8))
+                if 0.25 < d_glow <= 1.0:
+                    db = int(6 * math.sin(math.pi * (d_glow - 0.25) / 0.75))
+                ddx = int(dice_cx + (di - 0.5) * (die_s + die_gap)) + djx
+                ddy = int(dice_cy) + djy - db
+                dhx = ddx - die_s // 2
+                dhy = ddy - die_s // 2
+                # Shadow
+                self.renderer.draw_rect((0, 0, 0), (dhx + 4, dhy + 4, die_s, die_s), alpha=50)
+                self.renderer.draw_rect((0, 0, 0), (dhx + 2, dhy + 2, die_s, die_s), alpha=70)
+                # Face
+                self.renderer.draw_rect((250, 250, 255), (dhx, dhy, die_s, die_s), alpha=255)
+                # Top highlight
+                self.renderer.draw_rect((255, 255, 255), (dhx + 2, dhy + 2, die_s - 4, 5), alpha=130)
+                # Border
+                self.renderer.draw_rect((40, 40, 48), (dhx, dhy, die_s, die_s), width=2, alpha=230)
+                # Inner bevel
+                self.renderer.draw_rect((180, 180, 195), (dhx + 3, dhy + 3, die_s - 6, die_s - 6), width=1, alpha=50)
+                # Resolve glow
+                if d_glow > 0:
+                    dga = int(80 * d_glow)
+                    self.renderer.draw_rect((255, 215, 0), (dhx - 3, dhy - 3, die_s + 6, die_s + 6), width=2, alpha=dga)
+                # Pips
+                pip_r = max(2, die_s // 10)
+                pip_off = die_s // 4
+                _pip_map = {
+                    1: [(0, 0)], 2: [(-pip_off, -pip_off), (pip_off, pip_off)],
+                    3: [(-pip_off, -pip_off), (0, 0), (pip_off, pip_off)],
+                    4: [(-pip_off, -pip_off), (pip_off, -pip_off), (-pip_off, pip_off), (pip_off, pip_off)],
+                    5: [(-pip_off, -pip_off), (pip_off, -pip_off), (0, 0), (-pip_off, pip_off), (pip_off, pip_off)],
+                    6: [(-pip_off, -pip_off), (pip_off, -pip_off), (-pip_off, 0), (pip_off, 0), (-pip_off, pip_off), (pip_off, pip_off)],
+                }
+                for pdx, pdy in _pip_map.get(int(dv), []):
+                    ppx, ppy = ddx + pdx, ddy + pdy
+                    self.renderer.draw_circle((0, 0, 0), (ppx + 1, ppy + 1), pip_r, alpha=45)
+                    self.renderer.draw_circle((15, 15, 22), (ppx, ppy), pip_r, alpha=245)
 
         # Footer info
         turn_seat = self._current_turn_seat()

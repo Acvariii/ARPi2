@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import random
+import time
 from typing import List, Tuple
 
 
@@ -184,9 +185,73 @@ class CardFlyAnim:
             border = tuple(min(255, int(c * 1.5)) for c in self.color)  # type: ignore[assignment]
             tint_alpha = 90
 
+        # Trail glow while in flight
+        if 0.05 < p < 0.92:
+            trail_a = int(28 * math.sin(math.pi * p))
+            renderer.draw_circle(self.color, (int(cx), int(cy)), max(8, int(self.card_w * 0.35)), alpha=trail_a)
+        # Shadow
+        renderer.draw_rect((0, 0, 0), (dx + 4, dy + 4, dw, dh), alpha=50)
+        # Card body
         renderer.draw_rect((250, 250, 250), (dx, dy, dw, dh), alpha=225)
         renderer.draw_rect(self.color, (dx, dy, dw, dh), alpha=tint_alpha)
+        # Top highlight
+        if dw > 10:
+            renderer.draw_rect((255, 255, 255), (dx + 2, dy + 2, dw - 4, 5), alpha=80)
         renderer.draw_rect(border, (dx, dy, dw, dh), width=3, alpha=245)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# In-place card flip
+# ---------------------------------------------------------------------------
+class CardFlipInPlace:
+    """
+    A card that flips in place, scaling horizontally through zero
+    to simulate a 3D card-turn.  Draws a 'back' colour for the first
+    half and a 'front' colour for the second.
+    """
+
+    def __init__(
+        self,
+        x: int, y: int,
+        card_w: int = 90,
+        card_h: int = 122,
+        back_color: Tuple[int, int, int] = (60, 60, 130),
+        front_color: Tuple[int, int, int] = (250, 250, 255),
+        duration: float = 0.48,
+    ) -> None:
+        self.x = x; self.y = y
+        self.card_w = card_w; self.card_h = card_h
+        self.back_color = back_color
+        self.front_color = front_color
+        self.duration = float(duration)
+        self.t = 0.0
+        self.done = False
+
+    def update(self, dt: float) -> None:
+        self.t = min(self.t + dt, self.duration)
+        if self.t >= self.duration:
+            self.done = True
+
+    def draw(self, renderer) -> None:
+        p = self.t / self.duration
+        sx = abs(math.cos(math.pi * p))
+        dw = max(2, int(self.card_w * sx))
+        dh = self.card_h
+        dx = int(self.x - dw / 2)
+        dy = int(self.y - dh / 2)
+
+        is_front = p >= 0.5
+        col = self.front_color if is_front else self.back_color
+
+        # Shadow
+        renderer.draw_rect((0, 0, 0), (dx + 3, dy + 3, dw, dh), alpha=55)
+        # Card body
+        renderer.draw_rect(col, (dx, dy, dw, dh), alpha=235)
+        # Border
+        renderer.draw_rect((70, 70, 80), (dx, dy, dw, dh), width=2, alpha=200)
+        # Front highlight
+        if is_front and dw > 10:
+            renderer.draw_rect((255, 255, 255), (dx + 2, dy + 2, dw - 4, 5), alpha=100)
 
 
 # ---------------------------------------------------------------------------
@@ -320,6 +385,138 @@ class ScreenFlash:
         alpha = int(self.peak_alpha * (1.0 - p) ** 1.4)
         if alpha > 0:
             renderer.draw_rect(self.color, (0, 0, w, h), alpha=alpha)
+
+
+# ---------------------------------------------------------------------------
+# Shared die-pip renderer
+# ---------------------------------------------------------------------------
+def _draw_die_pips(renderer, cx: int, cy: int, size: int, value: int) -> None:
+    """Draw standard die face pips with subtle 3D shadow/highlight."""
+    r = max(3, size // 9)
+    off = size // 4
+    _PM = {
+        1: [(0, 0)],
+        2: [(-off, -off), (off, off)],
+        3: [(-off, -off), (0, 0), (off, off)],
+        4: [(-off, -off), (off, -off), (-off, off), (off, off)],
+        5: [(-off, -off), (off, -off), (0, 0), (-off, off), (off, off)],
+        6: [(-off, -off), (off, -off), (-off, 0), (off, 0), (-off, off), (off, off)],
+    }
+    for dx, dy in _PM.get(int(value), []):
+        px, py = int(cx + dx), int(cy + dy)
+        renderer.draw_circle((0, 0, 0), (px + 1, py + 1), r, alpha=45)
+        renderer.draw_circle((15, 15, 22), (px, py), r, alpha=245)
+        renderer.draw_circle((55, 55, 65), (px - 1, py - 1), max(1, r - 2), alpha=70)
+
+
+# ---------------------------------------------------------------------------
+# Animated dice roller
+# ---------------------------------------------------------------------------
+class DiceRollAnimation:
+    """
+    Time-based animated dice roller with stylish 3D rendering.
+    No update() call needed -- uses wall-clock time internally.
+
+    Usage::
+
+        anim = DiceRollAnimation(die_size=64)
+        anim.start([4, 2])            # begin rolling, final values 4 & 2
+        # each frame:
+        anim.draw(renderer, cx, cy)   # handles jitter / glow automatically
+        if anim.just_resolved:        # one-shot after dice settle
+            ...                       # apply game logic
+    """
+
+    def __init__(
+        self,
+        die_size: int = 68,
+        gap: int = 20,
+        duration: float = 1.2,
+        show_duration: float = 3.0,
+        accent: Tuple[int, int, int] = (255, 215, 0),
+    ) -> None:
+        self.die_size = die_size
+        self.gap = gap
+        self.duration = duration
+        self.show_duration = show_duration
+        self.accent = accent
+        self.final_values: List[int] = []
+        self._start: float = 0.0
+        self._active: bool = False
+        self._seed: float = 0.0
+
+    @property
+    def rolling(self) -> bool:
+        return self._active and (time.time() - self._start) < self.duration
+
+    @property
+    def visible(self) -> bool:
+        return self._active and (time.time() - self._start) < (self.duration + self.show_duration)
+
+    @property
+    def just_resolved(self) -> bool:
+        if not self._active:
+            return False
+        e = time.time() - self._start
+        return self.duration <= e < self.duration + 0.4
+
+    def start(self, final_values: List[int]) -> None:
+        self.final_values = list(final_values)
+        self._start = time.time()
+        self._active = True
+        self._seed = random.random() * 100
+
+    def hide(self) -> None:
+        self._active = False
+
+    def draw(self, renderer, cx: int, cy: int, *, total_text: str = "") -> None:
+        if not self.visible or not self.final_values:
+            return
+        now = time.time()
+        elapsed = now - self._start
+        is_rolling = elapsed < self.duration
+        glow = max(0.0, 1.0 - (elapsed - self.duration) / 0.55) if elapsed >= self.duration else 0.0
+
+        n = len(self.final_values)
+        ds = self.die_size
+        tw = n * ds + (n - 1) * self.gap
+        sx = cx - tw // 2
+
+        for i in range(n):
+            jx, jy, bounce = 0, 0, 0
+            if is_rolling:
+                ph = elapsed * 34 + i * 2.3 + self._seed
+                jx = int(6 * math.sin(ph))
+                jy = int(5 * math.cos(ph * 1.35 + 0.8))
+            if 0.25 < glow <= 1.0:
+                bounce = int(10 * math.sin(math.pi * (glow - 0.25) / 0.75))
+
+            dcx = sx + i * (ds + self.gap) + ds // 2 + jx
+            dcy = cy + jy - bounce
+            hx = dcx - ds // 2
+            hy = dcy - ds // 2
+            val = random.randint(1, 6) if is_rolling else self.final_values[i]
+
+            renderer.draw_rect((0, 0, 0), (hx + 6, hy + 6, ds, ds), alpha=45)
+            renderer.draw_rect((0, 0, 0), (hx + 3, hy + 3, ds, ds), alpha=70)
+            renderer.draw_rect((250, 250, 255), (hx, hy, ds, ds), alpha=255)
+            renderer.draw_rect((210, 210, 220), (hx + 2, hy + ds * 2 // 3, ds - 4, ds // 3 - 2), alpha=35)
+            renderer.draw_rect((255, 255, 255), (hx + 3, hy + 2, ds - 6, 7), alpha=140)
+            renderer.draw_rect((40, 40, 48), (hx, hy, ds, ds), width=2, alpha=230)
+            renderer.draw_rect((180, 180, 195), (hx + 4, hy + 4, ds - 8, ds - 8), width=1, alpha=55)
+            if glow > 0:
+                ga = int(90 * glow)
+                renderer.draw_rect(self.accent, (hx - 4, hy - 4, ds + 8, ds + 8), width=3, alpha=ga)
+            _draw_die_pips(renderer, dcx, dcy, ds, val)
+
+        if total_text and not is_rolling:
+            tx = cx + tw // 2 + 16
+            renderer.draw_text(total_text, tx + 2, cy + 2, font_size=20,
+                               color=(0, 0, 0), alpha=140,
+                               anchor_x="left", anchor_y="center", bold=True)
+            renderer.draw_text(total_text, tx, cy, font_size=20,
+                               color=(255, 235, 80), alpha=255,
+                               anchor_x="left", anchor_y="center", bold=True)
 
 
 # ---------------------------------------------------------------------------

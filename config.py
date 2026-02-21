@@ -7,7 +7,7 @@ SERVER_WS = f"ws://{SERVER_IP}:{SERVER_PORT}"
 
 # Display Configuration
 WINDOW_SIZE = (1920, 1080)
-FPS = 60
+FPS = 120  # Game-logic tick rate; rendering runs at monitor vsync (60/120/144/…)
 
 # Interaction Configuration
 HOVER_TIME_THRESHOLD = 0.9  # seconds to hold for activation

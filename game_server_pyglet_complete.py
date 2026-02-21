@@ -897,6 +897,12 @@ class PygletGameServer:
         except Exception:
             pass
 
+        try:
+            if hasattr(self.monopoly_game, "set_name_provider"):
+                self.monopoly_game.set_name_provider(self._player_display_name)
+        except Exception:
+            pass
+
         # Player selection is handled via Web UI (button-driven), so hide in-window selection UIs.
         setattr(self.monopoly_game, "web_ui_only_player_select", True)
         setattr(self.blackjack_game, "web_ui_only_player_select", True)

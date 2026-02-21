@@ -11,6 +11,7 @@ Features:
 
 import time
 import random
+import math
 from typing import List, Dict, Tuple, Optional
 from core.renderer import PygletRenderer
 from core.card_rendering import draw_playing_card, draw_game_background
@@ -1685,25 +1686,25 @@ class BlackjackGame:
                 continue  # Not started yet
             
             elapsed = current_time - anim['start_time']
-            progress = min(1.0, elapsed / anim['duration'])
+            raw_progress = min(1.0, elapsed / anim['duration'])
             
             # Ease-out cubic for smooth deceleration
-            progress = 1 - (1 - progress) ** 3
+            progress = 1 - (1 - raw_progress) ** 3
             
             # Calculate current position
             start_x, start_y = anim['start_pos']
             target_x, target_y = anim['target_pos']
             current_x = start_x + (target_x - start_x) * progress
             current_y = start_y + (target_y - start_y) * progress
+            # Arc: card rises then falls during flight
+            current_y -= math.sin(math.pi * raw_progress) * 55
             
             # Draw the card at its current position
             card = anim['card']
             if anim['is_dealer']:
-                # Dealer card - centered, no rotation
                 show_face = anim['card_num'] == 0  # Only first card face up
                 self._draw_card_at_position(card, int(current_x), int(current_y), show_face)
             else:
-                # Player card
                 player_idx = anim['player_idx']
                 panel = self.panels[player_idx]
                 player_color = self.players[player_idx].color
@@ -1713,6 +1714,11 @@ class BlackjackGame:
             # Mark card as completed if animation finished
             if progress >= 1.0 and not anim.get('marked_complete', False):
                 anim['marked_complete'] = True
+                # Sparkle on arrival
+                try:
+                    self._particles.emit_sparkle(int(current_x + 35), int(current_y + 50), (255, 235, 120), count=6)
+                except Exception:
+                    pass
                 if anim['is_dealer']:
                     key = ('dealer', -1)
                 else:
@@ -1924,7 +1930,6 @@ class BlackjackGame:
     def _draw_game_over(self):
         """Draw game over screen with rich banner."""
         self._draw_background(self.width, self.height)
-        self._draw_panels()
         draw_rainbow_title(self.renderer, "BLACKJACK", self.width)
 
         cx, cy = self.width // 2, self.height // 2

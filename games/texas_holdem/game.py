@@ -9,7 +9,7 @@ from core.player_selection import PlayerSelectionUI
 from config import PLAYER_COLORS
 from core.card_rendering import draw_playing_card, draw_game_background
 from core.animation import (
-    ParticleSystem, CardFlyAnim, TextPopAnim, PulseRing, ScreenFlash,
+    ParticleSystem, CardFlyAnim, CardFlipInPlace, TextPopAnim, PulseRing, ScreenFlash,
     _RAINBOW_PALETTE as _FW_COLORS, draw_rainbow_title,
 )
 
@@ -496,11 +496,35 @@ class TexasHoldemGame:
         for _ in range(3):
             if self.deck:
                 self.community.append(self.deck.pop())
+        # Flip animation for each flop card
+        try:
+            cw, ch = 78, 110
+            total = 5 * cw + 4 * 14
+            sx = int(self.width) // 2 - total // 2
+            for ci in range(3):
+                fx = sx + ci * (cw + 14) + cw // 2
+                fy = int(self.height) // 2
+                self._anim_card_flips.append(CardFlipInPlace(fx, fy, cw, ch, duration=0.45))
+                self._particles.emit_sparkle(fx, fy, (255, 235, 120), count=8)
+        except Exception:
+            pass
 
     def _deal_turn(self) -> None:
         self._burn()
         if self.deck:
             self.community.append(self.deck.pop())
+        # Flip animation for the new card
+        try:
+            ci = len(self.community) - 1
+            cw, ch = 78, 110
+            total = 5 * cw + 4 * 14
+            sx = int(self.width) // 2 - total // 2
+            fx = sx + ci * (cw + 14) + cw // 2
+            fy = int(self.height) // 2
+            self._anim_card_flips.append(CardFlipInPlace(fx, fy, cw, ch, duration=0.45))
+            self._particles.emit_sparkle(fx, fy, (255, 235, 120), count=8)
+        except Exception:
+            pass
 
     def _advance_street(self) -> None:
         # Reset betting

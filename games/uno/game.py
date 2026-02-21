@@ -273,7 +273,6 @@ class UnoGame:
                 _col = _FW_COLORS[int(_curr_turn) % len(_FW_COLORS)]
                 self._pulse_rings.append(PulseRing(_cx, _cy, _col, max_radius=min(self.width, self.height) // 5, duration=0.8))
                 self._particles.emit_sparkle(_cx, _cy, _col, count=18)
-                self._flashes.append(ScreenFlash(_col, peak_alpha=40, duration=0.3))
             self._anim_prev_turn = _curr_turn
             if isinstance(self.winner, int) and self.winner is not self._anim_prev_winner:
                 self._anim_prev_winner = self.winner
@@ -994,35 +993,36 @@ class UnoGame:
         count = int(len(self.hands.get(seat, [])))
         is_turn = bool(self.current_turn_seat == seat)
         try:
-            # Badge panel
-            bw, bh = 100, 36
+            # Player colour
+            pcol = PLAYER_COLORS[seat % len(PLAYER_COLORS)] if seat < len(PLAYER_COLORS) else (200, 200, 200)
+            # Badge panel — wider & taller to avoid overlap
+            bw, bh = 116, 46
             bx = int(ax) - bw // 2
             offset_y = 30 if seat in (3, 4, 5) else -30
             by = int(ay) + offset_y - bh // 2
             bg = (18, 18, 28)
-            border = (255, 220, 60) if is_turn else (140, 140, 150)
+            # Use player's own colour for turn ring
+            border = pcol if is_turn else (140, 140, 150)
             self.renderer.draw_rect((0, 0, 0), (bx + 2, by + 2, bw, bh), alpha=60)
             self.renderer.draw_rect(bg, (bx, by, bw, bh), alpha=190)
             if is_turn:
-                self.renderer.draw_rect(border, (bx - 2, by - 2, bw + 4, bh + 4), width=2, alpha=40)
+                self.renderer.draw_rect(border, (bx - 3, by - 3, bw + 6, bh + 6), width=2, alpha=55)
             self.renderer.draw_rect(border, (bx, by, bw, bh), width=2 if is_turn else 1, alpha=200)
             # Player colour dot
-            pcol = PLAYER_COLORS[seat % len(PLAYER_COLORS)] if seat < len(PLAYER_COLORS) else (200, 200, 200)
-            self.renderer.draw_circle(pcol, (bx + 10, by + bh // 2), 4, alpha=180)
-            # Name
+            self.renderer.draw_circle(pcol, (bx + 10, by + 12), 4, alpha=180)
+            # Name — top row
             name_col = (255, 240, 100) if is_turn else (210, 210, 210)
             self.renderer.draw_text(
                 self._seat_label(seat),
-                int(ax), by + 10,
+                bx + 20, by + 6,
                 font_size=11, color=name_col,
-                anchor_x="center", anchor_y="top",
+                anchor_x="left", anchor_y="top",
             )
-            # Card count badge
-            badge_txt = f"🃏{count}"
+            # Card count — bottom row, clearly separated
             self.renderer.draw_text(
-                badge_txt, int(ax), by + bh - 6,
+                f"🃏 {count}", bx + 10, by + bh - 8,
                 font_size=10, color=(200, 200, 200),
-                anchor_x="center", anchor_y="bottom",
+                anchor_x="left", anchor_y="bottom",
             )
         except Exception:
             pass
