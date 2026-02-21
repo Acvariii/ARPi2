@@ -934,8 +934,19 @@ class TexasHoldemGame:
             pad = int(min(w, h) * 0.10)
             tx, ty = pad, pad
             tw, th = w - pad * 2, h - pad * 2
-            self.renderer.draw_rect((0, 65, 40), (tx, ty, tw, th), alpha=180)
-            self.renderer.draw_rect((220, 200, 120), (tx, ty, tw, th), width=3, alpha=90)
+            # Shadow
+            self.renderer.draw_rect((0, 0, 0), (tx + 4, ty + 4, tw, th), alpha=50)
+            # Felt base
+            self.renderer.draw_rect((0, 60, 36), (tx, ty, tw, th), alpha=200)
+            # Inner lighter felt
+            ip = max(6, int(min(tw, th) * 0.04))
+            self.renderer.draw_rect((6, 85, 45), (tx + ip, ty + ip, tw - 2 * ip, th - 2 * ip), alpha=80)
+            # Centre glow
+            gcx, gcy = tx + tw // 2, ty + th // 2
+            self.renderer.draw_circle((12, 110, 55), (gcx, gcy), int(min(tw, th) * 0.28), alpha=25)
+            # Gold rail
+            self.renderer.draw_rect((190, 170, 90), (tx, ty, tw, th), width=4, alpha=140)
+            self.renderer.draw_rect((240, 220, 130), (tx + 3, ty + 3, tw - 6, th - 6), width=1, alpha=60)
         except Exception:
             pass
 
@@ -954,14 +965,17 @@ class TexasHoldemGame:
 
         # Pot
         try:
+            pot_txt = f"Pot: {self.pot}"
+            pw = max(100, len(pot_txt) * 11)
+            ph = 28
+            px = cx - pw // 2
+            py = int(cy + card_h / 2 + 14)
+            self.renderer.draw_rect((0, 0, 0), (px, py, pw, ph), alpha=130)
+            self.renderer.draw_rect((255, 215, 0), (px, py, pw, ph), width=1, alpha=80)
             self.renderer.draw_text(
-                f"Pot: {self.pot}",
-                cx,
-                int(cy + card_h / 2 + 26),
-                font_size=16,
-                color=(240, 240, 240),
-                anchor_x="center",
-                anchor_y="bottom",
+                pot_txt, cx, py + ph // 2,
+                font_size=16, color=(255, 230, 140),
+                anchor_x="center", anchor_y="center",
             )
         except Exception:
             pass
@@ -970,8 +984,14 @@ class TexasHoldemGame:
         if isinstance(self.last_showdown, dict) and self.last_showdown.get("winners"):
             try:
                 winners = [self._seat_label(int(s)) for s in (self.last_showdown.get("winners") or [])]
-                msg = "Winners: " + ", ".join(winners)
-                self.renderer.draw_text(msg, cx, int(cy - card_h / 2 - 24), font_size=16, color=(235, 235, 235), anchor_x="center", anchor_y="top")
+                msg = "🏆 Winners: " + ", ".join(winners)
+                mw = max(200, len(msg) * 10)
+                mh = 30
+                mx = cx - mw // 2
+                my = int(cy - card_h / 2 - 40)
+                self.renderer.draw_rect((0, 0, 0), (mx, my, mw, mh), alpha=160)
+                self.renderer.draw_rect((255, 215, 0), (mx, my, mw, mh), width=1, alpha=100)
+                self.renderer.draw_text(msg, cx, my + mh // 2, font_size=15, color=(255, 235, 140), anchor_x="center", anchor_y="center")
             except Exception:
                 pass
 
@@ -1093,7 +1113,7 @@ class TexasHoldemGame:
         return (w // 2, h // 2)
 
     def _draw_seat_zones(self, w: int, h: int) -> None:
-        """Draw per-seat info panels around the table."""
+        """Draw per-seat info panels with modern styling."""
         for s in self.active_players:
             seat = int(s)
             ax, ay = self._seat_anchor(seat, w, h)
@@ -1102,36 +1122,46 @@ class TexasHoldemGame:
             stack = int(self.stacks.get(seat, 0) or 0)
             bet = int(self.bet_in_round.get(seat, 0) or 0)
 
-            bw, bh = 110, 48
+            bw, bh = 120, 54
             bx, by = ax - bw // 2, ay - bh // 2
 
-            # Background
-            bg = (20, 80, 50) if is_turn else (18, 28, 38)
-            border = (130, 230, 130) if is_turn else ((180, 180, 180) if alive else (90, 90, 90))
+            bg = (16, 70, 42) if is_turn else (14, 22, 32)
+            border = (100, 220, 110) if is_turn else ((170, 170, 170) if alive else (80, 80, 80))
             try:
-                self.renderer.draw_rect((0, 0, 0), (bx + 3, by - 3, bw, bh), alpha=50)
-                self.renderer.draw_rect(bg, (bx, by, bw, bh), alpha=200)
+                # Shadow
+                self.renderer.draw_rect((0, 0, 0), (bx + 3, by - 3, bw, bh), alpha=70)
+                # Panel body
+                self.renderer.draw_rect(bg, (bx, by, bw, bh), alpha=210)
+                # Turn glow
+                if is_turn:
+                    self.renderer.draw_rect(border, (bx - 2, by - 2, bw + 4, bh + 4), width=2, alpha=50)
                 self.renderer.draw_rect(border, (bx, by, bw, bh), width=2 if is_turn else 1, alpha=220)
             except Exception:
                 pass
 
-            # Name
-            name_col = (130, 255, 130) if is_turn else ((230, 230, 230) if alive else (120, 120, 120))
+            # Player colour dot
+            try:
+                pcol = PLAYER_COLORS[seat % len(PLAYER_COLORS)]
+                self.renderer.draw_circle(pcol, (bx + 10, by + bh // 2), 4, alpha=180)
+            except Exception:
+                pass
+
+            name_col = (100, 255, 100) if is_turn else ((230, 230, 230) if alive else (110, 110, 110))
             try:
                 self.renderer.draw_text(
                     self._seat_label(seat),
-                    ax, by + 9, font_size=11, color=name_col,
+                    ax, by + 9, font_size=12, color=name_col,
                     anchor_x="center", anchor_y="top")
             except Exception:
                 pass
 
-            # Stack + bet
             try:
-                status_txt = f"${stack}" + (f"  bet {bet}" if bet > 0 else "")
                 if not alive and self.state == "playing":
                     status_txt = "FOLD"
                 elif stack == 0 and alive:
                     status_txt = "ALL-IN"
+                else:
+                    status_txt = f"💰${stack}" + (f"  🎲{bet}" if bet > 0 else "")
                 self.renderer.draw_text(
                     status_txt,
                     ax, by + bh - 9, font_size=11, color=(210, 210, 210),

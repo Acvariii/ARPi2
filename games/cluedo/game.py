@@ -1414,8 +1414,13 @@ class CluedoGame:
                     continue
                 rect = _cell_rect((r, c), inset=2)
                 if k in (self._TILE_HALL, self._TILE_START):
-                    self.renderer.draw_rect((55, 55, 65), rect, alpha=170)
-                    self.renderer.draw_rect((0, 0, 0), rect, width=1, alpha=70)
+                    # Shadow
+                    self.renderer.draw_rect((0, 0, 0), (rect[0] + 1, rect[1] + 1, rect[2], rect[3]), alpha=40)
+                    # Body
+                    self.renderer.draw_rect((50, 50, 58), rect, alpha=185)
+                    # Subtle top highlight
+                    self.renderer.draw_rect((80, 80, 90), (rect[0], rect[1] + rect[3] - 2, rect[2], 2), alpha=40)
+                    self.renderer.draw_rect((0, 0, 0), rect, width=1, alpha=50)
 
         # Render rooms as single blocks (one big rectangle per room).
         for room_name, (r0, r1, c0, c1) in (self._ROOM_RECTS or {}).items():
@@ -1425,8 +1430,15 @@ class CluedoGame:
             ww = int((int(c1) - int(c0) + 1) * cell_w)
             hh = int((int(r1) - int(r0) + 1) * cell_h)
             rect = (x + 2, y + 2, ww - 4, hh - 4)
-            self.renderer.draw_rect(col, rect, alpha=220)
-            self.renderer.draw_rect((0, 0, 0), rect, width=2, alpha=120)
+            # Shadow
+            self.renderer.draw_rect((0, 0, 0), (rect[0] + 3, rect[1] + 3, rect[2], rect[3]), alpha=60)
+            # Room body
+            self.renderer.draw_rect(col, rect, alpha=230)
+            # Inner top highlight
+            hl = tuple(min(255, c + 40) for c in col)
+            self.renderer.draw_rect(hl, (rect[0] + 2, rect[1] + rect[3] - 4, rect[2] - 4, 3), alpha=60)
+            # Border
+            self.renderer.draw_rect((20, 20, 20), rect, width=2, alpha=140)
 
         # Accusation block
         for (r0, r1, c0, c1) in (self._ACCUSATION_RECTS or []):
@@ -1572,16 +1584,31 @@ class CluedoGame:
 
                 color = PLAYER_COLORS[seat % len(PLAYER_COLORS)]
                 alpha = 255 if seat not in set(self.eliminated) else 90
-                self.renderer.draw_circle((0, 0, 0), (int(cx), int(cy)), int(token_r * 1.35), alpha=max(60, alpha - 80))
+                # Shadow
+                self.renderer.draw_circle((0, 0, 0), (int(cx) + 2, int(cy) + 2), int(token_r * 1.2), alpha=max(40, alpha - 120))
+                # Token body
                 self.renderer.draw_circle(color, (int(cx), int(cy)), int(token_r), alpha=alpha)
+                # Highlight dot
+                hl = tuple(min(255, c + 80) for c in color)
+                self.renderer.draw_circle(hl, (int(cx) - 2, int(cy) - 2), max(2, int(token_r * 0.3)), alpha=min(alpha, 90))
+                # Outline
+                self.renderer.draw_circle((0, 0, 0), (int(cx), int(cy)), int(token_r), width=1, alpha=max(60, alpha - 60))
 
                 if self._current_turn_seat() == seat and self.winner is None:
-                    self.renderer.draw_circle(Colors.GOLD, (int(cx), int(cy)), int(token_r * 1.6), width=0, alpha=70)
+                    self.renderer.draw_circle(Colors.GOLD, (int(cx), int(cy)), int(token_r * 1.8), width=0, alpha=50)
+                    self.renderer.draw_circle(Colors.GOLD, (int(cx), int(cy)), int(token_r * 1.8), width=2, alpha=80)
 
         # Footer panel (reserve space so it never overlaps rooms)
         footer_y = h - footer_pad + 8
-        self.renderer.draw_rect((0, 0, 0), (margin, footer_y, w - 2 * margin, footer_pad - 16), alpha=110)
-        self.renderer.draw_rect(Colors.ACCENT, (margin, footer_y, w - 2 * margin, footer_pad - 16), width=2, alpha=90)
+        fp_rect = (margin, footer_y, w - 2 * margin, footer_pad - 16)
+        # Shadow
+        self.renderer.draw_rect((0, 0, 0), (fp_rect[0] + 3, fp_rect[1] + 3, fp_rect[2], fp_rect[3]), alpha=70)
+        # Body
+        self.renderer.draw_rect((12, 12, 18), fp_rect, alpha=190)
+        # Inner accent
+        self.renderer.draw_rect((30, 20, 40), (fp_rect[0] + 3, fp_rect[1] + 3, fp_rect[2] - 6, fp_rect[3] - 6), alpha=40)
+        # Gold border
+        self.renderer.draw_rect((180, 150, 80), fp_rect, width=2, alpha=120)
 
         # Dice in footer-left (keep result visible briefly after rolling)
         show_dice = bool(self.dice_rolling) or (self.last_roll is not None and time.time() < float(self._dice_show_until or 0.0))
@@ -1629,16 +1656,17 @@ class CluedoGame:
             else:
                 info += f"  ·  Roll: {self.last_roll}  ·  Steps: {self.steps_remaining}"
         if self.winner is not None:
-            info = f"Winner: {self._seat_name(self.winner)}"
+            info = f"\U0001F3C6 Winner: {self._seat_name(self.winner)} \U0001F3C6"
 
         self.renderer.draw_text(
             info,
             int(w * 0.5),
             footer_y + int((footer_pad - 16) * 0.38),
             font_size=18,
-            color=(235, 235, 235),
+            color=(255, 230, 140) if self.winner is not None else (235, 235, 235),
             anchor_x="center",
             anchor_y="center",
+            bold=True,
         )
 
         # Last event

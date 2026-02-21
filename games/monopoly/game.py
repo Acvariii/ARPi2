@@ -19,7 +19,7 @@ from core.player_selection import PlayerSelectionUI
 from core.card_rendering import draw_game_background
 from core.animation import (
     ParticleSystem, CardFlyAnim, TextPopAnim, PulseRing, ScreenFlash,
-    _RAINBOW_PALETTE as _FW_COLORS,
+    _RAINBOW_PALETTE as _FW_COLORS, draw_rainbow_title,
 )
 from core.ui_components import (
     PygletButton, PlayerPanel, calculate_all_panels, draw_hover_indicators
@@ -3044,82 +3044,80 @@ class MonopolyGame:
             )
     
     def _draw_board(self):
-        """Draw monopoly board with property colors and names"""
+        """Draw monopoly board with modern styling, larger indicators, and shadow depth."""
         bx, by, bw, bh = self.board_rect
-        # Safety check: ensure dimensions are integers
         bx, by, bw, bh = int(bx), int(by), int(bw), int(bh)
-        
-        # Board background
-        self.renderer.draw_rect((220, 240, 220), (bx, by, bw, bh))
-        self.renderer.draw_rect((100, 100, 100), (bx, by, bw, bh), width=3)
-        
-        # Draw spaces with colors and names for ALL spaces
+
+        # Shadow beneath board
+        self.renderer.draw_rect((0, 0, 0), (bx + 5, by + 5, bw, bh), alpha=80)
+        # Board base
+        self.renderer.draw_rect((215, 235, 215), (bx, by, bw, bh))
+        # Inner lighter fill
+        pad = 4
+        self.renderer.draw_rect((230, 245, 228), (bx + pad, by + pad, bw - 2 * pad, bh - 2 * pad), alpha=120)
+        # Gold border
+        self.renderer.draw_rect((160, 140, 80), (bx, by, bw, bh), width=3)
+
+        # Draw spaces
         for i, (sx, sy, sw, sh) in enumerate(self.spaces):
             space = self.properties[i]
             space_data = space.data
             space_type = space_data.get("type", "")
-            
-            # Background with subtle gradient effect
-            self.renderer.draw_rect((250, 250, 250), (sx, sy, sw, sh))
-            self.renderer.draw_rect((120, 120, 120), (sx, sy, sw, sh), width=1)
-            
-            # Color bar for properties (larger and more visible)
+
+            # Space background with subtle shadow
+            self.renderer.draw_rect((0, 0, 0), (sx + 2, sy + 2, sw, sh), alpha=30)
+            self.renderer.draw_rect((248, 248, 245), (sx, sy, sw, sh))
+
+            # Color bar for properties – thicker and brighter
             if "color" in space_data and isinstance(space_data["color"], tuple):
                 prop_color = space_data["color"]
-                bar_h = max(10, sh // 3)
-                self.renderer.draw_rect(prop_color, (sx, sy, sw, bar_h))
-            
-            # Draw owner border if property is owned
+                bar_h = max(12, sh // 3)
+                self.renderer.draw_rect(prop_color, (sx + 1, sy + 1, sw - 2, bar_h))
+                # Highlight strip at top of bar
+                hl = tuple(min(255, c + 60) for c in prop_color)
+                self.renderer.draw_rect(hl, (sx + 1, sy + bar_h - 2, sw - 2, 2), alpha=100)
+
+            # Owner glow + border
             if space.owner is not None and space_type in ["property", "railroad", "utility"]:
                 owner_color = PLAYER_COLORS[space.owner]
-                # Draw a much thicker, more visible border.
-                inset = 1
-                self.renderer.draw_rect(owner_color, (sx + inset, sy + inset, sw - 2 * inset, sh - 2 * inset), width=10)
-                # Sub leading edge for contrast
-                self.renderer.draw_rect(owner_color, (sx + 3, sy + 3, sw - 6, sh - 6), width=2)
+                # Outer glow
+                self.renderer.draw_rect(owner_color, (sx - 1, sy - 1, sw + 2, sh + 2), width=4, alpha=100)
+                # Inner owner ring
+                self.renderer.draw_rect(owner_color, (sx + 2, sy + 2, sw - 4, sh - 4), width=3)
 
-            # Jail marker (colored emoji) on the Jail tile.
+            # Jail marker
             if i == JAIL_POSITION or space_type == "jail":
                 try:
                     cx, cy = sx + sw // 2, sy + sh // 2
-                    # Prefer the Windows emoji font for a colored glyph.
                     self.renderer.draw_text(
-                        "\U0001F512",  # 🔒
-                        cx,
-                        cy + int(sh * 0.20),
-                        "Segoe UI Emoji",
-                        max(12, int(min(sw, sh) * 0.22)),
-                        (0, 0, 0),
-                        anchor_x="center",
-                        anchor_y="center",
-                        rotation=0,
+                        "\U0001F512", cx, cy + int(sh * 0.20),
+                        "Segoe UI Emoji", max(14, int(min(sw, sh) * 0.24)),
+                        (0, 0, 0), anchor_x="center", anchor_y="center",
                     )
                 except Exception:
                     pass
-            
-            # Draw house/hotel indicators
+
+            # Houses / Hotels – BIGGER
             if space.houses > 0 and space_type == "property":
-                house_w = 6
-                house_h = 6
-                house_gap = 2
-                
                 if space.houses == 5:  # Hotel
-                    # Draw single large indicator with H
-                    hotel_x = sx + sw // 2 - 8
-                    hotel_y = sy + sh - 12
-                    self.renderer.draw_rect((255, 0, 0), (hotel_x, hotel_y, 16, 10))
-                    self.renderer.draw_text("H", hotel_x + 8, hotel_y + 5, 
-                                          'Arial', 8, (255, 255, 255),
-                                          anchor_x='center', anchor_y='center')
-                else:  # Houses (1-4)
-                    total_width = space.houses * house_w + (space.houses - 1) * house_gap
-                    start_x = sx + (sw - total_width) // 2
-                    house_y = sy + sh - 10
-                    
-                    for i in range(space.houses):
-                        house_x = start_x + i * (house_w + house_gap)
-                        self.renderer.draw_rect((0, 200, 0), (house_x, house_y, house_w, house_h))
-                        self.renderer.draw_rect((0, 100, 0), (house_x, house_y, house_w, house_h), width=1)
+                    hx = sx + sw // 2 - 10
+                    hy = sy + sh - 16
+                    self.renderer.draw_rect((200, 0, 0), (hx, hy, 20, 14))
+                    self.renderer.draw_rect((255, 80, 80), (hx + 1, hy + 1, 18, 4), alpha=100)
+                    self.renderer.draw_text("H", hx + 10, hy + 7, 'Arial', 10, (255, 255, 255),
+                                            bold=True, anchor_x='center', anchor_y='center')
+                else:
+                    hw, hh = 9, 9
+                    gap = 3
+                    total_w = space.houses * hw + (space.houses - 1) * gap
+                    sx0 = sx + (sw - total_w) // 2
+                    hy = sy + sh - 14
+                    for j in range(space.houses):
+                        hx = sx0 + j * (hw + gap)
+                        self.renderer.draw_rect((20, 180, 20), (hx, hy, hw, hh))
+                        self.renderer.draw_rect((10, 120, 10), (hx, hy, hw, hh), width=1)
+                        # Tiny roof highlight
+                        self.renderer.draw_rect((80, 220, 80), (hx + 1, hy + hh - 2, hw - 2, 2), alpha=80)
             
             # Draw space name with text wrapping - NO ROTATION, always readable from bottom.
             # In web-UI-first (board_only_mode) we keep names visible even if a popup is active,
@@ -3357,44 +3355,51 @@ class MonopolyGame:
                 offset = 15
                 cx += int(offset * (0.5 - abs(0.5 - offset_idx / num_players)))
             
-            # Draw token using immediate rendering to ensure it's on top of board text
+            # Draw token with glow/shadow (larger for readability)
             color = PLAYER_COLORS[idx]
-            self.renderer.draw_circle_immediate(color, (cx, cy), 12)
-            self.renderer.draw_circle_immediate((0, 0, 0), (cx, cy), 12, width=2)
+            # Shadow
+            self.renderer.draw_circle_immediate((0, 0, 0), (cx + 3, cy + 3), 16, alpha=60)
+            # Glow for current player
+            if idx == self.active_players[self.current_player_idx % len(self.active_players)]:
+                self.renderer.draw_circle_immediate(color, (cx, cy), 22, alpha=40)
+            # Token body
+            self.renderer.draw_circle_immediate(color, (cx, cy), 16)
+            # Highlight
+            hl = tuple(min(255, c + 70) for c in color)
+            self.renderer.draw_circle_immediate(hl, (cx - 4, cy - 4), 6, alpha=90)
+            # Outline
+            self.renderer.draw_circle_immediate((0, 0, 0), (cx, cy), 16, width=2)
     
     def _draw_dice(self):
-        """Draw dice with animation during roll"""
+        """Draw dice with shadow, highlight, and animation."""
         bx, by, bw, bh = self.board_rect
         cx, cy = bx + bw // 2, by + bh // 2
-        
-        dice_size = 60
-        gap = 15
-        
-        # Show dice values (animated if rolling)
+
+        dice_size = 64
+        gap = 18
+
         if self.dice_rolling:
-            # Show random values during roll animation
-            import random
             display_values = (random.randint(1, 6), random.randint(1, 6))
         else:
             display_values = self.dice_values
-        
+
         for i, value in enumerate(display_values):
-            dx = cx + (i - 0.5) * (dice_size + gap)
+            dx = int(cx + (i - 0.5) * (dice_size + gap))
             dy = cy
-            
-            # Die background with shadow
-            shadow_offset = 3
-            self.renderer.draw_rect((100, 100, 100, 180), 
-                (int(dx - dice_size/2 + shadow_offset), int(dy - dice_size/2 + shadow_offset), dice_size, dice_size))
-            
-            # Die face
-            self.renderer.draw_rect((255, 255, 255), 
-                (int(dx - dice_size/2), int(dy - dice_size/2), dice_size, dice_size))
-            self.renderer.draw_rect((0, 0, 0), 
-                (int(dx - dice_size/2), int(dy - dice_size/2), dice_size, dice_size), width=3)
-            
-            # Pips
-            self._draw_pips(int(dx), int(dy), dice_size, value)
+
+            hx = dx - dice_size // 2
+            hy = dy - dice_size // 2
+
+            # Shadow
+            self.renderer.draw_rect((0, 0, 0), (hx + 4, hy + 4, dice_size, dice_size), alpha=70)
+            # Die body
+            self.renderer.draw_rect((255, 255, 255), (hx, hy, dice_size, dice_size))
+            # Inner highlight
+            self.renderer.draw_rect((245, 245, 250), (hx + 3, hy + dice_size - 8, dice_size - 6, 5), alpha=60)
+            # Border
+            self.renderer.draw_rect((60, 60, 60), (hx, hy, dice_size, dice_size), width=3)
+
+            self._draw_pips(dx, dy, dice_size, value)
 
     def _push_toast(self, text: str, color: Tuple[int, int, int] = (255, 255, 255), ttl: float = 3.0) -> None:
         try:
@@ -3438,30 +3443,21 @@ class MonopolyGame:
             for i, t in enumerate(reversed(alive)):
                 text = str(t.get("text", ""))
                 color = t.get("color", (255, 255, 255))
-                y = base_y + (i * 22)
+                y = base_y + (i * 26)
+                tw = min(int(bw * 0.6), max(200, len(text) * 9))
+                th = 22
+                tx = cx - tw // 2
+                self.renderer.draw_rect((0, 0, 0), (tx, y - th // 2, tw, th), alpha=140)
+                self.renderer.draw_rect((200, 170, 40), (tx, y - th // 2, tw, th), width=1, alpha=60)
                 try:
                     self.renderer.draw_text(
-                        text,
-                        cx,
-                        y,
-                        "Arial",
-                        14,
-                        color,
-                        anchor_x="center",
-                        anchor_y="center",
-                        bold=True,
+                        text, cx, y, "Arial", 13, color,
+                        anchor_x="center", anchor_y="center", bold=True,
                     )
                 except Exception:
-                    # If bold isn't supported by the renderer implementation.
                     self.renderer.draw_text(
-                        text,
-                        cx,
-                        y,
-                        "Arial",
-                        14,
-                        color,
-                        anchor_x="center",
-                        anchor_y="center",
+                        text, cx, y, "Arial", 13, color,
+                        anchor_x="center", anchor_y="center",
                     )
         except Exception:
             return
@@ -3494,67 +3490,60 @@ class MonopolyGame:
             self.renderer.draw_circle((0, 0, 0), (cx + dx, cy + dy), r)
     
     def _draw_winner_screen(self):
-        """Draw winner celebration screen"""
-        # Background
-        self.renderer.draw_rect((20, 20, 30), (0, 0, self.width, self.height))
-        
-        # Winner banner
-        banner_w = 800
-        banner_h = 400
-        banner_x = (self.width - banner_w) // 2
-        banner_y = (self.height - banner_h) // 2
-        
+        """Draw winner celebration with glow banner and particles."""
+        self.renderer.draw_rect((10, 10, 18), (0, 0, self.width, self.height), alpha=230)
+        draw_rainbow_title(self.renderer, "MONOPOLY", self.width)
+
+        cx, cy = self.width // 2, self.height // 2
+        banner_w = min(800, int(self.width * 0.7))
+        banner_h = 360
+        bx = cx - banner_w // 2
+        by = cy - banner_h // 2
+
         winner_color = PLAYER_COLORS[self.winner_idx]
-        
-        # Banner background with winner's color
-        self.renderer.draw_rect(winner_color, (banner_x, banner_y, banner_w, banner_h))
-        self.renderer.draw_rect((255, 255, 255), (banner_x, banner_y, banner_w, banner_h), width=8)
-        
-        # Winner text
-        cx = self.width // 2
-        cy = self.height // 2
-        
-        self.renderer.draw_text(
-            f"PLAYER {self.winner_idx + 1} WINS!",
-            cx, cy - 50,
-            'Arial', 60, (255, 255, 255),
-            anchor_x='center', anchor_y='center',
-            bold=True
-        )
-        
-        self.renderer.draw_text(
-            "MONOPOLY CHAMPION",
-            cx, cy + 50,
-            'Arial', 40, (255, 255, 200),
-            anchor_x='center', anchor_y='center',
-            bold=True
-        )
-        
-        # Player's final money
+
+        # Shadow
+        self.renderer.draw_rect((0, 0, 0), (bx + 6, by + 6, banner_w, banner_h), alpha=100)
+        # Banner body in winner colour
+        self.renderer.draw_rect(winner_color, (bx, by, banner_w, banner_h))
+        # Inner darkened panel
+        self.renderer.draw_rect((0, 0, 0), (bx + 8, by + 8, banner_w - 16, banner_h - 16), alpha=100)
+        # Gold border
+        self.renderer.draw_rect((255, 215, 0), (bx, by, banner_w, banner_h), width=5)
+        self.renderer.draw_rect((255, 235, 120), (bx + 4, by + 4, banner_w - 8, banner_h - 8), width=1, alpha=80)
+        # Centre glow
+        self.renderer.draw_circle(winner_color, (cx, cy), int(min(banner_w, banner_h) * 0.28), alpha=25)
+
+        # Shadow text
+        self.renderer.draw_text(f"PLAYER {self.winner_idx + 1} WINS!", cx + 3, cy - 47, 'Arial', 56, (0, 0, 0),
+                                bold=True, anchor_x='center', anchor_y='center', alpha=120)
+        self.renderer.draw_text(f"PLAYER {self.winner_idx + 1} WINS!", cx, cy - 50, 'Arial', 56, (255, 255, 255),
+                                bold=True, anchor_x='center', anchor_y='center')
+        self.renderer.draw_text("MONOPOLY CHAMPION", cx, cy + 20, 'Arial', 36, (255, 255, 200),
+                                bold=True, anchor_x='center', anchor_y='center')
+
         winner = self.players[self.winner_idx]
-        self.renderer.draw_text(
-            f"Final Balance: ${winner.money}",
-            cx, cy + 120,
-            'Arial', 30, (255, 255, 255),
-            anchor_x='center', anchor_y='center'
-        )
-        
+        self.renderer.draw_text(f"Final Balance: ${winner.money}", cx, cy + 80, 'Arial', 26, (255, 255, 255),
+                                anchor_x='center', anchor_y='center')
+
         # Back to Main Menu button
-        btn_w = 300
-        btn_h = 60
-        btn_x = (self.width - btn_w) // 2
-        btn_y = banner_y - 100
-        
-        self.renderer.draw_rect((80, 80, 80), (btn_x, btn_y, btn_w, btn_h))
+        btn_w, btn_h = 300, 60
+        btn_x = cx - btn_w // 2
+        btn_y = by - 90
+        self.renderer.draw_rect((0, 0, 0), (btn_x + 3, btn_y + 3, btn_w, btn_h), alpha=80)
+        self.renderer.draw_rect((60, 60, 60), (btn_x, btn_y, btn_w, btn_h))
         self.renderer.draw_rect((200, 200, 200), (btn_x, btn_y, btn_w, btn_h), width=3)
-        
-        self.renderer.draw_text(
-            "Back to Main Menu",
-            cx, btn_y + btn_h // 2,
-            'Arial', 24, (255, 255, 255),
-            anchor_x='center', anchor_y='center',
-            bold=True
-        )
+        self.renderer.draw_text("Back to Main Menu", cx, btn_y + btn_h // 2, 'Arial', 24, (255, 255, 255),
+                                bold=True, anchor_x='center', anchor_y='center')
+
+        # Animation layers
+        try:
+            self._particles.draw(self.renderer)
+            for _r in self._pulse_rings: _r.draw(self.renderer)
+            for _fl in self._flashes: _fl.draw(self.renderer, self.width, self.height)
+            for _p in self._text_pops: _p.draw(self.renderer)
+        except Exception:
+            pass
     
     def _draw_player_select(self):
         """Draw player selection screen"""

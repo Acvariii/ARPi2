@@ -7,6 +7,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from core.player_selection import PlayerSelectionUI
 from core.card_rendering import draw_label_card, draw_game_background
+from config import PLAYER_COLORS
 from core.animation import (
     ParticleSystem, CardFlyAnim, TextPopAnim, PulseRing, ScreenFlash,
     _RAINBOW_PALETTE as _FW_COLORS, draw_rainbow_title,
@@ -350,15 +351,16 @@ class UnoGame:
 
         # Turn + direction indicator near center
         try:
-            arrow = "→" if self.direction >= 0 else "←"
+            arrow = "⟳" if self.direction >= 0 else "⟲"
+            acx = int((draw_cx + disc_cx) / 2)
+            acy = int((draw_cy + disc_cy) / 2 - 70)
+            # Glow ring
+            self.renderer.draw_circle((255, 255, 255), (acx, acy), 22, alpha=15)
+            self.renderer.draw_circle((255, 255, 255), (acx, acy), 22, width=2, alpha=60)
             self.renderer.draw_text(
-                f"{arrow}",
-                int((draw_cx + disc_cx) / 2),
-                int((draw_cy + disc_cy) / 2 - 70),
-                font_size=26,
-                color=(220, 220, 220),
-                anchor_x="center",
-                anchor_y="top",
+                arrow, acx, acy,
+                font_size=30, color=(255, 255, 255),
+                anchor_x="center", anchor_y="center",
             )
         except Exception:
             pass
@@ -374,15 +376,28 @@ class UnoGame:
         # Winner overlay
         if isinstance(self.winner, int):
             try:
-                self.renderer.draw_rect((0, 0, 0), (0, 0, w, h), alpha=120)
+                self.renderer.draw_rect((0, 0, 0), (0, 0, w, h), alpha=150)
+                bw2, bh2 = min(600, int(w * 0.55)), 180
+                bx2, by2 = w // 2 - bw2 // 2, h // 2 - bh2 // 2
+                self.renderer.draw_rect((0, 0, 0), (bx2 + 5, by2 + 5, bw2, bh2), alpha=100)
+                self.renderer.draw_rect((10, 10, 18), (bx2, by2, bw2, bh2), alpha=220)
+                self.renderer.draw_rect((255, 215, 0), (bx2, by2, bw2, bh2), width=4, alpha=200)
+                self.renderer.draw_circle((255, 215, 0), (w // 2, h // 2), int(min(bw2, bh2) * 0.3), alpha=12)
+                self.renderer.draw_text(
+                    "🏆", w // 2, h // 2 + 30, font_size=50,
+                    color=(255, 215, 0), anchor_x="center", anchor_y="center",
+                )
                 self.renderer.draw_text(
                     f"Winner: {self._seat_label(self.winner)}",
-                    w // 2,
-                    h // 2,
-                    font_size=42,
-                    color=(240, 240, 240),
-                    anchor_x="center",
-                    anchor_y="center",
+                    w // 2 + 2, h // 2 - 22,
+                    font_size=40, color=(0, 0, 0),
+                    anchor_x="center", anchor_y="center", alpha=100,
+                )
+                self.renderer.draw_text(
+                    f"Winner: {self._seat_label(self.winner)}",
+                    w // 2, h // 2 - 24,
+                    font_size=40, color=(255, 240, 180),
+                    anchor_x="center", anchor_y="center",
                 )
             except Exception:
                 pass
@@ -405,14 +420,14 @@ class UnoGame:
         # Last event (brief)
         if self._last_event and self._last_event_age < 4.5:
             try:
+                ev = self._last_event
+                ew = max(180, len(ev) * 8)
+                eh = 22
+                self.renderer.draw_rect((0, 0, 0), (20, 74, ew, eh), alpha=120)
                 self.renderer.draw_text(
-                    self._last_event,
-                    24,
-                    78,
-                    font_size=12,
-                    color=(190, 190, 190),
-                    anchor_x="left",
-                    anchor_y="top",
+                    ev, 28, 85,
+                    font_size=12, color=(200, 200, 200),
+                    anchor_x="left", anchor_y="center",
                 )
             except Exception:
                 pass
@@ -935,11 +950,20 @@ class UnoGame:
     def _draw_card_back(self, rect: Tuple[float, float, float, float], label: str = "") -> None:
         x, y, w, h = rect
         try:
-            self.renderer.draw_rect((35, 35, 45), (int(x), int(y), int(w), int(h)), alpha=230)
-            self.renderer.draw_rect((90, 90, 110), (int(x), int(y), int(w), int(h)), width=2, alpha=230)
-            self.renderer.draw_line((120, 120, 150), (int(x + 10), int(y + 12)), (int(x + w - 10), int(y + h - 12)), width=2, alpha=200)
+            # Shadow
+            self.renderer.draw_rect((0, 0, 0), (int(x + 4), int(y - 4), int(w), int(h)), alpha=70)
+            # Body — dark red/maroon UNO back
+            self.renderer.draw_rect((40, 10, 15), (int(x), int(y), int(w), int(h)), alpha=240)
+            # Inner lighter stripe
+            ip = max(4, int(min(w, h) * 0.08))
+            self.renderer.draw_rect((70, 20, 25), (int(x + ip), int(y + ip), int(w - 2 * ip), int(h - 2 * ip)), alpha=100)
+            # Border
+            self.renderer.draw_rect((200, 50, 50), (int(x), int(y), int(w), int(h)), width=2, alpha=220)
+            # Cross lines
+            self.renderer.draw_line((180, 60, 50), (int(x + 8), int(y + 10)), (int(x + w - 8), int(y + h - 10)), width=2, alpha=120)
+            self.renderer.draw_line((180, 60, 50), (int(x + w - 8), int(y + 10)), (int(x + 8), int(y + h - 10)), width=2, alpha=120)
             if label:
-                self.renderer.draw_text(label, int(x + w / 2), int(y + h / 2), font_size=12, color=(230, 230, 230), anchor_x="center", anchor_y="center")
+                self.renderer.draw_text(label, int(x + w / 2), int(y + h / 2), font_size=12, color=(255, 240, 200), anchor_x="center", anchor_y="center")
         except Exception:
             return
 
@@ -969,17 +993,36 @@ class UnoGame:
         ax, ay = self._seat_anchor(seat, w, h)
         count = int(len(self.hands.get(seat, [])))
         is_turn = bool(self.current_turn_seat == seat)
-        col = (235, 235, 235) if is_turn else (200, 200, 200)
         try:
-            # small label + count
+            # Badge panel
+            bw, bh = 100, 36
+            bx = int(ax) - bw // 2
+            offset_y = 30 if seat in (3, 4, 5) else -30
+            by = int(ay) + offset_y - bh // 2
+            bg = (18, 18, 28)
+            border = (255, 220, 60) if is_turn else (140, 140, 150)
+            self.renderer.draw_rect((0, 0, 0), (bx + 2, by + 2, bw, bh), alpha=60)
+            self.renderer.draw_rect(bg, (bx, by, bw, bh), alpha=190)
+            if is_turn:
+                self.renderer.draw_rect(border, (bx - 2, by - 2, bw + 4, bh + 4), width=2, alpha=40)
+            self.renderer.draw_rect(border, (bx, by, bw, bh), width=2 if is_turn else 1, alpha=200)
+            # Player colour dot
+            pcol = PLAYER_COLORS[seat % len(PLAYER_COLORS)] if seat < len(PLAYER_COLORS) else (200, 200, 200)
+            self.renderer.draw_circle(pcol, (bx + 10, by + bh // 2), 4, alpha=180)
+            # Name
+            name_col = (255, 240, 100) if is_turn else (210, 210, 210)
             self.renderer.draw_text(
-                f"{self._seat_label(seat)} ({count})" + (" *" if is_turn else ""),
-                int(ax),
-                int(ay + (42 if seat in (3, 4, 5) else -42)),
-                font_size=12,
-                color=col,
-                anchor_x="center",
-                anchor_y="center",
+                self._seat_label(seat),
+                int(ax), by + 10,
+                font_size=11, color=name_col,
+                anchor_x="center", anchor_y="top",
+            )
+            # Card count badge
+            badge_txt = f"🃏{count}"
+            self.renderer.draw_text(
+                badge_txt, int(ax), by + bh - 6,
+                font_size=10, color=(200, 200, 200),
+                anchor_x="center", anchor_y="bottom",
             )
         except Exception:
             pass

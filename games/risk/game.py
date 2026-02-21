@@ -2769,42 +2769,49 @@ class RiskGame:
         except Exception:
             pass
         if self.winner is not None:
+            # Small header note
             self.renderer.draw_text(
-                f"Winner: {self._seat_label(self.winner)}",
-                pad,
-                68,
-                font_size=14,
-                color=(255, 220, 140),
-                anchor_x="left",
-                anchor_y="top",
+                f"\U0001F3C6 {self._seat_label(self.winner)} Wins!",
+                pad, 68, font_size=14, color=(255, 220, 140),
+                anchor_x="left", anchor_y="top",
             )
 
             # Winner screen overlay + fireworks/confetti.
             try:
-                # Dim the background a bit.
                 overlay = pyglet.shapes.Rectangle(0, 0, int(self.width), int(self.height), color=(0, 0, 0))
-                overlay.opacity = 160
+                overlay.opacity = 170
                 overlay.draw()
 
                 winner_col = PLAYER_COLORS[int(self.winner) % len(PLAYER_COLORS)]
                 wc = (int(winner_col[0]), int(winner_col[1]), int(winner_col[2]))
+                cx, cy = int(self.width // 2), int(self.height // 2)
+
+                # Banner
+                bw2, bh2 = min(600, int(self.width * 0.55)), 180
+                bx2, by2 = cx - bw2 // 2, cy - bh2 // 2
+                self.renderer.draw_rect((0, 0, 0), (bx2 + 5, by2 + 5, bw2, bh2), alpha=100)
+                self.renderer.draw_rect((10, 10, 16), (bx2, by2, bw2, bh2), alpha=220)
+                self.renderer.draw_rect((255, 215, 0), (bx2, by2, bw2, bh2), width=4, alpha=200)
+                self.renderer.draw_circle(wc, (cx, cy), int(min(bw2, bh2) * 0.28), alpha=18)
+
+                # Shadow text
                 self.renderer.draw_text(
                     f"{self._seat_label(int(self.winner))} WINS!",
-                    int(self.width // 2),
-                    int(self.height // 2) - 10,
-                    font_size=44,
-                    color=(245, 245, 245),
-                    anchor_x="center",
-                    anchor_y="center",
+                    cx + 2, cy - 22,
+                    font_size=42, color=(0, 0, 0),
+                    anchor_x="center", anchor_y="center", alpha=120,
+                )
+                self.renderer.draw_text(
+                    f"{self._seat_label(int(self.winner))} WINS!",
+                    cx, cy - 24,
+                    font_size=42, color=(255, 245, 220),
+                    anchor_x="center", anchor_y="center",
                 )
                 self.renderer.draw_text(
                     "Mission Complete",
-                    int(self.width // 2),
-                    int(self.height // 2) + 32,
-                    font_size=18,
-                    color=wc,
-                    anchor_x="center",
-                    anchor_y="center",
+                    cx, cy + 24,
+                    font_size=20, color=wc,
+                    anchor_x="center", anchor_y="center",
                 )
 
                 now2 = time.time()
@@ -2854,40 +2861,40 @@ class RiskGame:
                 def _draw_dice_block(x: int, y: int, seat_val: Optional[int], rolls: List[int], align: str) -> None:
                     label = self._seat_label(int(seat_val)) if isinstance(seat_val, int) else "—"
                     col = _seat_col(seat_val)
-                    # Label
+                    # Label with shadow
                     self.renderer.draw_text(
-                        label,
-                        x,
-                        y,
-                        font_size=12,
-                        color=col,
-                        anchor_x=align,
-                        anchor_y="top",
+                        label, x + 1, y + 1, font_size=13, color=(0, 0, 0),
+                        anchor_x=align, anchor_y="top", bold=True,
                     )
-                    # Dice
-                    dx = -22 if align == "right" else 22
-                    cx = x
-                    cy = y + 18
+                    self.renderer.draw_text(
+                        label, x, y, font_size=13, color=col,
+                        anchor_x=align, anchor_y="top", bold=True,
+                    )
+                    # Square dice
+                    ds = 26  # die size
+                    gap = 4
+                    dx = -(ds + gap) if align == "right" else (ds + gap)
+                    cx = x - ds // 2 if align == "right" else x - ds // 2
+                    cy = y + 20
                     for r in rolls:
-                        self.renderer.draw_circle(col, (int(cx), int(cy)), 10, width=0, alpha=220)
-                        self.renderer.draw_circle((0, 0, 0), (int(cx), int(cy)), 11, width=0, alpha=70)
+                        ix, iy = int(cx), int(cy)
+                        # Shadow
+                        self.renderer.draw_rect((0, 0, 0), (ix + 3, iy + 3, ds, ds), width=0, alpha=90)
+                        # White face
+                        self.renderer.draw_rect((255, 255, 255), (ix, iy, ds, ds), width=0, alpha=240)
+                        # Coloured border
+                        self.renderer.draw_rect(col, (ix, iy, ds, ds), width=2, alpha=220)
+                        # Inner highlight
+                        self.renderer.draw_rect((255, 255, 255), (ix + 2, iy + 2, ds - 4, 3), width=0, alpha=100)
+                        # Value text (shadow + bright)
+                        tx, ty = ix + ds // 2, iy + ds // 2
                         self.renderer.draw_text(
-                            str(int(r)),
-                            int(cx),
-                            int(cy),
-                            font_size=12,
-                            color=(0, 0, 0),
-                            anchor_x="center",
-                            anchor_y="center",
+                            str(int(r)), tx + 1, ty + 1, font_size=14,
+                            color=(0, 0, 0), anchor_x="center", anchor_y="center", bold=True,
                         )
                         self.renderer.draw_text(
-                            str(int(r)),
-                            int(cx) - 1,
-                            int(cy) - 1,
-                            font_size=12,
-                            color=(245, 245, 245),
-                            anchor_x="center",
-                            anchor_y="center",
+                            str(int(r)), tx, ty, font_size=14,
+                            color=(40, 40, 40), anchor_x="center", anchor_y="center", bold=True,
                         )
                         cx += dx
 
@@ -2936,6 +2943,7 @@ class RiskGame:
             self.renderer.draw_line((210, 210, 210), (ax, ay), (bx, by), width=2, alpha=70)
 
         # Draw troop markers
+        turn_seat = self.current_turn_seat
         for td in self.territories:
             seat = self.owner.get(td.tid)
             troops = int(self.troops.get(td.tid, 0) or 0)
@@ -2950,52 +2958,46 @@ class RiskGame:
             else:
                 token_col = (230, 230, 230)
 
-            # token body + outline
-            self.renderer.draw_circle(token_col, (sx, sy), 10, width=0, alpha=220)
-            self.renderer.draw_circle((0, 0, 0), (sx, sy), 11, width=0, alpha=70)
-            # number
+            # Shadow
+            self.renderer.draw_circle((0, 0, 0), (sx + 2, sy + 2), 15, width=0, alpha=70)
+            # Glow for current-turn owner
+            if seat == turn_seat:
+                self.renderer.draw_circle(token_col, (sx, sy), 20, width=0, alpha=int(25 + 15 * pulse))
+            # Token body
+            self.renderer.draw_circle(token_col, (sx, sy), 14, width=0, alpha=230)
+            # Highlight
+            hl = (min(255, token_col[0] + 70), min(255, token_col[1] + 70), min(255, token_col[2] + 70))
+            self.renderer.draw_circle(hl, (sx - 3, sy - 3), 5, width=0, alpha=70)
+            # Outline
+            self.renderer.draw_circle((0, 0, 0), (sx, sy), 15, width=2, alpha=120)
+            # Troop count
             self.renderer.draw_text(
-                str(troops),
-                sx + 1,
-                sy + 1,
-                font_size=12,
-                color=(0, 0, 0),
-                anchor_x="center",
-                anchor_y="center",
+                str(troops), sx + 1, sy + 1,
+                font_size=13, color=(0, 0, 0),
+                anchor_x="center", anchor_y="center",
             )
             self.renderer.draw_text(
-                str(troops),
-                sx,
-                sy,
-                font_size=12,
-                color=(245, 245, 245),
-                anchor_x="center",
-                anchor_y="center",
+                str(troops), sx, sy,
+                font_size=13, color=(255, 255, 255),
+                anchor_x="center", anchor_y="center",
+                bold=True,
             )
 
-        # Territory names (small, always visible)
+        # Territory names (larger, always visible)
         for td in self.territories:
             px, py = self._tid_point(int(td.tid))
             sx, sy = _map_to_screen(px, py)
             name = str(td.name)
             # Shadow + foreground for readability.
             self.renderer.draw_text(
-                name,
-                int(sx) + 1,
-                int(sy) + 16 + 1,
-                font_size=9,
-                color=(0, 0, 0),
-                anchor_x="center",
-                anchor_y="center",
+                name, int(sx) + 1, int(sy) + 20 + 1,
+                font_size=11, color=(0, 0, 0),
+                anchor_x="center", anchor_y="center", alpha=180,
             )
             self.renderer.draw_text(
-                name,
-                int(sx),
-                int(sy) + 16,
-                font_size=9,
-                color=(230, 230, 230),
-                anchor_x="center",
-                anchor_y="center",
+                name, int(sx), int(sy) + 20,
+                font_size=11, color=(235, 235, 235),
+                anchor_x="center", anchor_y="center",
             )
 
         # FX / animations (projectiles, moving troops, pulses, sparks)
@@ -3102,14 +3104,17 @@ class RiskGame:
 
         # Last event (bottom-left)
         if self.last_event:
+            ev = str(self.last_event)
+            ew = max(200, len(ev) * 8)
+            eh = 24
+            ex = pad
+            ey = int(self.height) - 32
+            self.renderer.draw_rect((0, 0, 0), (ex, ey, ew, eh), alpha=140)
+            self.renderer.draw_rect((120, 120, 140), (ex, ey, ew, eh), width=1, alpha=40)
             self.renderer.draw_text(
-                str(self.last_event),
-                pad,
-                int(self.height) - 18,
-                font_size=12,
-                color=(190, 190, 190),
-                anchor_x="left",
-                anchor_y="top",
+                ev, ex + 8, ey + eh // 2,
+                font_size=12, color=(200, 200, 210),
+                anchor_x="left", anchor_y="center",
             )
 
         # ── Animation render layer ──────────────────────────────────────────

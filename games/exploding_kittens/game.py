@@ -6,6 +6,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from core.player_selection import PlayerSelectionUI
 from core.card_rendering import draw_emoji_card, draw_game_background
+from config import PLAYER_COLORS
 from core.animation import (
     ParticleSystem, CardFlyAnim, TextPopAnim, PulseRing, ScreenFlash,
     _RAINBOW_PALETTE as _FW_COLORS, draw_rainbow_title,
@@ -815,7 +816,8 @@ class ExplodingKittensGame:
         # Subtle table highlight behind piles
         try:
             cx, cy = w // 2, h // 2
-            self.renderer.draw_circle((0, 0, 0), (cx, cy), int(min(w, h) * 0.15), alpha=35)
+            self.renderer.draw_circle((80, 30, 100), (cx, cy), int(min(w, h) * 0.18), alpha=20)
+            self.renderer.draw_circle((140, 60, 180), (cx, cy), int(min(w, h) * 0.12), alpha=15)
         except Exception:
             pass
         self._draw_card_back(draw_rect, label=f"DECK {len(self.draw_pile)}")
@@ -828,29 +830,43 @@ class ExplodingKittensGame:
         # Winner overlay
         if isinstance(self.winner, int):
             try:
-                self.renderer.draw_rect((0, 0, 0), (0, 0, w, h), alpha=120)
+                self.renderer.draw_rect((0, 0, 0), (0, 0, w, h), alpha=150)
+                bw2, bh2 = min(600, int(w * 0.55)), 180
+                bx2, by2 = w // 2 - bw2 // 2, h // 2 - bh2 // 2
+                self.renderer.draw_rect((0, 0, 0), (bx2 + 5, by2 + 5, bw2, bh2), alpha=100)
+                self.renderer.draw_rect((18, 10, 24), (bx2, by2, bw2, bh2), alpha=225)
+                self.renderer.draw_rect((255, 180, 40), (bx2, by2, bw2, bh2), width=4, alpha=200)
+                self.renderer.draw_circle((255, 180, 40), (w // 2, h // 2), int(min(bw2, bh2) * 0.3), alpha=12)
+                self.renderer.draw_text(
+                    "😼", w // 2, h // 2 + 30, font_size=48,
+                    color=(255, 200, 60), anchor_x="center", anchor_y="center",
+                )
                 self.renderer.draw_text(
                     f"Winner: {self._seat_label(self.winner)}",
-                    w // 2,
-                    h // 2,
-                    font_size=42,
-                    color=(240, 240, 240),
-                    anchor_x="center",
-                    anchor_y="center",
+                    w // 2 + 2, h // 2 - 22,
+                    font_size=40, color=(0, 0, 0),
+                    anchor_x="center", anchor_y="center", alpha=100,
+                )
+                self.renderer.draw_text(
+                    f"Winner: {self._seat_label(self.winner)}",
+                    w // 2, h // 2 - 24,
+                    font_size=40, color=(255, 240, 180),
+                    anchor_x="center", anchor_y="center",
                 )
             except Exception:
                 pass
 
         if self._last_event and self._last_event_age < 4.5:
             try:
+                ev = self._last_event
+                ew = max(180, len(ev) * 8)
+                eh = 22
+                self.renderer.draw_rect((0, 0, 0), (20, 74, ew, eh), alpha=120)
+                self.renderer.draw_rect((200, 140, 255), (20, 74, ew, eh), width=1, alpha=40)
                 self.renderer.draw_text(
-                    self._last_event,
-                    24,
-                    78,
-                    font_size=12,
-                    color=(190, 190, 190),
-                    anchor_x="left",
-                    anchor_y="top",
+                    ev, 28, 85,
+                    font_size=12, color=(210, 200, 230),
+                    anchor_x="left", anchor_y="center",
                 )
             except Exception:
                 pass
@@ -1061,38 +1077,46 @@ class ExplodingKittensGame:
         count = int(len(self.hands.get(seat, [])))
         is_turn = bool(self.current_turn_seat == seat)
 
-        # Small card placeholder at each seat (helps make the table feel like a board)
         try:
             rx, ry, rw, rh = self._seat_card_target_rect(seat, w, h)
-            # base
-            self.renderer.draw_rect((0, 0, 0), (int(rx + 3), int(ry - 3), int(rw), int(rh)), alpha=55)
-            self.renderer.draw_rect((22, 22, 28), (int(rx), int(ry), int(rw), int(rh)), alpha=150)
-            # outline (gold-ish on turn)
-            outline = (245, 210, 95) if is_turn else (160, 160, 170)
-            self.renderer.draw_rect(outline, (int(rx), int(ry), int(rw), int(rh)), width=2 if is_turn else 1, alpha=190)
-            # count badge
+            # Shadow
+            self.renderer.draw_rect((0, 0, 0), (int(rx + 3), int(ry - 3), int(rw), int(rh)), alpha=70)
+            # Card placeholder body
+            bg = (28, 16, 36) if is_turn else (18, 18, 24)
+            self.renderer.draw_rect(bg, (int(rx), int(ry), int(rw), int(rh)), alpha=190)
+            # Turn glow ring
+            outline = (250, 200, 70) if is_turn else (140, 120, 160)
+            if is_turn:
+                self.renderer.draw_rect(outline, (int(rx - 2), int(ry - 2), int(rw + 4), int(rh + 4)), width=2, alpha=50)
+            self.renderer.draw_rect(outline, (int(rx), int(ry), int(rw), int(rh)), width=2 if is_turn else 1, alpha=200)
+            # Cat emoji watermark
             self.renderer.draw_text(
-                str(count),
-                int(rx + rw / 2),
-                int(ry + rh / 2),
-                font_size=14,
-                color=(235, 235, 235),
-                anchor_x="center",
-                anchor_y="center",
+                "😺", int(rx + rw / 2), int(ry + rh / 2 + 12),
+                font_size=18, color=(200, 200, 200), anchor_x="center", anchor_y="center", alpha=40,
+            )
+            # Count badge
+            self.renderer.draw_text(
+                str(count), int(rx + rw / 2), int(ry + rh / 2 - 4),
+                font_size=16, color=(240, 240, 240), bold=True,
+                anchor_x="center", anchor_y="center",
             )
         except Exception:
             pass
 
-        col = (245, 245, 245) if is_turn else (205, 205, 205)
+        # Player name with colour dot
         try:
+            pcol = PLAYER_COLORS[seat % len(PLAYER_COLORS)]
+        except Exception:
+            pcol = (200, 200, 200)
+        name_col = (250, 220, 100) if is_turn else (205, 205, 205)
+        try:
+            name_y = int(ay + (42 if seat in (3, 4, 5) else -42))
+            self.renderer.draw_circle(pcol, (int(ax) - 40, name_y), 4, alpha=180)
             self.renderer.draw_text(
                 f"{self._seat_label(seat)}" + ("  ★" if is_turn else ""),
-                int(ax),
-                int(ay + (42 if seat in (3, 4, 5) else -42)),
-                font_size=12,
-                color=col,
-                anchor_x="center",
-                anchor_y="center",
+                int(ax), name_y,
+                font_size=12, color=name_col,
+                anchor_x="center", anchor_y="center",
             )
         except Exception:
             pass

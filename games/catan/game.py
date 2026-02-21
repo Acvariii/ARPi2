@@ -2016,6 +2016,8 @@ class CatanGame:
             sand_h = max(18, int(h * 0.085))
             self.renderer.draw_rect((194, 170, 120), (0, h - sand_h, w, sand_h), alpha=225)
             self.renderer.draw_rect((176, 154, 108), (0, h - sand_h, w, max(1, sand_h // 3)), alpha=140)
+            # Foam line
+            self.renderer.draw_rect((220, 210, 180), (0, h - sand_h - 2, w, 2), alpha=60)
         except Exception:
             pass
 
@@ -2227,14 +2229,15 @@ class CatanGame:
 
         # Event line
         if self.last_event:
+            ev = str(self.last_event)
+            ew = max(200, len(ev) * 8)
+            eh = 24
+            self.renderer.draw_rect((0, 0, 0), (12, 68, ew, eh), alpha=130)
+            self.renderer.draw_rect((80, 160, 200), (12, 68, ew, eh), width=1, alpha=50)
             self.renderer.draw_text(
-                str(self.last_event),
-                16,
-                72,
-                font_size=12,
-                color=(190, 190, 190),
-                anchor_x="left",
-                anchor_y="top",
+                ev, 20, 80,
+                font_size=12, color=(200, 210, 220),
+                anchor_x="left", anchor_y="center",
             )
 
         # Footer hint

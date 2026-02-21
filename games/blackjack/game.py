@@ -1572,62 +1572,50 @@ class BlackjackGame:
         pass
     
     def _draw_panel_info(self, player: BlackjackPlayer, panel: PlayerPanel):
-        """Draw player chips, bet, and ready status with rotation"""
+        """Draw player chips, bet, and status with modern badge style."""
         x, y, w, h = panel.rect
-        
+
         # Calculate bet amount
-        total_bet = sum(h.bet for h in player.hands)
+        total_bet = sum(hd.bet for hd in player.hands)
         if total_bet == 0 and player.current_bet > 0:
             total_bet = player.current_bet
-        
-        # Build info text - combine balance, bet, and ready on same line
-        info_text = f"${player.chips}"
+
+        # Determine orientation-aware anchor
+        if panel.orientation == 0:     # Bottom
+            tx, ty, rot = x + w // 2, y + int(h * 0.30), 0
+        elif panel.orientation == 180: # Top
+            tx, ty, rot = x + w // 2, y + int(h * 0.70), 180
+        elif panel.orientation == 270: # Left
+            tx, ty, rot = x + int(w * 0.85), y + h // 2, 90
+        else:                          # Right
+            tx, ty, rot = x + int(w * 0.15), y + h // 2, 270
+
+        # Build label parts
+        parts = [f"💰${player.chips}"]
         if total_bet > 0:
-            info_text += f" | Bet: ${total_bet}"
+            parts.append(f"🎲${total_bet}")
         if player.is_ready and self.state in ["betting", "insurance"]:
-            info_text += " | Ready"
-        
-        # Show result during results phase
+            parts.append("✅")
         if self.state == "results" and hasattr(self, '_player_results'):
             if player.idx in self._player_results:
-                result_title, result_msg, result_time = self._player_results[player.idx]
-                info_text += f" | {result_title}"
-        
-        info_lines = [info_text]
-        
-        # Position and draw based on orientation
-        if panel.orientation == 0:  # Bottom
-            tx = x + w // 2
-            ty = y + int(h * 0.30)
-            for i, line in enumerate(info_lines):
-                self.renderer.draw_text(
-                    line, tx, ty - i * 22, 'Arial', 18, (255, 255, 255),
-                    bold=True, anchor_x='center', anchor_y='center', rotation=0
-                )
-        elif panel.orientation == 180:  # Top
-            tx = x + w // 2
-            ty = y + int(h * 0.70)
-            for i, line in enumerate(info_lines):
-                self.renderer.draw_text(
-                    line, tx, ty + i * 22, 'Arial', 18, (255, 255, 255),
-                    bold=True, anchor_x='center', anchor_y='center', rotation=180
-                )
-        elif panel.orientation == 270:  # Left
-            tx = x + int(w * 0.85)
-            ty = y + h // 2
-            for i, line in enumerate(info_lines):
-                self.renderer.draw_text(
-                    line, tx, ty + i * 22, 'Arial', 16, (255, 255, 255),
-                    bold=True, anchor_x='center', anchor_y='center', rotation=90
-                )
-        else:  # 90 - Right
-            tx = x + int(w * 0.15)
-            ty = y + h // 2
-            for i, line in enumerate(info_lines):
-                self.renderer.draw_text(
-                    line, tx, ty - i * 22, 'Arial', 16, (255, 255, 255),
-                    bold=True, anchor_x='center', anchor_y='center', rotation=270
-                )
+                result_title, _, _ = self._player_results[player.idx]
+                parts.append(result_title)
+        label = "  ".join(parts)
+
+        # Chips badge background
+        badge_w = min(int(w * 0.85), max(120, len(label) * 10))
+        badge_h = 26
+        bx = tx - badge_w // 2 if rot in (0, 180) else tx - badge_h // 2
+        by = ty - badge_h // 2 if rot in (0, 180) else ty - badge_w // 2
+        if rot in (0, 180):
+            self.renderer.draw_rect((0, 0, 0), (bx, by, badge_w, badge_h), alpha=100)
+            self.renderer.draw_rect((255, 215, 0), (bx, by, badge_w, badge_h), width=1, alpha=80)
+
+        fs = 16 if rot in (0, 180) else 14
+        self.renderer.draw_text(
+            label, tx, ty, 'Arial', fs, (255, 255, 255),
+            bold=True, anchor_x='center', anchor_y='center', rotation=rot
+        )
     
     def _draw_panels(self):
         """Draw player panels"""
@@ -1667,10 +1655,26 @@ class BlackjackGame:
                         btn.draw(self.renderer, progress)
     
     def _draw_table(self):
-        """Draw casino table"""
+        """Draw casino table with felt, inner glow, and card-shoe accent."""
         tx, ty, tw, th = self.table_rect
-        self.renderer.draw_rect((0, 120, 60), (tx, ty, tw, th))
-        self.renderer.draw_rect((255, 215, 0), (tx, ty, tw, th), width=4)
+        # Outer shadow
+        self.renderer.draw_rect((0, 0, 0), (tx + 4, ty + 4, tw, th), alpha=60)
+        # Felt base
+        self.renderer.draw_rect((0, 100, 48), (tx, ty, tw, th), alpha=255)
+        # Lighter inner felt band
+        inner_pad = max(6, int(min(tw, th) * 0.04))
+        self.renderer.draw_rect((8, 130, 55), (tx + inner_pad, ty + inner_pad, tw - 2 * inner_pad, th - 2 * inner_pad), alpha=100)
+        # Centre glow circle
+        gcx, gcy = tx + tw // 2, ty + th // 2
+        self.renderer.draw_circle((15, 150, 60), (gcx, gcy), int(min(tw, th) * 0.30), alpha=30)
+        # Gold rails
+        self.renderer.draw_rect((200, 170, 40), (tx, ty, tw, th), width=5, alpha=200)
+        self.renderer.draw_rect((240, 210, 80), (tx + 2, ty + 2, tw - 4, th - 4), width=2, alpha=80)
+        # "DEALER" label at top-centre of table
+        self.renderer.draw_text(
+            "DEALER", gcx, ty + 18, 'Arial', 14, (255, 255, 255),
+            bold=True, anchor_x='center', anchor_y='top', alpha=80
+        )
     
     def _draw_animating_cards(self):
         """Draw cards that are currently animating"""
@@ -1720,31 +1724,19 @@ class BlackjackGame:
     
     def _draw_card_at_position(self, card: Card, x: int, y: int, show_face: bool = True,
                                rotation: int = 0, border_color: Tuple[int, int, int] = None):
-        """Draw a single card at specified position (for animations)"""
+        """Draw a single card at specified position (for animations)."""
         card_width = 70
         card_height = 100
-        
-        # Draw card background
-        if show_face:
-            self.renderer.draw_rect((255, 255, 255), (x, y, card_width, card_height))
-        else:
-            self.renderer.draw_rect((50, 50, 150), (x, y, card_width, card_height))
-        
-        # Draw border
-        if border_color:
-            self.renderer.draw_rect(border_color, (x, y, card_width, card_height), width=3)
-        else:
-            self.renderer.draw_rect((0, 0, 0), (x, y, card_width, card_height), width=2)
-        
-        if show_face:
-            # Determine card color
-            color = (255, 0, 0) if card.suit in ['♥', '♦'] else (0, 0, 0)
-            
-            # Draw rank and suit
-            self.renderer.draw_text(card.rank, x + 10, y + card_height - 25, 
-                                  'Arial', 20, color, bold=True)
-            self.renderer.draw_text(card.suit, x + 10, y + card_height - 50, 
-                                  'Arial', 24, color, bold=True)
+        border = border_color if border_color else (30, 30, 30)
+        bw = 3 if border_color else 2
+        draw_playing_card(
+            self.renderer,
+            (int(x), int(y), int(card_width), int(card_height)),
+            f"{card.rank}{card.suit}" if show_face else "",
+            face_up=show_face,
+            border_rgb=border,
+            border_width=bw,
+        )
     
     def _draw_dealer(self):
         """Draw dealer's hand in center"""
@@ -1853,21 +1845,19 @@ class BlackjackGame:
                 # No hand values or STAND text - players count their own cards
     
     def _draw_bust_indicator(self, x: int, y: int, w: int, h: int, orientation: int):
-        """Draw a large X through busted cards"""
-        # Draw thick red X through the cards
-        line_color = (255, 50, 50)
-        line_width = 5
-        
-        # Draw two diagonal lines forming an X
-        # Line 1: top-left to bottom-right
-        x1, y1 = x, y + h
-        x2, y2 = x + w, y
-        self.renderer.draw_line(line_color, (x1, y1), (x2, y2), line_width)
-        
-        # Line 2: bottom-left to top-right
-        x1, y1 = x, y
-        x2, y2 = x + w, y + h
-        self.renderer.draw_line(line_color, (x1, y1), (x2, y2), line_width)
+        """Draw a prominent bust X with red overlay."""
+        # Red tint over cards
+        self.renderer.draw_rect((200, 20, 20), (x, y, w, h), alpha=50)
+        # Thick red X glow
+        for offset in (3, 2, 1, 0):
+            a = 40 + offset * 30
+            lw = 6 - offset
+            self.renderer.draw_line((255, 50, 50), (x, y + h), (x + w, y), lw, alpha=a)
+            self.renderer.draw_line((255, 50, 50), (x, y), (x + w, y + h), lw, alpha=a)
+        # "BUST" text over
+        cx, cy = x + w // 2, y + h // 2
+        self.renderer.draw_text("BUST", cx + 2, cy + 2, 'Arial', 22, (0, 0, 0), bold=True, anchor_x='center', anchor_y='center', alpha=120)
+        self.renderer.draw_text("BUST", cx, cy, 'Arial', 22, (255, 60, 60), bold=True, anchor_x='center', anchor_y='center')
     
     def _calculate_player_positions(self) -> List[Tuple[int, int]]:
         """Calculate card positions from player's POV (above their panel from their perspective)"""
@@ -1896,79 +1886,17 @@ class BlackjackGame:
         return positions
     
     def _draw_card_rotated(self, card: Card, x: int, y: int, w: int, h: int, rotation: int, player_color: Tuple[int, int, int] = None):
-        """Draw a rotated playing card with rotated content"""
-        # Draw card background and border
-        self.renderer.draw_rect((255, 255, 255), (x, y, w, h))
-        outline_color = player_color if player_color else (0, 0, 0)
-        outline_width = 3 if player_color else 2
-        self.renderer.draw_rect(outline_color, (x, y, w, h), width=outline_width)
-        
-        # Suit color
-        color = (220, 20, 20) if card.suit in ['♥', '♦'] else (20, 20, 20)
-        
-        # Calculate center for rotation
-        cx = x + w // 2
-        cy = y + h // 2
-        
-        # Draw card content with rotation
-        if rotation == 0:  # Bottom player
-            # Rank top
-            self.renderer.draw_text(
-                card.rank, cx, y + h - 20,
-                'Arial', 20, color, bold=True, anchor_x='center', anchor_y='center', rotation=0
-            )
-            # Suit center
-            self.renderer.draw_text(
-                card.suit, cx, cy,
-                'Arial', 40, color, anchor_x='center', anchor_y='center', rotation=0
-            )
-            # Rank bottom
-            self.renderer.draw_text(
-                card.rank, cx, y + 20,
-                'Arial', 20, color, bold=True, anchor_x='center', anchor_y='center', rotation=0
-            )
-        elif rotation == 180:  # Top player
-            # Everything rotated 180
-            self.renderer.draw_text(
-                card.rank, cx, y + 20,
-                'Arial', 20, color, bold=True, anchor_x='center', anchor_y='center', rotation=180
-            )
-            self.renderer.draw_text(
-                card.suit, cx, cy,
-                'Arial', 40, color, anchor_x='center', anchor_y='center', rotation=180
-            )
-            self.renderer.draw_text(
-                card.rank, cx, y + h - 20,
-                'Arial', 20, color, bold=True, anchor_x='center', anchor_y='center', rotation=180
-            )
-        elif rotation == 90:  # Right player (rotated 90 CW)
-            # Card is rotated 90 degrees clockwise
-            self.renderer.draw_text(
-                card.rank, x + w - 20, cy,
-                'Arial', 20, color, bold=True, anchor_x='center', anchor_y='center', rotation=270
-            )
-            self.renderer.draw_text(
-                card.suit, cx, cy,
-                'Arial', 40, color, anchor_x='center', anchor_y='center', rotation=270
-            )
-            self.renderer.draw_text(
-                card.rank, x + 20, cy,
-                'Arial', 20, color, bold=True, anchor_x='center', anchor_y='center', rotation=270
-            )
-        else:  # rotation == 270, Left player (rotated 90 CCW)
-            # Card is rotated 90 degrees counter-clockwise
-            self.renderer.draw_text(
-                card.rank, x + 20, cy,
-                'Arial', 20, color, bold=True, anchor_x='center', anchor_y='center', rotation=90
-            )
-            self.renderer.draw_text(
-                card.suit, cx, cy,
-                'Arial', 40, color, anchor_x='center', anchor_y='center', rotation=90
-            )
-            self.renderer.draw_text(
-                card.rank, x + w - 20, cy,
-                'Arial', 20, color, bold=True, anchor_x='center', anchor_y='center', rotation=90
-            )
+        """Draw a rotated playing card using the polished core renderer."""
+        border = player_color if player_color else (30, 30, 30)
+        bw = 3 if player_color else 2
+        draw_playing_card(
+            self.renderer,
+            (int(x), int(y), int(w), int(h)),
+            f"{card.rank}{card.suit}",
+            face_up=True,
+            border_rgb=border,
+            border_width=bw,
+        )
     
     def _draw_card(self, card: Card, x: int, y: int, w: int, h: int, player_color: Tuple[int, int, int] = None):
         """Draw a playing card with optional player color outline"""
@@ -1985,53 +1913,59 @@ class BlackjackGame:
         )
     
     def _draw_card_back(self, x: int, y: int, w: int, h: int):
-        """Draw card back"""
-        self.renderer.draw_rect((0, 0, 0), (x + 3, y + 3, w, h), alpha=55)
-        self.renderer.draw_rect((50, 70, 150), (x, y, w, h))
-        self.renderer.draw_rect((230, 230, 230), (x, y, w, h), width=2)
-
-        # Pattern
-        for i in range(5):
-            self.renderer.draw_line((200, 200, 240), (x + 6, y + 10 + i * 18), (x + w - 6, y + 2 + i * 18), width=2, alpha=70)
-        try:
-            self.renderer.draw_text("🂠", x + w // 2, y + h // 2, 'Arial', 22, (235, 235, 235), anchor_x='center', anchor_y='center')
-        except Exception:
-            pass
+        """Draw card back with layered casino pattern."""
+        draw_playing_card(
+            self.renderer,
+            (int(x), int(y), int(w), int(h)),
+            "",
+            face_up=False,
+        )
     
     def _draw_game_over(self):
-        """Draw game over screen"""
-        # Background
+        """Draw game over screen with rich banner."""
         self._draw_background(self.width, self.height)
-        
-        # Draw panels to show final chip counts
         self._draw_panels()
-        
-        # Game over message in center
-        center_x = self.width // 2
-        center_y = self.height // 2
-        
+        draw_rainbow_title(self.renderer, "BLACKJACK", self.width)
+
+        cx, cy = self.width // 2, self.height // 2
+        bw, bh = min(700, int(self.width * 0.65)), 220
+        bx, by = cx - bw // 2, cy - bh // 2
+        # Shadow
+        self.renderer.draw_rect((0, 0, 0), (bx + 6, by + 6, bw, bh), alpha=100)
+        # Banner body
+        self.renderer.draw_rect((10, 10, 18), (bx, by, bw, bh), alpha=220)
+        # Gold border
+        self.renderer.draw_rect((255, 215, 0), (bx, by, bw, bh), width=4, alpha=200)
+        self.renderer.draw_rect((255, 235, 100), (bx + 4, by + 4, bw - 8, bh - 8), width=1, alpha=80)
+        # Inner glow
+        self.renderer.draw_circle((255, 215, 0), (cx, cy), int(min(bw, bh) * 0.3), alpha=10)
+
         self.renderer.draw_text(
-            "GAME OVER",
-            center_x, center_y + 50,
-            'Arial', 48, (255, 215, 0),
+            "GAME OVER", cx + 2, cy - 32, 'Arial', 46, (0, 0, 0),
+            bold=True, anchor_x='center', anchor_y='center', alpha=100
+        )
+        self.renderer.draw_text(
+            "GAME OVER", cx, cy - 34, 'Arial', 46, (255, 215, 0),
             bold=True, anchor_x='center', anchor_y='center'
         )
-        
         self.renderer.draw_text(
-            self.game_over_message,
-            center_x, center_y - 20,
-            'Arial', 32, (255, 255, 255),
+            self.game_over_message, cx, cy + 14, 'Arial', 24, (255, 255, 255),
             bold=True, anchor_x='center', anchor_y='center'
         )
-        
-        # Show restart instruction after 3 seconds
         if time.time() - self.game_over_time > 3.0:
             self.renderer.draw_text(
-                "Returning to player selection...",
-                center_x, center_y - 80,
-                'Arial', 20, (200, 200, 200),
+                "Returning to player selection...", cx, cy + 52, 'Arial', 16, (180, 180, 180),
                 anchor_x='center', anchor_y='center'
             )
+
+        # Animation layer
+        try:
+            self._particles.draw(self.renderer)
+            for _r in self._pulse_rings: _r.draw(self.renderer)
+            for _fl in self._flashes: _fl.draw(self.renderer, self.width, self.height)
+            for _p in self._text_pops: _p.draw(self.renderer)
+        except Exception:
+            pass
     
     def _draw_player_select(self):
         """Draw player selection"""
