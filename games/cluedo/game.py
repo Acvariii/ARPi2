@@ -7,6 +7,10 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from config import Colors, PLAYER_COLORS
 from core.player_selection import PlayerSelectionUI
+from core.animation import (
+    ParticleSystem, CardFlyAnim, TextPopAnim, PulseRing, ScreenFlash,
+    _RAINBOW_PALETTE as _FW_COLORS, draw_rainbow_title,
+)
 
 
 @dataclass(frozen=True)
@@ -184,6 +188,16 @@ class CluedoGame:
         # Opt-in flags used by the server
         self.web_ui_only_player_select = True
         self.board_only_mode = True
+
+        # ── Particle animations ─────────────────────────────────────────────
+        self._particles = ParticleSystem()
+        self._anim_card_flips: list = []
+        self._text_pops: list = []
+        self._pulse_rings: list = []
+        self._flashes: list = []
+        self._anim_prev_winner: object = None
+        self._anim_fw_timer: float = 0.0
+        self._anim_prev_turn: object = None
 
     @classmethod
     def _ensure_board(cls) -> None:
@@ -1062,6 +1076,15 @@ class CluedoGame:
         suggester = int(seat)
         msg = f"{self._seat_name(suggester)} suggests {suspect} with the {weapon} in the {room}."
         self._set_event(msg)
+        # 🔍 Suggestion animation
+        try:
+            _cx, _cy = self.width // 2, self.height // 2
+            self._flashes.append(ScreenFlash((60, 100, 200), peak_alpha=40, duration=0.4))
+            self._text_pops.append(TextPopAnim(
+                "🔍 Suggestion!", _cx, _cy - 50, (120, 170, 255), font_size=26))
+            self._particles.emit_sparkle(_cx, _cy, (120, 170, 255), count=14)
+        except Exception:
+            pass
 
         self._last_suggestion = (str(suspect), str(weapon), str(room))
 
@@ -1112,12 +1135,37 @@ class CluedoGame:
 
         if correct:
             self.winner = accuser
+            # ✨ Correct accusation — fireworks!
+            try:
+                import random as _rnd
+                _cx, _cy = self.width // 2, self.height // 2
+                self._flashes.append(ScreenFlash((220, 200, 60), 60, 0.6))
+                self._text_pops.append(TextPopAnim(
+                    f"\U0001f50d SOLVED! {self._seat_name(accuser)}",
+                    _cx, _cy - 60, (255, 220, 50), font_size=34))
+                for _ in range(6):
+                    self._particles.emit_firework(
+                        _cx + _rnd.randint(-120, 120), _cy + _rnd.randint(-80, 80),
+                        [(255, 220, 50), (80, 220, 120), (100, 180, 255)])
+            except Exception:
+                pass
             # Correct: show to everyone.
             self._set_event(
                 f"{self._seat_name(accuser)} wins! Case File: {self.solution_suspect} · {self.solution_weapon} · {self.solution_room}"
             )
             self._envelope_peek_allowed.add(accuser)
             return
+
+        # ❌ Wrong accusation — red flash
+        try:
+            _cx, _cy = self.width // 2, self.height // 2
+            self._flashes.append(ScreenFlash((180, 40, 40), 50, 0.45))
+            self._text_pops.append(TextPopAnim(
+                f"\u274c WRONG! {self._seat_name(accuser)}",
+                _cx, _cy - 40, (255, 80, 80), font_size=30))
+            self._particles.emit_sparkle(_cx, _cy, (255, 60, 60), count=20)
+        except Exception:
+            pass
 
         if accuser not in set(self.eliminated):
             self.eliminated.append(accuser)
@@ -1212,6 +1260,53 @@ class CluedoGame:
         if self.state != "playing":
             return
 
+        # ── Tick animations ─────────────────────────────────────────────
+        try:
+            self._particles.update(dt)
+            for _a in list(self._anim_card_flips): _a.update(dt)
+            self._anim_card_flips = [_a for _a in self._anim_card_flips if not _a.done]
+            for _a in list(self._text_pops): _a.update(dt)
+            self._text_pops = [_a for _a in self._text_pops if not _a.done]
+            for _a in list(self._pulse_rings): _a.update(dt)
+            self._pulse_rings = [_a for _a in self._pulse_rings if not _a.done]
+            for _a in list(self._flashes): _a.update(dt)
+            self._flashes = [_a for _a in self._flashes if not _a.done]
+            # Turn-change pulse + sparkle
+            _curr_turn = getattr(self, 'current_turn_seat', None)
+            if (
+                self.state == "playing"
+                and isinstance(_curr_turn, int)
+                and _curr_turn != self._anim_prev_turn
+                and isinstance(self._anim_prev_turn, int)
+            ):
+                _cx, _cy = self.width // 2, self.height // 2
+                _col = _FW_COLORS[int(_curr_turn) % len(_FW_COLORS)]
+                self._pulse_rings.append(PulseRing(_cx, _cy, _col, max_radius=min(self.width, self.height) // 5, duration=0.8))
+                self._particles.emit_sparkle(_cx, _cy, _col, count=18)
+                self._flashes.append(ScreenFlash(_col, peak_alpha=40, duration=0.3))
+            self._anim_prev_turn = _curr_turn
+            if isinstance(self.winner, int) and self.winner is not self._anim_prev_winner:
+                self._anim_prev_winner = self.winner
+                _cx, _cy = self.width // 2, self.height // 2
+                for _ in range(8):
+                    self._particles.emit_firework(
+                        _cx + random.randint(-120, 120), _cy + random.randint(-80, 80),
+                        _FW_COLORS)
+                self._flashes.append(ScreenFlash((255, 220, 80), 70, 1.0))
+                self._text_pops.append(TextPopAnim(
+                    f"🏆 {self._seat_name(self.winner)} wins!", _cx, _cy - 60,
+                    (255, 220, 80), font_size=36))
+                self._anim_fw_timer = 6.0
+            if self._anim_fw_timer > 0:
+                self._anim_fw_timer = max(0.0, self._anim_fw_timer - dt)
+                if int(self._anim_fw_timer * 3) % 2 == 0:
+                    _cx, _cy = self.width // 2, self.height // 2
+                    self._particles.emit_firework(
+                        _cx + random.randint(-150, 150), _cy + random.randint(-100, 100),
+                        _FW_COLORS)
+        except Exception:
+            pass
+
         # Resolve dice animation
         if bool(self.dice_rolling):
             elapsed = time.time() - float(self.dice_roll_start or time.time())
@@ -1228,6 +1323,15 @@ class CluedoGame:
                     self._mode = "moving" if self.steps_remaining > 0 else "in_room"
                     self._set_event(f"{self._seat_name(int(turn_seat))} rolled {d1}+{d2} = {self.last_roll}.")
                     self._dice_show_until = time.time() + 2.2
+                    # ── Dice result pop-up ────────────────────────────────────
+                    try:
+                        _cx, _cy = self.width // 2, int(self.height * 0.35)
+                        self._text_pops.append(TextPopAnim(
+                            f"🎲 {d1} + {d2} = {self.last_roll}", _cx, _cy,
+                            (255, 235, 120), font_size=34))
+                        self._particles.emit_sparkle(_cx, _cy, (255, 235, 120))
+                    except Exception:
+                        pass
 
                 self._rebuild_buttons_all()
                 return
@@ -1268,16 +1372,7 @@ class CluedoGame:
         self.renderer.draw_circle(Colors.ACCENT, (int(w * 0.84), int(h * 0.70)), int(min(w, h) * 0.30), alpha=6)
 
         # Title
-        self.renderer.draw_text(
-            "Cluedo",
-            int(w * 0.5),
-            int(h * 0.06),
-            font_size=40,
-            color=Colors.WHITE,
-            anchor_x="center",
-            anchor_y="center",
-            bold=True,
-        )
+        draw_rainbow_title(self.renderer, "CLUEDO", w, y=int(h * 0.04), font_size=28, char_width=22)
 
         # Board area (bigger + less padding)
         margin = int(min(w, h) * 0.02)
@@ -1557,3 +1652,14 @@ class CluedoGame:
                 anchor_x="center",
                 anchor_y="center",
             )
+
+        # ── Animation render layer ──────────────────────────────────────────
+        try:
+            if self.renderer:
+                self._particles.draw(self.renderer)
+                for _r in self._pulse_rings: _r.draw(self.renderer)
+                for _f in self._anim_card_flips: _f.draw(self.renderer)
+                for _fl in self._flashes: _fl.draw(self.renderer, self.width, self.height)
+                for _p in self._text_pops: _p.draw(self.renderer)
+        except Exception:
+            pass

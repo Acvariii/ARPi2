@@ -1,8 +1,12 @@
 import React from 'react';
-import { Box, Button, Paper, Stack, Typography } from '@mui/material';
+import { Box, Button, Chip, Paper, Stack, Typography } from '@mui/material';
 import type { Snapshot } from '../../types';
 import UnoCardTile from '../../components/UnoCardTile';
 import GameBanner from '../../components/GameBanner';
+
+const UNO_BG: Record<string, string> = {
+  R: '#c62828', G: '#2e7d32', B: '#1565c0', Y: '#f9a825',
+};
 
 type Props = {
   snapshot: Snapshot;
@@ -55,17 +59,53 @@ export default function UnoPanel({ snapshot, seatLabel, send, playerColors }: Pr
   return (
     <>
       <GameBanner game="uno" />
-      <Paper variant="outlined" sx={{ p: 1.5, mb: 2 }}>
+      <Paper variant="outlined" sx={{ p: 1.5, mb: 2, animation: 'fadeInUp 0.4s ease-out' }}>
         <Stack spacing={1}>
-          <Typography variant="body2" color="text.secondary" align="center">
-            Top: {uno.top_card ?? '—'} {' · '}Color: {uno.current_color ?? '—'}
-          </Typography>
+          {/* Top card visual */}
+          <Stack direction="row" spacing={2} alignItems="center" justifyContent="center">
+            <Box
+              sx={{
+                minWidth: 64,
+                minHeight: 64,
+                borderRadius: 2,
+                bgcolor: UNO_BG[uno.current_color ?? ''] ?? '#424242',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: 3,
+                animation: 'cardDrop 0.35s ease-out',
+              }}
+            >
+              <Typography variant="h6" sx={{ fontWeight: 900, color: '#fff', textShadow: '1px 1px 3px rgba(0,0,0,0.6)' }}>
+                {uno.top_card ?? '—'}
+              </Typography>
+            </Box>
+            <Stack spacing={0.5} alignItems="flex-start">
+              <Stack direction="row" spacing={0.75} alignItems="center">
+                <Typography variant="caption" color="text.secondary">Color:</Typography>
+                <Chip
+                  label={uno.current_color ?? '—'}
+                  size="small"
+                  sx={{ bgcolor: UNO_BG[uno.current_color ?? ''] ?? '#424242', color: '#fff', fontWeight: 700, height: 20, fontSize: '0.7rem' }}
+                />
+              </Stack>
+              <Stack direction="row" spacing={0.75} alignItems="center">
+                <Typography variant="caption" color="text.secondary">Direction:</Typography>
+                <Chip
+                  label={typeof uno.direction === 'number' ? (uno.direction >= 0 ? '↻ Clockwise' : '↺ Counter-CW') : '—'}
+                  size="small"
+                  variant="outlined"
+                  sx={{ height: 20, fontSize: '0.7rem' }}
+                />
+              </Stack>
+            </Stack>
+          </Stack>
           <Typography variant="body2" color="text.secondary" align="center">
             Turn: {turnSeat !== null ? seatLabel(turnSeat) : '—'}
           </Typography>
           {typeof uno.winner === 'number' && (
-            <Typography variant="body2" sx={{ fontWeight: 700 }} align="center">
-              Winner: {seatLabel(uno.winner)}
+            <Typography variant="body2" sx={{ fontWeight: 700, animation: 'winnerShimmer 2s linear infinite, glowText 1.5s ease-in-out infinite' }} align="center">
+              🏆 Winner: {seatLabel(uno.winner)}
             </Typography>
           )}
         </Stack>
@@ -212,19 +252,32 @@ export default function UnoPanel({ snapshot, seatLabel, send, playerColors }: Pr
                 variant="outlined"
                 sx={{
                   p: 1.25,
-                  borderColor: playerColors[pidx % playerColors.length],
+                  borderColor: turnSeat === pidx ? playerColors[pidx % playerColors.length] : `${playerColors[pidx % playerColors.length]}88`,
+                  borderWidth: turnSeat === pidx ? 2 : 1,
+                  bgcolor: turnSeat === pidx ? `${playerColors[pidx % playerColors.length]}18` : 'background.paper',
                   width: '100%',
                   maxWidth: 440,
                   textAlign: 'center',
                 }}
               >
-                <Typography variant="body2" sx={{ fontWeight: 700 }} align="center">
-                  {seatLabel(pidx)}
-                </Typography>
-                <Typography variant="body2" color="text.secondary" align="center">
-                  Cards: {uno.hand_counts?.[String(pidx)] ?? 0}
-                  {turnSeat === pidx ? ' · (turn)' : ''}
-                </Typography>
+                <Stack direction="row" spacing={1} alignItems="center" justifyContent="center">
+                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                    {seatLabel(pidx)}
+                  </Typography>
+                  <Chip
+                    label={`${uno.hand_counts?.[String(pidx)] ?? 0} cards`}
+                    size="small"
+                    sx={{
+                      bgcolor: playerColors[pidx % playerColors.length],
+                      color: '#fff',
+                      fontWeight: 700,
+                      height: 18,
+                      fontSize: '0.65rem',
+                      animation: 'badgePop 0.3s ease-out',
+                    }}
+                  />
+                  {turnSeat === pidx && <Chip label="Turn" size="small" color="primary" sx={{ height: 18, fontSize: '0.65rem', animation: 'badgePop 0.3s ease-out' }} />}
+                </Stack>
               </Paper>
             ))}
           </Stack>

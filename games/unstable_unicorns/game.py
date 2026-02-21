@@ -10,7 +10,7 @@ from core.player_selection import PlayerSelectionUI
 from core.card_rendering import draw_emoji_card, draw_game_background
 from core.animation import (
     ParticleSystem, CardFlyAnim, TextPopAnim, PulseRing, ScreenFlash,
-    _RAINBOW_PALETTE as _UU_FW_COLORS,
+    _RAINBOW_PALETTE as _UU_FW_COLORS, draw_rainbow_title,
 )
 
 
@@ -479,11 +479,11 @@ class UnstableUnicornsGame:
         return int(self.reaction_order[self.reaction_idx])
 
     def _reaction_result_allows_resolve(self) -> bool:
-        # If last reaction is SUPER_NEIGH => force resolve.
+        # If last reaction is SUPER_NEIGH => card is negated unconditionally.
         if self.reaction_stack:
             last = self.reaction_stack[-1]
             if self.cards.get(last) and self.cards[last].kind == "super_neigh":
-                return True
+                return False
         # Otherwise odd number of NEIGH cancels.
         neigh_count = 0
         for cid in self.reaction_stack:
@@ -1038,16 +1038,7 @@ class UnstableUnicornsGame:
         title = "UNSTABLE UNICORNS"
         if isinstance(self.winner, int):
             title = f"WINNER: {self._seat_label(self.winner)}"
-        try:
-            _rainbow = [(255, 55, 55), (255, 140, 0), (255, 220, 0), (55, 200, 55), (70, 130, 255), (200, 55, 255)]
-            _fsz = 22
-            _cw = 16  # wider spacing between characters
-            _tx = w // 2 - (len(title) * _cw) // 2
-            for _i, _ch in enumerate(title):
-                _col = _rainbow[_i % len(_rainbow)]
-                self.renderer.draw_text(_ch, _tx + _i * _cw, 12, font_size=_fsz, color=_col, bold=True, anchor_x="left", anchor_y="top")
-        except Exception:
-            pass
+        draw_rainbow_title(self.renderer, title, w)
 
         # Layout: grid of player stables
         seats = list(self.active_players)

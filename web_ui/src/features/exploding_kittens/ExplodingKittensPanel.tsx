@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Paper, Stack, Typography } from '@mui/material';
+import { Box, Chip, Paper, Stack, Typography } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import type { Snapshot } from '../../types';
 import EmojiCardTile from '../../components/EmojiCardTile';
@@ -83,34 +83,76 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
   return (
     <>
       <GameBanner game="exploding_kittens" />
-      <Paper variant="outlined" sx={{ p: 1.5, mb: 2 }}>
+      <Paper variant="outlined" sx={{ p: 1.5, mb: 2, animation: 'fadeInUp 0.4s ease-out' }}>
         <Stack spacing={1}>
-          <Typography variant="body2" color="text.secondary" align="center">
-            Deck: {ek.deck_count ?? '—'} {' · '}Discard: {ek.discard_top ?? '—'} {' · '}Draws: {ek.pending_draws ?? 1}
-          </Typography>
+          <Stack direction="row" spacing={1} justifyContent="center" flexWrap="wrap" useFlexGap>
+            <Typography variant="caption" color="text.secondary">
+              Deck:
+            </Typography>
+            <Chip
+              label={`🃍 ${ek.deck_count ?? '?'} left`}
+              size="small"
+              sx={{
+                bgcolor:
+                  typeof ek.deck_count === 'number' && ek.deck_count <= 5
+                    ? '#c62828'
+                    : typeof ek.deck_count === 'number' && ek.deck_count <= 10
+                      ? '#e65100'
+                      : '#37474f',
+                color: '#fff',
+                fontWeight: 700,
+                height: 20,
+                fontSize: '0.7rem',
+                animation: typeof ek.deck_count === 'number' && ek.deck_count <= 5 ? 'blink 0.8s ease-in-out infinite' : undefined,
+              }}
+            />
+            {(ek.pending_draws ?? 1) > 1 && (
+              <Chip
+                label={`Draw ${ek.pending_draws}×`}
+                size="small"
+                sx={{ bgcolor: '#c62828', color: '#fff', fontWeight: 900, height: 20, fontSize: '0.7rem' }}
+              />
+            )}
+            {ek.discard_top && (
+              <Chip label={`Discard: ${ek.discard_top}`} size="small" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
+            )}
+          </Stack>
           <Typography variant="body2" color="text.secondary" align="center">
             Turn: {turnSeat !== null ? seatLabel(turnSeat) : '—'}
           </Typography>
           {typeof ek.winner === 'number' && (
-            <Typography variant="body2" sx={{ fontWeight: 700 }} align="center">
-              Winner: {seatLabel(ek.winner)}
+            <Typography variant="body2" sx={{ fontWeight: 700, animation: 'winnerShimmer 2s linear infinite, glowText 1.5s ease-in-out infinite' }} align="center">
+              🏆 Winner: {seatLabel(ek.winner)}
             </Typography>
           )}
+          {/* NOPE window — prominent alert */}
           {!!ek.nope_active && (
-            <Typography variant="body2" color="text.secondary" align="center">
-              NOPE window active ({ek.nope_count ?? 0})
-            </Typography>
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 1,
+                borderColor: '#ef5350',
+                borderWidth: 2,
+                bgcolor: '#ef535018',
+                textAlign: 'center',
+                animation: 'nopeFlash 0.7s ease-in-out infinite',
+              }}
+            >
+              <Typography variant="body1" sx={{ fontWeight: 900, color: '#ef5350' }}>
+                🚫 NOPE WINDOW OPEN! ({ek.nope_count ?? 0} played)
+              </Typography>
+            </Paper>
           )}
 
           {!!ek.last_event && (
-            <Typography variant="body2" sx={{ fontWeight: 700 }} align="center">
+            <Typography variant="body2" sx={{ fontWeight: 700, animation: 'slideInRight 0.4s ease-out' }} align="center">
               {ek.last_event}
             </Typography>
           )}
 
           {iAmEliminated && (
             <Typography variant="body2" color="error" sx={{ fontWeight: 800 }} align="center">
-              You exploded. You’re out.
+              You exploded. You&apos;re out.
             </Typography>
           )}
         </Stack>
@@ -231,6 +273,7 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
                     maxWidth: 440,
                     textAlign: 'center',
                     opacity: eliminated ? 0.55 : 1,
+                    animation: `fadeInUp 0.3s ease-out ${pidx * 0.06}s both`,
                   }}
                 >
                   <Typography variant="body2" sx={{ fontWeight: 700 }} align="center">

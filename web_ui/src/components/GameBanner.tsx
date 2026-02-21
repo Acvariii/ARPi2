@@ -142,20 +142,23 @@ export default function GameBanner({
         }}
       />
 
-      <Box sx={{ p: compact ? 1.25 : 2, display: 'flex', alignItems: 'center', gap: 1.5 }}>
-        <Typography sx={{ fontSize: compact ? '2rem' : '2.8rem', lineHeight: 1, flexShrink: 0 }}>
+      <Box sx={{ p: compact ? 1 : 2, display: 'flex', alignItems: 'center', gap: compact ? 1 : 1.5 }}>
+        <Typography sx={{ fontSize: compact ? '1.6rem' : '2.8rem', lineHeight: 1, flexShrink: 0 }}>
           {theme.emoji}
         </Typography>
-        <Box sx={{ minWidth: 0 }}>
+        <Box sx={{ minWidth: 0, flex: 1, overflow: 'hidden' }}>
           <Typography
-            variant={compact ? 'subtitle1' : 'h6'}
+            variant={compact ? 'body2' : 'h6'}
             sx={{
               fontWeight: 800,
               color: theme.accentColor,
-              lineHeight: 1.1,
-              letterSpacing: 0.5,
+              lineHeight: compact ? 1.2 : 1.1,
+              letterSpacing: compact ? 0.2 : 0.5,
               textTransform: 'uppercase',
               textShadow: `0 0 12px ${theme.accentColor}80`,
+              wordBreak: 'break-word',
+              overflowWrap: 'break-word',
+              fontSize: compact ? '0.72rem' : undefined,
             }}
           >
             {humanize(game)}

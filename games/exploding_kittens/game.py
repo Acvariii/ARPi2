@@ -6,6 +6,10 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from core.player_selection import PlayerSelectionUI
 from core.card_rendering import draw_emoji_card, draw_game_background
+from core.animation import (
+    ParticleSystem, CardFlyAnim, TextPopAnim, PulseRing, ScreenFlash,
+    _RAINBOW_PALETTE as _FW_COLORS, draw_rainbow_title,
+)
 
 
 @dataclass(frozen=True)
@@ -91,6 +95,16 @@ class ExplodingKittensGame:
 
         # Seat-name provider for Pyglet labels
         self._seat_name_provider: Optional[Callable[[int], str]] = None
+
+        # ── Particle animations ─────────────────────────────────────────────
+        self._particles = ParticleSystem()
+        self._anim_card_flips: list = []
+        self._text_pops: list = []
+        self._pulse_rings: list = []
+        self._flashes: list = []
+        self._anim_prev_winner: object = None
+        self._anim_fw_timer: float = 0.0
+        self._anim_prev_turn: object = None
 
     def set_name_provider(self, provider: Optional[Callable[[int], str]]) -> None:
         self._seat_name_provider = provider
@@ -251,6 +265,53 @@ class ExplodingKittensGame:
             if self._nope_deadline <= 0:
                 self._resolve_nope_window()
 
+        # ── Tick particle animations ──────────────────────────────────
+        try:
+            self._particles.update(delta)
+            for _a in list(self._anim_card_flips): _a.update(delta)
+            self._anim_card_flips = [_a for _a in self._anim_card_flips if not _a.done]
+            for _a in list(self._text_pops): _a.update(delta)
+            self._text_pops = [_a for _a in self._text_pops if not _a.done]
+            for _a in list(self._pulse_rings): _a.update(delta)
+            self._pulse_rings = [_a for _a in self._pulse_rings if not _a.done]
+            for _a in list(self._flashes): _a.update(delta)
+            self._flashes = [_a for _a in self._flashes if not _a.done]
+            # Turn-change pulse + sparkle
+            _curr_turn = getattr(self, 'current_turn_seat', None)
+            if (
+                self.state == "playing"
+                and isinstance(_curr_turn, int)
+                and _curr_turn != self._anim_prev_turn
+                and isinstance(self._anim_prev_turn, int)
+            ):
+                _cx, _cy = self.width // 2, self.height // 2
+                _col = _FW_COLORS[int(_curr_turn) % len(_FW_COLORS)]
+                self._pulse_rings.append(PulseRing(_cx, _cy, _col, max_radius=min(self.width, self.height) // 5, duration=0.8))
+                self._particles.emit_sparkle(_cx, _cy, _col, count=18)
+                self._flashes.append(ScreenFlash(_col, peak_alpha=40, duration=0.3))
+            self._anim_prev_turn = _curr_turn
+            if isinstance(self.winner, int) and self.winner is not self._anim_prev_winner:
+                self._anim_prev_winner = self.winner
+                _cx, _cy = self.width // 2, self.height // 2
+                for _ in range(8):
+                    self._particles.emit_firework(
+                        _cx + random.randint(-120, 120), _cy + random.randint(-80, 80),
+                        _FW_COLORS)
+                self._flashes.append(ScreenFlash((255, 220, 80), 60, 1.0))
+                self._text_pops.append(TextPopAnim(
+                    f"🏆 {self._seat_label(self.winner)} wins!", _cx, _cy - 60,
+                    (255, 220, 80), font_size=36))
+                self._anim_fw_timer = 6.0
+            if self._anim_fw_timer > 0:
+                self._anim_fw_timer = max(0.0, self._anim_fw_timer - delta)
+                if int(self._anim_fw_timer * 3) % 2 == 0:
+                    _cx, _cy = self.width // 2, self.height // 2
+                    self._particles.emit_firework(
+                        _cx + random.randint(-150, 150), _cy + random.randint(-100, 100),
+                        _FW_COLORS)
+        except Exception:
+            pass
+
         if not self._anims:
             return
         alive: List[_Anim] = []
@@ -329,6 +390,13 @@ class ExplodingKittensGame:
                 self.discard_pile.append(EKCard("NOPE"))
                 self._nope_count += 1
                 self._note_event(f"{self._seat_label(seat)} played NOPE")
+                try:
+                    _cx, _cy = self.width // 2, self.height // 2
+                    self._flashes.append(ScreenFlash((200, 80, 20), 55, 0.3))
+                    self._text_pops.append(TextPopAnim(
+                        "🚫 NOPE!", _cx, _cy - 40, (230, 100, 50), font_size=32))
+                except Exception:
+                    pass
                 self._rebuild_buttons()
             elif btn_id.startswith("ek_play:"):
                 # UX convenience: allow clicking the NOPE card itself.
@@ -345,6 +413,13 @@ class ExplodingKittensGame:
                 self.discard_pile.append(EKCard("NOPE"))
                 self._nope_count += 1
                 self._note_event(f"{self._seat_label(seat)} played NOPE")
+                try:
+                    _cx, _cy = self.width // 2, self.height // 2
+                    self._flashes.append(ScreenFlash((200, 80, 20), 55, 0.3))
+                    self._text_pops.append(TextPopAnim(
+                        "🚫 NOPE!", _cx, _cy - 40, (230, 100, 50), font_size=32))
+                except Exception:
+                    pass
                 self._rebuild_buttons()
             return
 
@@ -389,6 +464,16 @@ class ExplodingKittensGame:
             hand.pop(idx)
             self.discard_pile.append(card)
             self._queue_play_anim(seat, card)
+
+            # Action card sparkle + flash
+            try:
+                _cx, _cy = self.width // 2, self.height // 2
+                _action_cols = {'ATK': (230, 60, 60), 'SKIP': (255, 200, 50), 'SHUF': (100, 180, 255), 'FUT': (150, 100, 255), 'FAV': (255, 130, 200)}
+                _acol = _action_cols.get(card.kind, (200, 200, 200))
+                self._particles.emit_sparkle(_cx, _cy, _acol, count=16)
+                self._flashes.append(ScreenFlash(_acol, peak_alpha=35, duration=0.3))
+            except Exception:
+                pass
 
             # Execute card (some open a nope window).
             self._play_action(seat, card)
@@ -464,6 +549,16 @@ class ExplodingKittensGame:
                 # Reinsert EK at random position.
                 self._reinsert_random(EKCard("EK"))
                 self._note_event(f"{self._seat_label(seat)} defused!")
+                # Defuse animation
+                try:
+                    _cx, _cy = self.width // 2, self.height // 2
+                    self._flashes.append(ScreenFlash((60, 200, 100), 60, 0.4))
+                    self._text_pops.append(TextPopAnim(
+                        f"🧰 DEFUSED! {self._seat_label(seat)}",
+                        _cx, _cy - 40, (80, 230, 130), font_size=30))
+                    self._particles.emit_sparkle(_cx, _cy, (80, 230, 130), count=22)
+                except Exception:
+                    pass
             else:
                 self._explode(seat)
                 return
@@ -516,6 +611,21 @@ class ExplodingKittensGame:
             self.eliminated_players.append(int(seat))
 
         self._note_event(f"{self._seat_label(seat)} player exploded")
+
+        # Explosion animations!
+        try:
+            _cx, _cy = self.width // 2, self.height // 2
+            self._flashes.append(ScreenFlash((255, 80, 30), 80, 0.5))
+            self._text_pops.append(TextPopAnim(
+                f"💥 KABOOM! {self._seat_label(seat)}",
+                _cx, _cy - 50, (255, 90, 40), font_size=36))
+            for _ in range(6):
+                import random as _rnd
+                self._particles.emit_firework(
+                    _cx + _rnd.randint(-140, 140), _cy + _rnd.randint(-90, 90),
+                    [(220, 60, 20), (255, 140, 0), (255, 220, 0)])
+        except Exception:
+            pass
 
         # If only one remains, winner.
         if len(self.active_players) == 1:
@@ -686,7 +796,7 @@ class ExplodingKittensGame:
         try:
             title = "EXPLODING KITTENS"
             status = f"Turn: {self._seat_label(self.current_turn_seat)}" if isinstance(self.current_turn_seat, int) else "Turn: —"
-            self.renderer.draw_text(title, 24, 24, font_size=20, color=(235, 235, 235), anchor_x="left", anchor_y="top")
+            draw_rainbow_title(self.renderer, title, w, font_size=20)
             self.renderer.draw_text(
                 f"Deck: {len(self.draw_pile)}  ·  Discard: {self.discard_pile[-1].short() if self.discard_pile else '—'}  ·  {status}  ·  Draws: {self.pending_draws}",
                 24,
@@ -748,6 +858,17 @@ class ExplodingKittensGame:
         if self._anims:
             for a in list(self._anims):
                 self._draw_anim(a)
+
+        # ── Animation render layer ──────────────────────────────────────────
+        try:
+            if self.renderer:
+                self._particles.draw(self.renderer)
+                for _r in self._pulse_rings: _r.draw(self.renderer)
+                for _f in self._anim_card_flips: _f.draw(self.renderer)
+                for _fl in self._flashes: _fl.draw(self.renderer, self.width, self.height)
+                for _p in self._text_pops: _p.draw(self.renderer)
+        except Exception:
+            pass
 
     def _note_event(self, text: str) -> None:
         t = (text or "").strip()
@@ -908,7 +1029,7 @@ class ExplodingKittensGame:
                 self.renderer,
                 (int(x), int(y), int(w), int(h)),
                 emoji=str(emoji),
-                title=str(title),
+                title="",
                 accent_rgb=fc,
                 corner=str(t or "EK"),
             )

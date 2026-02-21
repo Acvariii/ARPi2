@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useRef } from 'react';
-import { Box, Button, Paper, Stack, Typography } from '@mui/material';
+import { Box, Button, Chip, Paper, Stack, Typography } from '@mui/material';
 import type { Snapshot } from '../../types';
 import GameBanner from '../../components/GameBanner';
 
@@ -123,23 +123,66 @@ export default function CatanPanel(props: {
   );
 
   return (
-    <Stack spacing={1.25}>
+    <Stack spacing={1.25} sx={{ animation: 'fadeInUp 0.4s ease-out' }}>
       <GameBanner game="catan" />
       <Paper variant="outlined" sx={{ p: 1.25 }}>
-        <Typography variant="body2" color="text.secondary" align="center">
-          Turn: {typeof turnSeat === 'number' ? seatLabel(turnSeat) : '—'} · Expansion: {st.expansion_mode || '—'}
-        </Typography>
-        <Typography variant="caption" color="text.secondary" display="block" align="center" sx={{ mt: 0.25 }}>
-          {isMyTurn ? 'Your turn' : 'Waiting'} · Phase: {st.phase || '—'} · Rolled: {st.rolled ? 'yes' : 'no'}
-        </Typography>
-        {st.your_resources ? (
-          <Typography variant="caption" color="text.secondary" display="block" align="center" sx={{ mt: 0.25 }}>
-            Resources: 🌲 {st.your_resources.wood ?? 0} · 🧱 {st.your_resources.brick ?? 0} · 🐑 {st.your_resources.sheep ?? 0} · 🌾{' '}
-            {st.your_resources.wheat ?? 0} · ⛰️ {st.your_resources.ore ?? 0}
+        <Stack direction="row" spacing={1} justifyContent="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
+          <Typography variant="body2" color="text.secondary">
+            Turn: {typeof turnSeat === 'number' ? seatLabel(turnSeat) : '—'}
           </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Phase: {st.phase || '—'}
+          </Typography>
+          {typeof st.last_roll === 'number' && (
+            <Chip
+              label={`🎲 ${st.last_roll}`}
+              size="small"
+              sx={{
+                bgcolor: st.last_roll === 7 ? '#c62828' : '#1565c0',
+                color: '#fff',
+                fontWeight: 900,
+                fontSize: '0.85rem',
+                height: 24,
+                animation: st.last_roll === 7 ? 'blink 0.6s ease-in-out 3' : 'badgePop 0.35s ease-out',
+              }}
+            />
+          )}
+        </Stack>
+        {/* VP + badges */}
+        <Stack direction="row" spacing={1} justifyContent="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
+          {typeof st.vp === 'number' && (
+            <Chip label={`⭐ ${st.vp} VP`} size="small" sx={{ bgcolor: '#f9a825', color: '#000', fontWeight: 900, height: 22, animation: 'badgePop 0.35s ease-out' }} />
+          )}
+          {typeof st.knights_played === 'number' && st.knights_played > 0 && (
+            <Chip label={`⚔️ ${st.knights_played} Knight${st.knights_played !== 1 ? 's' : ''}`} size="small" variant="outlined" sx={{ animation: 'badgePop 0.35s ease-out' }} />
+          )}
+          {typeof st.largest_army_holder === 'number' && st.largest_army_holder === mySeat && (
+            <Chip label="⚔️ Largest Army" size="small" sx={{ bgcolor: '#7b1fa2', color: '#fff', fontWeight: 700, height: 22, animation: 'winnerShimmer 2s linear infinite' }} />
+          )}
+          {typeof st.longest_road_holder === 'number' && st.longest_road_holder === mySeat && (
+            <Chip label="🛣️ Longest Road" size="small" sx={{ bgcolor: '#1565c0', color: '#fff', fontWeight: 700, height: 22, animation: 'winnerShimmer 2s linear infinite' }} />
+          )}
+        </Stack>
+        {st.your_resources ? (
+          <Stack direction="row" spacing={0.75} justifyContent="center" flexWrap="wrap" useFlexGap>
+            {([
+              ['wood', '🌲', '#2e7d32', '#fff'],
+              ['brick', '🧱', '#bf360c', '#fff'],
+              ['sheep', '🐑', '#558b2f', '#fff'],
+              ['wheat', '🌾', '#f9a825', '#000'],
+              ['ore', '⛰️', '#546e7a', '#fff'],
+            ] as [string, string, string, string][]).map(([res, em, bg, fg], i) => (
+              <Chip
+                key={res}
+                label={`${em} ${st.your_resources![res] ?? 0}`}
+                size="small"
+                sx={{ bgcolor: bg, color: fg, fontWeight: 700, fontSize: '0.8rem', height: 24, minWidth: 44, animation: `badgePop 0.3s ease-out ${i * 0.05}s both` }}
+              />
+            ))}
+          </Stack>
         ) : null}
         {st.last_event ? (
-          <Typography variant="caption" color="text.secondary" display="block" align="center" sx={{ mt: 0.5 }}>
+          <Typography variant="caption" color="text.secondary" display="block" align="center" sx={{ mt: 0.5, animation: 'slideInRight 0.4s ease-out' }}>
             {st.last_event}
           </Typography>
         ) : null}
@@ -157,7 +200,7 @@ export default function CatanPanel(props: {
               gap: 1,
             }}
           >
-            {buttons.map((b) => (
+            {buttons.map((b, bIdx) => (
               <Button
                 key={b.id}
                 variant={b.id === 'roll' ? 'contained' : b.id === 'end_turn' ? 'outlined' : 'outlined'}
@@ -167,6 +210,7 @@ export default function CatanPanel(props: {
                   minHeight: { xs: 52, sm: 44 },
                   fontSize: { xs: 15, sm: 14 },
                   gridColumn: b.id === 'roll' || b.id === 'end_turn' ? { xs: 'span 2', sm: 'span 3' } : undefined,
+                  animation: `bounceIn 0.4s ease-out ${bIdx * 0.05}s both`,
                 }}
               >
                 {buttonLabel(b.id, b.text)}

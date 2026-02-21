@@ -18,6 +18,10 @@ from config import PLAYER_COLORS, Colors, HOVER_TIME_THRESHOLD
 from core.player_selection import PlayerSelectionUI
 from core.ui_components import PygletButton, PlayerPanel, calculate_all_panels
 from core.popup_system import UniversalPopup
+from core.animation import (
+    ParticleSystem, CardFlyAnim, TextPopAnim, PulseRing, ScreenFlash,
+    _RAINBOW_PALETTE as _FW_COLORS, draw_rainbow_title,
+)
 
 
 class Card:
@@ -181,6 +185,15 @@ class BlackjackGame:
         self._web_result_dismissed_round: Dict[int, int] = {}
         
         self._calculate_geometry()
+
+        # ── Particle animations ─────────────────────────────────────────────
+        self._particles = ParticleSystem()
+        self._anim_card_flips: list = []
+        self._text_pops: list = []
+        self._pulse_rings: list = []
+        self._flashes: list = []
+        self._anim_prev_game_over = False
+        self._anim_fw_timer: float = 0.0
 
     def get_status_summary(self) -> Dict:
         """Return a small summary used by both Web UI and board-only overlay."""
@@ -453,7 +466,7 @@ class BlackjackGame:
                 
                 self._set_popup_buttons(
                     player_idx,
-                    ["$5", "$25", "$100", "$500", "All-in" if can_all_in else "", "Ready"],
+                    ["$5", "$25", "$100", "$500", "All-in", "Ready"],
                     [can_5, can_25, can_100, can_500, can_all_in, can_ready],
                 )
         
@@ -461,11 +474,12 @@ class BlackjackGame:
         if all(self.players[i].is_ready for i in self.active_players):
             # All players are ready (some may be broke)
             players_with_chips = [i for i in self.active_players if self.players[i].chips >= 5]
+            total_active = len(self.active_players)
             if len(players_with_chips) == 0:
                 # Game over - all players broke
                 self._end_game("All players are broke!")
-            elif len(players_with_chips) == 1:
-                # Only one player left - they win
+            elif len(players_with_chips) == 1 and total_active > 1:
+                # In a multi-player game, only one player has chips → they win
                 winner_idx = players_with_chips[0]
                 self._end_game(f"Player {winner_idx + 1} wins!")
 
@@ -576,6 +590,13 @@ class BlackjackGame:
         self.deal_start_time = time.time()
         self.deal_phase = 0
         self.state = "dealing"
+        # Pulse the deck position to show dealing has begun
+        try:
+            dx, dy = self.deck_position
+            self._pulse_rings.append(PulseRing(int(dx), int(dy), (80, 220, 120), max_radius=60, duration=0.7))
+            self._flashes.append(ScreenFlash((60, 180, 80), 30, 0.4))
+        except Exception:
+            pass
     
     def _get_card_base_position(self, player_idx: int, card_index: int) -> Tuple[float, float]:
         """Calculate the target position for a card based on player and card index"""
@@ -782,6 +803,14 @@ class BlackjackGame:
                     player.chips += winnings
                     profit = int(hand.bet * 1.5)
                     self._show_result(idx, "BLACKJACK!", f"Won ${profit}!", hand)
+                    # Flashy BLACKJACK! animation
+                    try:
+                        cx, cy = self._get_card_base_position(idx, 0)
+                        self._text_pops.append(TextPopAnim("🃏 BLACKJACK!", int(cx), int(cy) - 30, (255, 220, 50), font_size=32))
+                        self._pulse_rings.append(PulseRing(int(cx), int(cy), (255, 220, 50), max_radius=90, duration=0.8))
+                        self._flashes.append(ScreenFlash((255, 220, 50), 50, 0.5))
+                    except Exception:
+                        pass
                 hand.is_standing = True
         
         if dealer_bj:
@@ -797,8 +826,9 @@ class BlackjackGame:
     
     def _show_player_actions(self):
         """Show action buttons for all players who need to act"""
-        # If a player has no chips remaining, they cannot take further actions.
-        # Auto-stand their active hands so the round cannot softlock waiting on input.
+        # Auto-stand only players who have NO chips AND no active bet on any hand
+        # (e.g. they somehow ended up in playing phase with nothing at stake).
+        # Players who went all-in (chips==0 but hand.bet>0) can still Hit/Stand.
         try:
             for player_idx in list(self.active_players or []):
                 player = self.players[int(player_idx)]
@@ -806,6 +836,13 @@ class BlackjackGame:
                     continue
                 if int(getattr(player, "chips", 0) or 0) > 0:
                     continue
+                # Player has no chips – only auto-stand if they also have no active bet
+                has_active_bet = any(
+                    int(getattr(h, "bet", 0) or 0) > 0
+                    for h in (getattr(player, "hands", []) or [])
+                )
+                if has_active_bet:
+                    continue  # All-in: they still have a bet, let them play
                 for h in list(getattr(player, "hands", []) or []):
                     if not bool(getattr(h, "is_standing", False)) and not bool(getattr(h, "is_busted", False)):
                         h.is_standing = True
@@ -1075,6 +1112,20 @@ class BlackjackGame:
             self._player_results = {}
         self._player_results[player_idx] = (title, message, time.time())
 
+        # Animated result pop at the player's card area
+        try:
+            cx, cy = self._get_card_base_position(player_idx, 0)
+            cy_pop = int(cy) - 40
+            if "WIN" in title or "BLACKJACK" in title:
+                self._text_pops.append(TextPopAnim(f"✨ {title}", int(cx), cy_pop, (80, 240, 120), font_size=26))
+                self._particles.emit_firework(int(cx), int(cy), [(255,220,50),(80,240,120),(100,180,255)])
+            elif "BUST" in title or "LOSE" in title:
+                self._text_pops.append(TextPopAnim(f"💔 {title}", int(cx), cy_pop, (255, 80, 80), font_size=24))
+            elif "PUSH" in title:
+                self._text_pops.append(TextPopAnim(f"🤝 {title}", int(cx), cy_pop, (200, 200, 100), font_size=22))
+        except Exception:
+            pass
+
         # Also store a structured, must-close Web UI result popup.
         try:
             pidx = int(player_idx)
@@ -1158,6 +1209,13 @@ class BlackjackGame:
             if hand.value() > 21:
                 hand.is_busted = True
                 hand.is_standing = True
+                # BUST animation
+                try:
+                    cx, cy = self._get_card_base_position(player.idx, 0)
+                    self._text_pops.append(TextPopAnim("💥 BUST!", int(cx), int(cy) - 30, (255, 80, 80), font_size=28))
+                    self._flashes.append(ScreenFlash((200, 60, 60), 40, 0.35))
+                except Exception:
+                    pass
                 if not player.next_hand():
                     self.current_player_idx += 1
             
@@ -1285,11 +1343,12 @@ class BlackjackGame:
                     if all(self.players[i].is_ready for i in self.active_players):
                         # Check if at least one player has chips to play
                         players_with_chips = [i for i in self.active_players if self.players[i].chips >= 5]
+                        total_active = len(self.active_players)
                         if len(players_with_chips) == 0:
                             # Game over - all players broke
                             self._end_game("All players are broke!")
-                        elif len(players_with_chips) == 1:
-                            # Only one player left - they win
+                        elif len(players_with_chips) == 1 and total_active > 1:
+                            # In a multi-player game, only one player has chips → they win
                             winner_idx = players_with_chips[0]
                             self._end_game(f"Player {winner_idx + 1} wins!")
                         else:
@@ -1336,6 +1395,39 @@ class BlackjackGame:
     
     def update(self, dt: float):
         """Update game state"""
+        # ── Tick animations ─────────────────────────────────────────────
+        try:
+            self._particles.update(dt)
+            for _a in list(self._anim_card_flips): _a.update(dt)
+            self._anim_card_flips = [_a for _a in self._anim_card_flips if not _a.done]
+            for _a in list(self._text_pops): _a.update(dt)
+            self._text_pops = [_a for _a in self._text_pops if not _a.done]
+            for _a in list(self._pulse_rings): _a.update(dt)
+            self._pulse_rings = [_a for _a in self._pulse_rings if not _a.done]
+            for _a in list(self._flashes): _a.update(dt)
+            self._flashes = [_a for _a in self._flashes if not _a.done]
+            _is_over = (self.state == "game_over")
+            if _is_over and not self._anim_prev_game_over:
+                self._anim_prev_game_over = True
+                _cx, _cy = self.width // 2, self.height // 2
+                for _ in range(8):
+                    self._particles.emit_firework(
+                        _cx + random.randint(-120, 120), _cy + random.randint(-80, 80),
+                        _FW_COLORS)
+                self._flashes.append(ScreenFlash((255, 220, 80), 70, 1.0))
+                self._text_pops.append(TextPopAnim("🏆 WINNER!", _cx, _cy - 60, (255, 220, 80), font_size=40))
+                self._anim_fw_timer = 6.0
+            if not _is_over:
+                self._anim_prev_game_over = False
+            if self._anim_fw_timer > 0:
+                self._anim_fw_timer = max(0.0, self._anim_fw_timer - dt)
+                if int(self._anim_fw_timer * 3) % 2 == 0:
+                    _cx, _cy = self.width // 2, self.height // 2
+                    self._particles.emit_firework(
+                        _cx + random.randint(-150, 150), _cy + random.randint(-100, 100),
+                        _FW_COLORS)
+        except Exception:
+            pass
         current_time = time.time()
         
         if self.dealing_animation:
@@ -1399,6 +1491,7 @@ class BlackjackGame:
         
         # Background
         self._draw_background(self.width, self.height)
+        draw_rainbow_title(self.renderer, "BLACKJACK", self.width)
 
         # True board-only mode (no panels/popups in the Pyglet window)
         if board_only:
@@ -1424,6 +1517,17 @@ class BlackjackGame:
         # Popup without dimming overlay
         if self.popup.active:
             self.popup.draw(self.renderer)
+
+        # ── Animation render layer ──────────────────────────────────────────
+        try:
+            if self.renderer:
+                self._particles.draw(self.renderer)
+                for _r in self._pulse_rings: _r.draw(self.renderer)
+                for _f in self._anim_card_flips: _f.draw(self.renderer)
+                for _fl in self._flashes: _fl.draw(self.renderer, self.width, self.height)
+                for _p in self._text_pops: _p.draw(self.renderer)
+        except Exception:
+            pass
 
     def _draw_board_only_status_overlay(self) -> None:
         """Small status line for the Pyglet window in Web-UI-first mode."""

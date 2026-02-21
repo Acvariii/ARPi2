@@ -93,20 +93,52 @@ export default function RiskPanel(props: {
   };
 
   return (
-    <Stack spacing={1.25}>
+    <Stack spacing={1.25} sx={{ animation: 'fadeInUp 0.4s ease-out' }}>
       <GameBanner game="risk" />
       <Paper variant="outlined" sx={{ p: 1.25 }}>
-        <Typography variant="body2" color="text.secondary" align="center">
-          {typeof st?.winner === 'number'
-            ? `Winner: ${seatLabel(st.winner)}`
-            : st?.phase === 'initial_deploy'
-              ? `Initial Deploy · Pool: ${(st as any)?.initial_deploy_pool ?? 0}`
-              : `Turn: ${typeof st?.current_turn_seat === 'number' ? seatLabel(st.current_turn_seat) : '—'} · Phase: ${
-                  st?.phase || '—'
-                } · Reinforcements: ${st?.reinforcements_left ?? 0}`}
-        </Typography>
+        {typeof st?.winner === 'number' ? (
+          <Typography variant="body1" sx={{ fontWeight: 800, animation: 'winnerShimmer 2s linear infinite, glowText 1.5s ease-in-out infinite' }} align="center">
+            🏆 Winner: {seatLabel(st.winner)}
+          </Typography>
+        ) : (
+          <Stack spacing={0.75}>
+            <Stack direction="row" spacing={1} justifyContent="center" flexWrap="wrap" useFlexGap>
+              {/* Phase badge */}
+              {(() => {
+                const phase = String(st?.phase || '');
+                const phaseInfo: Record<string, { icon: string; color: string }> = {
+                  initial_deploy: { icon: '🚩', color: '#7b1fa2' },
+                  reinforce: { icon: '➕', color: '#1565c0' },
+                  attack: { icon: '⚔️', color: '#c62828' },
+                  conquer_move: { icon: '💪', color: '#e65100' },
+                  fortify: { icon: '🛡️', color: '#2e7d32' },
+                };
+                const info = phaseInfo[phase] ?? { icon: '🎮', color: '#37474f' };
+                return (
+                  <Chip
+                    label={`${info.icon} ${phase.replace('_', ' ').toUpperCase()}`}
+                    size="small"
+                    sx={{ bgcolor: info.color, color: '#fff', fontWeight: 700, height: 24, fontSize: '0.75rem', animation: 'badgePop 0.4s ease-out' }}
+                  />
+                );
+              })()}
+              {isMyTurn && (
+                <Chip label="Your Turn" size="small" color="primary" sx={{ height: 24, fontWeight: 700, animation: 'pulseScale 1.5s ease-in-out infinite' }} />
+              )}
+              {st?.phase === 'initial_deploy' && (
+                <Chip label={`Pool: ${(st as any)?.initial_deploy_pool ?? 0}`} size="small" variant="outlined" sx={{ height: 24 }} />
+              )}
+              {typeof st?.reinforcements_left === 'number' && st.reinforcements_left > 0 && (
+                <Chip label={`+${st.reinforcements_left} reinforce`} size="small" sx={{ bgcolor: '#1565c0', color: '#fff', height: 24 }} />
+              )}
+            </Stack>
+            <Typography variant="body2" color="text.secondary" align="center">
+              Turn: {typeof st?.current_turn_seat === 'number' ? seatLabel(st.current_turn_seat) : '—'}
+            </Typography>
+          </Stack>
+        )}
         {st?.last_event ? (
-          <Typography variant="caption" color="text.secondary" display="block" align="center" sx={{ mt: 0.5 }}>
+          <Typography variant="caption" color="text.secondary" display="block" align="center" sx={{ mt: 0.5, animation: 'slideInRight 0.4s ease-out' }}>
             {st.last_event}
           </Typography>
         ) : null}
@@ -129,13 +161,14 @@ export default function RiskPanel(props: {
         </Typography>
         <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
           {actionButtons.length ? (
-            actionButtons.map((b) => (
+            actionButtons.map((b, bIdx) => (
               <Button
                 key={b.id}
                 variant="contained"
                 size="small"
                 disabled={!b.enabled}
                 onClick={() => send({ type: 'click_button', id: b.id })}
+                sx={{ animation: `bounceIn 0.35s ease-out ${bIdx * 0.05}s both` }}
               >
                 {b.text}
               </Button>
@@ -173,6 +206,7 @@ export default function RiskPanel(props: {
                     const selected = tid === st?.selected_from || tid === st?.selected_to;
                     const owner = typeof t?.owner === 'number' ? (t.owner as number) : null;
                     const troops = typeof t?.troops === 'number' ? t.troops : 0;
+                    const ownerColor = owner !== null && owner >= 0 ? playerColors[owner % playerColors.length] : undefined;
 
                     return (
                       <ListItemButton
@@ -182,18 +216,30 @@ export default function RiskPanel(props: {
                         sx={{
                           borderRadius: 1,
                           mb: 0.25,
+                          borderLeft: selected ? `4px solid #f9a825` : undefined,
                         }}
                       >
                         <ListItemText
                           primary={
                             <Stack direction="row" spacing={1} alignItems="center">
-                              <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                              <Typography variant="body2" sx={{ fontWeight: 700, flex: 1 }}>
                                 {String(t?.name || `T${tid}`)}
                               </Typography>
                               {ownerChip(owner)}
-                              <Chip size="small" label={`${troops}`} variant="outlined" />
-                              {tid === st?.selected_from ? <Chip size="small" label="From" /> : null}
-                              {tid === st?.selected_to ? <Chip size="small" label="To" /> : null}
+                              <Chip
+                                size="small"
+                                label={`${troops}`}
+                                sx={{
+                                  bgcolor: ownerColor ?? '#546e7a',
+                                  color: '#fff',
+                                  fontWeight: 900,
+                                  minWidth: 28,
+                                  height: 20,
+                                  fontSize: '0.72rem',
+                                }}
+                              />
+                              {tid === st?.selected_from ? <Chip size="small" label="From" color="warning" sx={{ height: 18, fontSize: '0.65rem' }} /> : null}
+                              {tid === st?.selected_to ? <Chip size="small" label="To" color="success" sx={{ height: 18, fontSize: '0.65rem' }} /> : null}
                             </Stack>
                           }
                         />

@@ -1,8 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Paper, Stack, TextField, Typography } from '@mui/material';
+import { Box, Chip, Paper, Stack, TextField, Typography } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import type { Snapshot } from '../../types';
 import GameBanner from '../../components/GameBanner';
+
+const CLUE_CARD_STYLE: Record<string, { border: string; bg: string; label: string }> = {
+  suspect: { border: '#ab47bc', bg: '#ab47bc18', label: '📛 Suspect' },
+  weapon:  { border: '#ef5350', bg: '#ef535018', label: '🗡️ Weapon'  },
+  room:    { border: '#26a69a', bg: '#26a69a18', label: '📋 Room'     },
+};
 
 type Props = {
   snapshot: Snapshot;
@@ -93,7 +99,7 @@ export default function CluedoPanel({ snapshot, seatLabel, send, playerColors }:
   return (
     <>
       <GameBanner game="cluedo" />
-      <Paper variant="outlined" sx={{ p: 1.5, mb: 2 }}>
+      <Paper variant="outlined" sx={{ p: 1.5, mb: 2, animation: 'fadeInUp 0.4s ease-out' }}>
         <Stack spacing={0.75}>
           <Typography variant="body2" color="text.secondary" align="center">
             Turn: {turnSeat !== null ? seatLabel(turnSeat) : '—'}
@@ -102,7 +108,7 @@ export default function CluedoPanel({ snapshot, seatLabel, send, playerColors }:
             {typeof cl.steps_remaining === 'number' ? ` · Steps: ${cl.steps_remaining}` : ''}
           </Typography>
           {!!cl.last_event && (
-            <Typography variant="body2" sx={{ fontWeight: 700 }} align="center">
+            <Typography variant="body2" sx={{ fontWeight: 700, animation: 'slideInRight 0.4s ease-out' }} align="center">
               {cl.last_event}
             </Typography>
           )}
@@ -112,7 +118,7 @@ export default function CluedoPanel({ snapshot, seatLabel, send, playerColors }:
             </Typography>
           )}
           {typeof cl.winner === 'number' && (
-            <Typography variant="body2" sx={{ fontWeight: 800 }} align="center">
+            <Typography variant="body2" sx={{ fontWeight: 800, animation: 'winnerShimmer 2s linear infinite, glowText 1.5s ease-in-out infinite' }} align="center">
               Winner: {seatLabel(cl.winner)}
             </Typography>
           )}
@@ -148,24 +154,39 @@ export default function CluedoPanel({ snapshot, seatLabel, send, playerColors }:
               justifyContent: 'center',
             }}
           >
-            {(cl.your_hand || []).map((c, idx) => (
-              <Paper
-                key={`${c.kind}:${c.name}:${idx}`}
-                variant="outlined"
-                sx={{
-                  p: { xs: 0.75, sm: 1 },
-                  borderRadius: 2,
-                  bgcolor: theme.palette.background.paper,
-                }}
-              >
-                <Typography variant="body2" sx={{ fontWeight: 800, fontSize: { xs: '0.78rem', sm: '0.875rem' } }}>
-                  {c.text}
-                </Typography>
-                <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
-                  {String(c.kind || '').toUpperCase()}
-                </Typography>
-              </Paper>
-            ))}
+            {(cl.your_hand || []).map((c, idx) => {
+              const style = CLUE_CARD_STYLE[c.kind] ?? { border: theme.palette.divider, bg: 'transparent', label: c.kind.toUpperCase() };
+              return (
+                <Paper
+                  key={`${c.kind}:${c.name}:${idx}`}
+                  variant="outlined"
+                  sx={{
+                    p: { xs: 0.75, sm: 1 },
+                    borderRadius: 2,
+                    borderColor: style.border,
+                    borderWidth: 1.5,
+                    bgcolor: style.bg,
+                    animation: `flipIn 0.4s ease-out ${idx * 0.06}s both`,
+                  }}
+                >
+                  <Typography variant="body2" sx={{ fontWeight: 800, fontSize: { xs: '0.78rem', sm: '0.875rem' } }}>
+                    {c.text}
+                  </Typography>
+                  <Chip
+                    label={style.label}
+                    size="small"
+                    sx={{
+                      mt: 0.5,
+                      height: 18,
+                      fontSize: '0.62rem',
+                      bgcolor: style.border,
+                      color: '#fff',
+                      fontWeight: 700,
+                    }}
+                  />
+                </Paper>
+              );
+            })}
           </Box>
         </Paper>
       ) : (
@@ -315,19 +336,27 @@ export default function CluedoPanel({ snapshot, seatLabel, send, playerColors }:
               variant="outlined"
               sx={{
                 p: 1,
-                borderColor: playerColors[p.seat % playerColors.length],
+                borderColor: turnSeat === p.seat
+                  ? playerColors[p.seat % playerColors.length]
+                  : `${playerColors[p.seat % playerColors.length]}88`,
+                borderWidth: turnSeat === p.seat ? 2 : 1,
+                bgcolor: turnSeat === p.seat ? `${playerColors[p.seat % playerColors.length]}18` : 'background.paper',
                 opacity: p.eliminated ? 0.6 : 1,
+                animation: `fadeInUp 0.3s ease-out ${p.seat * 0.06}s both`,
               }}
             >
               <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
-                <Typography variant="body2" sx={{ fontWeight: 800 }}>
-                  {p.name}
-                  {turnSeat === p.seat ? ' (Turn)' : ''}
-                  {p.eliminated ? ' (Out)' : ''}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {p.room || '—'} · {p.hand_count} cards
-                </Typography>
+                <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap">
+                  <Typography variant="body2" sx={{ fontWeight: 800 }}>
+                    {p.name}
+                  </Typography>
+                  {turnSeat === p.seat && <Chip label="Turn" size="small" color="primary" sx={{ height: 18, fontSize: '0.65rem', animation: 'badgePop 0.3s ease-out' }} />}
+                  {p.eliminated && <Chip label="Out" size="small" sx={{ height: 18, fontSize: '0.65rem', bgcolor: '#c62828', color: '#fff', animation: 'blink 0.6s ease-in-out 3' }} />}
+                </Stack>
+                <Stack direction="row" spacing={0.75} alignItems="center">
+                  {p.room && <Chip label={`📋 ${p.room}`} size="small" variant="outlined" sx={{ height: 18, fontSize: '0.65rem' }} />}
+                  <Typography variant="caption" color="text.secondary">{p.hand_count} cards</Typography>
+                </Stack>
               </Stack>
             </Paper>
           ))}

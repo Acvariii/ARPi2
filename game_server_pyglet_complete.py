@@ -425,6 +425,10 @@ class PygletGameServer:
         if st == "risk":
             return "RiskBG.mp3"
         if st == "catan":
+            return "CatanBG.mp3"
+        if st == "unstable_unicorns":
+            return "TavernBG.mp3"
+        if st in ("dnd_creation", "dnd"):
             return "TavernBG.mp3"
         return None
 
@@ -1896,6 +1900,8 @@ class PygletGameServer:
                         "money": int(getattr(p, "money", 0)),
                         "jail_free_cards": int(getattr(p, "get_out_of_jail_cards", 0)),
                         "properties": props,
+                        "position": int(getattr(p, "position", 0) or 0),
+                        "in_jail": bool(getattr(p, "in_jail", False)),
                     })
 
                 ownership: Dict[str, int] = {}

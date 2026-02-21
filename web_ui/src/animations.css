@@ -1,0 +1,127 @@
+/* ─── ARPi2 Global UI Animations ─────────────────────────────── */
+
+/* Panel / card entrance */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Turn-indicator glow pulse (white / neutral – complements any border-color) */
+@keyframes turnGlow {
+  0%, 100% { box-shadow: 0 0 4px 1px rgba(255,255,255,0.10); }
+  50%       { box-shadow: 0 0 18px 4px rgba(255,255,255,0.30); }
+}
+
+/* NOPE window flash */
+@keyframes nopeFlash {
+  0%, 100% { background-color: rgba(239, 83, 80, 0.09); border-color: #ef5350; }
+  50%       { background-color: rgba(239, 83, 80, 0.30); border-color: #ff1744; }
+}
+
+/* Winner trophy shimmer */
+@keyframes winnerShimmer {
+  0%   { filter: hue-rotate(0deg)   brightness(1.0); }
+  50%  { filter: hue-rotate(120deg) brightness(1.4); }
+  100% { filter: hue-rotate(360deg) brightness(1.0); }
+}
+
+/* Pot / stat counter pop bounce */
+@keyframes potPop {
+  0%   { transform: scale(1); }
+  35%  { transform: scale(1.13); }
+  70%  { transform: scale(0.97); }
+  100% { transform: scale(1); }
+}
+
+/* Card entrance – drop in from above */
+@keyframes cardDrop {
+  from { transform: translateY(-10px) scale(0.88); opacity: 0; }
+  to   { transform: translateY(0)     scale(1);    opacity: 1; }
+}
+
+/* Badge / chip pop-in */
+@keyframes badgePop {
+  0%   { transform: scale(0);    opacity: 0; }
+  60%  { transform: scale(1.22); opacity: 1; }
+  100% { transform: scale(1);    opacity: 1; }
+}
+
+/* Attention blink (low deck, urgent warning) */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.45; }
+}
+
+/* Subtle border pulse (active / pending states) */
+@keyframes pulseBorder {
+  0%, 100% { transform: scale(1);    }
+  50%       { transform: scale(1.01); }
+}
+
+/* Shake (wrong accusation, bust etc.) */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60%  { transform: translateX(-5px); }
+  40%, 80%  { transform: translateX(5px); }
+}
+
+/* Slide-in from right (last-event banners) */
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* Rainbow gradient sweep for titles/banners */
+@keyframes rainbowSweep {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Dice roll shake */
+@keyframes diceRoll {
+  0%   { transform: rotate(0deg)   scale(1); }
+  20%  { transform: rotate(-12deg) scale(1.1); }
+  40%  { transform: rotate(10deg)  scale(1.1); }
+  60%  { transform: rotate(-8deg)  scale(1.05); }
+  80%  { transform: rotate(5deg)   scale(1.02); }
+  100% { transform: rotate(0deg)   scale(1); }
+}
+
+/* Pulse scale for active player or action required */
+@keyframes pulseScale {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.04); }
+}
+
+/* Glow text shadow */
+@keyframes glowText {
+  0%, 100% { text-shadow: 0 0 4px currentColor; }
+  50%      { text-shadow: 0 0 16px currentColor, 0 0 30px currentColor; }
+}
+
+/* Float up and fade (for transient toasts) */
+@keyframes floatUp {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(-20px); }
+}
+
+/* Flip card entrance */
+@keyframes flipIn {
+  from { transform: rotateY(90deg); opacity: 0; }
+  to   { transform: rotateY(0deg);  opacity: 1; }
+}
+
+/* Bounce attention */
+@keyframes bounceIn {
+  0%   { transform: scale(0.3); opacity: 0; }
+  50%  { transform: scale(1.08); }
+  70%  { transform: scale(0.95); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* Confetti burst background */
+@keyframes confettiBurst {
+  0%   { background-size: 100%; opacity: 1; }
+  100% { background-size: 300%; opacity: 0; }
+}

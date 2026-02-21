@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from core.player_selection import PlayerSelectionUI
+from core.animation import (
+    ParticleSystem, CardFlyAnim, TextPopAnim, PulseRing, ScreenFlash,
+    _RAINBOW_PALETTE as _FW_COLORS, draw_rainbow_title,
+)
 
 
 class _WebButton:
@@ -221,6 +225,16 @@ class CatanGame:
         # Compatibility with server flags
         self.web_ui_only_player_select = True
         self.board_only_mode = True
+
+        # ── Particle animations ─────────────────────────────────────────
+        self._particles = ParticleSystem()
+        self._anim_card_flips: list = []
+        self._text_pops: list = []
+        self._pulse_rings: list = []
+        self._flashes: list = []
+        self._anim_prev_winner: object = None
+        self._anim_fw_timer: float = 0.0
+        self._anim_prev_turn: object = None
 
     def _seat_label(self, seat: int) -> str:
         try:
@@ -1039,6 +1053,18 @@ class CatanGame:
                 self.last_event = f"{self._seat_label(player_idx)} built a settlement"
                 self._update_awards_and_winner()
                 self._refresh_buttons()
+                # 🏠 Settlement animation
+                try:
+                    _pal = [(255,70,70),(70,145,255),(70,255,150),(255,220,70),(210,90,255),(70,255,245),(255,90,210),(210,255,90)]
+                    _pcol = _pal[int(player_idx) % len(_pal)]
+                    _v = self._vertices[int(vid)]
+                    _vx = float(_v["x"]) * self._draw_size + self._draw_off_x
+                    _vy = float(_v["y"]) * self._draw_size + self._draw_off_y
+                    self._text_pops.append(TextPopAnim("\U0001f3e0 Settlement!", _vx, _vy - 30, _pcol, font_size=18))
+                    self._pulse_rings.append(PulseRing(_vx, _vy, _pcol, max_radius=38, duration=0.6))
+                    self._particles.emit_sparkle(_vx, _vy, _pcol, count=16)
+                except Exception:
+                    pass
                 return
             if kind == "road":
                 eid = self._nearest_edge(lx, ly)
@@ -1058,6 +1084,20 @@ class CatanGame:
                 self.last_event = f"{self._seat_label(player_idx)} built a road"
                 self._update_awards_and_winner()
                 self._refresh_buttons()
+                # 🛤 Road animation (midpoint of edge)
+                try:
+                    _pal = [(255,70,70),(70,145,255),(70,255,150),(255,220,70),(210,90,255),(70,255,245),(255,90,210),(210,255,90)]
+                    _pcol = _pal[int(player_idx) % len(_pal)]
+                    _e = self._edges[int(eid)]
+                    _va = self._vertices[int(_e["a"])]
+                    _vb = self._vertices[int(_e["b"])]
+                    _ex = (float(_va["x"]) + float(_vb["x"])) / 2 * self._draw_size + self._draw_off_x
+                    _ey = (float(_va["y"]) + float(_vb["y"])) / 2 * self._draw_size + self._draw_off_y
+                    self._text_pops.append(TextPopAnim("\U0001f6e4 Road!", _ex, _ey - 25, _pcol, font_size=16))
+                    self._pulse_rings.append(PulseRing(_ex, _ey, _pcol, max_radius=28, duration=0.5))
+                    self._particles.emit_sparkle(_ex, _ey, _pcol, count=12)
+                except Exception:
+                    pass
                 return
             if kind == "city":
                 vid = self._nearest_vertex(lx, ly)
@@ -1073,6 +1113,18 @@ class CatanGame:
                 self.last_event = f"{self._seat_label(player_idx)} upgraded to a city"
                 self._update_awards_and_winner()
                 self._refresh_buttons()
+                # 🏙 City upgrade animation
+                try:
+                    _pal = [(255,70,70),(70,145,255),(70,255,150),(255,220,70),(210,90,255),(70,255,245),(255,90,210),(210,255,90)]
+                    _pcol = _pal[int(player_idx) % len(_pal)]
+                    _v = self._vertices[int(vid)]
+                    _vx = float(_v["x"]) * self._draw_size + self._draw_off_x
+                    _vy = float(_v["y"]) * self._draw_size + self._draw_off_y
+                    self._text_pops.append(TextPopAnim("\U0001f3d9 City!", _vx, _vy - 30, _pcol, font_size=20))
+                    self._pulse_rings.append(PulseRing(_vx, _vy, _pcol, max_radius=50, duration=0.7))
+                    self._particles.emit_sparkle(_vx, _vy, _pcol)
+                except Exception:
+                    pass
                 return
 
     def _advance_initial_turn_after_road(self) -> None:
@@ -1703,7 +1755,7 @@ class CatanGame:
             if int(hand.get("year_of_plenty", 0)) > 0:
                 self.buttons[seat]["play_dev:year_of_plenty"] = _WebButton("Play Year of Plenty", enabled=(not bought_this_turn and not self._dev_played_this_turn))
             if int(hand.get("monopoly", 0)) > 0:
-                self.buttons[seat]["play_dev:monopoly"] = _WebButton("Play Monopoly", enabled=(not bought_this_turn and not self._dev_played_this_turn))
+                self.buttons[seat]["play_dev:monopoly"] = _WebButton("Dev: Monopoly", enabled=(not bought_this_turn and not self._dev_played_this_turn))
 
             # Year of Plenty selections
             if self._yop_left > 0:
@@ -1784,7 +1836,8 @@ class CatanGame:
 
     def _draw_dice_overlay(self) -> None:
         now = float(time.time())
-        show = bool(self.dice_rolling) or (isinstance(self.last_roll, int) and (now - float(self._last_roll_time or 0.0)) <= 2.5)
+        # Show while rolling OR whenever a roll result is available (persistent until next round).
+        show = bool(self.dice_rolling) or isinstance(self.last_roll, int)
         if not show:
             return
 
@@ -1849,12 +1902,24 @@ class CatanGame:
             self._draw_pips(int(dx), int(dy), int(dice_size), int(value), layer=230)
 
         if isinstance(self.last_roll, int) and not self.dice_rolling:
+            # Shadow
+            self.renderer.draw_text_immediate(
+                f"= {int(self.last_roll)}",
+                int(cx + dice_size + 40),
+                int(cy) + 4,
+                font_size=22,
+                color=(30, 20, 10),
+                anchor_x="left",
+                anchor_y="center",
+                alpha=160,
+                layer=239,
+            )
             self.renderer.draw_text_immediate(
                 f"= {int(self.last_roll)}",
                 int(cx + dice_size + 38),
                 int(cy) + 2,
                 font_size=22,
-                color=(255, 255, 255),
+                color=(255, 235, 80),
                 anchor_x="left",
                 anchor_y="center",
                 alpha=255,
@@ -1962,7 +2027,7 @@ class CatanGame:
         else:
             subtitle = "Select players in Web UI"
 
-        self.renderer.draw_text(title, 16, 22, font_size=24, color=(235, 235, 235), anchor_x="left", anchor_y="top")
+        draw_rainbow_title(self.renderer, "CATAN", w)
         self.renderer.draw_text(subtitle, 16, 50, font_size=14, color=(200, 200, 200), anchor_x="left", anchor_y="top")
 
         if self.state != "playing":
@@ -2199,7 +2264,65 @@ class CatanGame:
             except Exception:
                 pass
 
+        # ── Animation render layer ──────────────────────────────────────────
+        try:
+            if self.renderer:
+                self._particles.draw(self.renderer)
+                for _r in self._pulse_rings: _r.draw(self.renderer)
+                for _f in self._anim_card_flips: _f.draw(self.renderer)
+                for _fl in self._flashes: _fl.draw(self.renderer, self.width, self.height)
+                for _p in self._text_pops: _p.draw(self.renderer)
+        except Exception:
+            pass
+
     def update(self, dt: float) -> None:
+        # ── Tick animations ──────────────────────────────────────────────────
+        try:
+            self._particles.update(dt)
+            for _a in list(self._anim_card_flips): _a.update(dt)
+            self._anim_card_flips = [_a for _a in self._anim_card_flips if not _a.done]
+            for _a in list(self._text_pops): _a.update(dt)
+            self._text_pops = [_a for _a in self._text_pops if not _a.done]
+            for _a in list(self._pulse_rings): _a.update(dt)
+            self._pulse_rings = [_a for _a in self._pulse_rings if not _a.done]
+            for _a in list(self._flashes): _a.update(dt)
+            self._flashes = [_a for _a in self._flashes if not _a.done]
+            # Turn-change pulse + sparkle
+            _curr_turn = getattr(self, 'current_turn_seat', None)
+            if (
+                self.state == "playing"
+                and isinstance(_curr_turn, int)
+                and _curr_turn != self._anim_prev_turn
+                and isinstance(self._anim_prev_turn, int)
+            ):
+                _cx, _cy = self.width // 2, self.height // 2
+                _col = _FW_COLORS[int(_curr_turn) % len(_FW_COLORS)]
+                self._pulse_rings.append(PulseRing(_cx, _cy, _col, max_radius=min(self.width, self.height) // 5, duration=0.8))
+                self._particles.emit_sparkle(_cx, _cy, _col, count=18)
+                self._flashes.append(ScreenFlash(_col, peak_alpha=40, duration=0.3))
+            self._anim_prev_turn = _curr_turn
+            if isinstance(self.winner, int) and self.winner is not self._anim_prev_winner:
+                self._anim_prev_winner = self.winner
+                _cx, _cy = self.width // 2, self.height // 2
+                for _ in range(10):
+                    self._particles.emit_firework(
+                        _cx + random.randint(-150, 150), _cy + random.randint(-100, 100),
+                        _FW_COLORS)
+                self._flashes.append(ScreenFlash((255, 220, 80), 80, 1.2))
+                self._text_pops.append(TextPopAnim(
+                    f"🏆 {self._seat_label(self.winner)} wins!", _cx, _cy - 70,
+                    (255, 220, 80), font_size=40))
+                self._anim_fw_timer = 8.0
+            if self._anim_fw_timer > 0:
+                self._anim_fw_timer = max(0.0, self._anim_fw_timer - dt)
+                if int(self._anim_fw_timer * 3) % 2 == 0:
+                    _cx, _cy = self.width // 2, self.height // 2
+                    self._particles.emit_firework(
+                        _cx + random.randint(-150, 150), _cy + random.randint(-100, 100),
+                        _FW_COLORS)
+        except Exception:
+            pass
+
         if not bool(self.dice_rolling):
             return
 
@@ -2224,6 +2347,21 @@ class CatanGame:
         self._last_dice = (int(a), int(b))
         self.last_roll = int(a + b)
         self._last_roll_time = float(time.time())
+
+        # ── Dice result visual feedback ─────────────────────────────────────
+        try:
+            _cx, _cy = self.width // 2, self.height // 2
+            if self.last_roll == 7:
+                self._flashes.append(ScreenFlash((200, 80, 255), 40, 0.6))
+                self._text_pops.append(TextPopAnim(
+                    "\U0001f6a8 ROBBER!", _cx, _cy - 50, (200, 80, 255), font_size=32))
+                self._particles.emit_sparkle(_cx, _cy, (200, 80, 255), count=20)
+            else:
+                self._text_pops.append(TextPopAnim(
+                    f"\U0001f3b2 {self.last_roll}", _cx, _cy - 50, (255, 235, 120), font_size=28))
+                self._particles.emit_sparkle(_cx, _cy, (255, 235, 120), count=12)
+        except Exception:
+            pass
 
         seat = int(self._pending_roll_seat) if isinstance(self._pending_roll_seat, int) else int(self.current_turn_seat or 0)
         self._pending_dice = None

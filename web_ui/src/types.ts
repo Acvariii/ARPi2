@@ -175,6 +175,8 @@ export type Snapshot = {
       name: string;
       money: number;
       jail_free_cards?: number;
+      position?: number;
+      in_jail?: boolean;
       properties: Array<{ idx: number; name: string }>;
     }>;
     // property index -> owner player index (stringified keys to match JSON)

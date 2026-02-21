@@ -127,11 +127,17 @@ def draw_emoji_card(
         # Emoji shadow then emoji
         cx = int(x + w / 2)
         cy = int(y + h * 0.58)
+        # Count visible emoji/characters (skip variation selectors & ZWJ so e.g. 🛡️ counts as 1)
+        _vis = [_c for _c in str(emoji or "") if ord(_c) > 0x2000 and ord(_c) not in (0xFE0F, 0x200D)]
+        _n_emoji = max(1, len(_vis)) if _vis else max(1, len(str(emoji or "")))
+        _base_fs = max(18, int(h * 0.36))
+        # Scale down font if multiple emoji would overflow the card width
+        _emoji_fs = min(_base_fs, max(14, int(w * 0.78 / _n_emoji)))
         try:
-            renderer.draw_text(str(emoji or ""), cx + 1, cy + 1, font_size=max(18, int(h * 0.36)), color=(0, 0, 0), alpha=90, anchor_x="center", anchor_y="center")
+            renderer.draw_text(str(emoji or ""), cx + 1, cy + 1, font_size=_emoji_fs, color=(0, 0, 0), alpha=90, anchor_x="center", anchor_y="center")
         except Exception:
             pass
-        renderer.draw_text(str(emoji or ""), cx, cy, font_size=max(18, int(h * 0.36)), color=(255, 255, 255), alpha=255, anchor_x="center", anchor_y="center")
+        renderer.draw_text(str(emoji or ""), cx, cy, font_size=_emoji_fs, color=(255, 255, 255), alpha=255, anchor_x="center", anchor_y="center")
 
         # Title
         name = (title or "").strip()

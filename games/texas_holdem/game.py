@@ -8,6 +8,10 @@ from typing import Callable, Dict, List, Optional, Tuple
 from core.player_selection import PlayerSelectionUI
 from config import PLAYER_COLORS
 from core.card_rendering import draw_playing_card, draw_game_background
+from core.animation import (
+    ParticleSystem, CardFlyAnim, TextPopAnim, PulseRing, ScreenFlash,
+    _RAINBOW_PALETTE as _FW_COLORS, draw_rainbow_title,
+)
 
 
 @dataclass(frozen=True)
@@ -204,6 +208,17 @@ class TexasHoldemGame:
         # Optional name provider for board rendering
         self._seat_name_provider: Optional[Callable[[int], str]] = None
 
+        # ── Particle animations ─────────────────────────────────────────────
+        self._particles = ParticleSystem()
+        self._anim_card_flips: list = []
+        self._text_pops: list = []
+        self._pulse_rings: list = []
+        self._flashes: list = []
+        self._anim_prev_showdown: object = None
+        self._anim_prev_turn_seat: object = None
+        self._anim_prev_street: str = ""
+        self._anim_fw_timer: float = 0.0
+
     def set_name_provider(self, provider: Optional[Callable[[int], str]]) -> None:
         self._seat_name_provider = provider
 
@@ -309,8 +324,66 @@ class TexasHoldemGame:
         self._rebuild_buttons()
 
     def update(self, dt: float) -> None:
-        # No animations yet; keep for interface parity.
-        return
+        # ── Tick animations ─────────────────────────────────────────────
+        try:
+            self._particles.update(dt)
+            for _a in list(self._anim_card_flips): _a.update(dt)
+            self._anim_card_flips = [_a for _a in self._anim_card_flips if not _a.done]
+            for _a in list(self._text_pops): _a.update(dt)
+            self._text_pops = [_a for _a in self._text_pops if not _a.done]
+            for _a in list(self._pulse_rings): _a.update(dt)
+            self._pulse_rings = [_a for _a in self._pulse_rings if not _a.done]
+            for _a in list(self._flashes): _a.update(dt)
+            self._flashes = [_a for _a in self._flashes if not _a.done]
+            # Fireworks on new showdown result
+            if self.last_showdown is not None and self.last_showdown is not self._anim_prev_showdown:
+                self._anim_prev_showdown = self.last_showdown
+                _cx, _cy = self.width // 2, self.height // 2
+                for _ in range(8):
+                    self._particles.emit_firework(
+                        _cx + random.randint(-120, 120), _cy + random.randint(-80, 80),
+                        _FW_COLORS)
+                self._flashes.append(ScreenFlash((255, 220, 80), 60, 1.0))
+                _winners = list(self.last_showdown.get("winners") or [])
+                if _winners:
+                    try:
+                        _names = " & ".join(self._seat_label(int(w)) for w in _winners)
+                        self._text_pops.append(TextPopAnim(f"🏆 {_names}!", _cx, _cy - 60, (255, 220, 80), font_size=32))
+                    except Exception:
+                        pass
+                self._anim_fw_timer = 5.0
+            if self._anim_fw_timer > 0:
+                self._anim_fw_timer = max(0.0, self._anim_fw_timer - dt)
+                if int(self._anim_fw_timer * 3) % 2 == 0:
+                    _cx, _cy = self.width // 2, self.height // 2
+                    self._particles.emit_firework(
+                        _cx + random.randint(-150, 150), _cy + random.randint(-100, 100),
+                        _FW_COLORS)
+            # Turn-change: pulse ring on the newly active seat
+            _turn = self.turn_seat
+            if self.state == "playing" and isinstance(_turn, int) and _turn != self._anim_prev_turn_seat:
+                self._anim_prev_turn_seat = _turn
+                try:
+                    _ax, _ay = self._seat_anchor(_turn, self.width, self.height)
+                    self._pulse_rings.append(PulseRing(int(_ax), int(_ay), (130, 230, 130), 55, 0.9))
+                except Exception:
+                    pass
+            # Street-change: brief flash when new community cards land
+            _street = self.street
+            if self.state == "playing" and _street != self._anim_prev_street:
+                self._anim_prev_street = _street
+                _street_colors = {"flop": (60, 200, 120), "turn": (80, 160, 230), "river": (230, 200, 60)}
+                _sc = _street_colors.get(_street)
+                if _sc:
+                    try:
+                        self._flashes.append(ScreenFlash(_sc, 55, 0.4))
+                        _scx, _scy = self.width // 2, self.height // 2
+                        self._text_pops.append(TextPopAnim(
+                            _street.upper(), _scx, _scy - 80, _sc, font_size=28))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
     # --- Dealing / rounds ---
 
@@ -499,6 +572,14 @@ class TexasHoldemGame:
         if btn_id == "all_in":
             if self.state == "playing" and isinstance(self.turn_seat, int) and seat == self.turn_seat and self.in_hand.get(seat, False):
                 self._do_all_in(seat)
+                # 💥 All-in animation
+                try:
+                    _cx, _cy = self.width // 2, self.height // 2
+                    self._text_pops.append(TextPopAnim("\U0001f4a5 ALL IN!", _cx, _cy - 35, (255, 130, 50), font_size=34))
+                    self._flashes.append(ScreenFlash((180, 80, 20), 35, 0.35))
+                    self._pulse_rings.append(PulseRing(_cx, _cy, (255, 130, 50), max_radius=80, duration=0.7))
+                except Exception:
+                    pass
                 self._after_action(seat)
             return
 
@@ -515,6 +596,13 @@ class TexasHoldemGame:
         if btn_id == "fold":
             self.in_hand[seat] = False
             self.acted.add(seat)
+            # 💔 Fold animation
+            try:
+                _cx, _cy = self.width // 2, self.height // 2
+                self._text_pops.append(TextPopAnim("\U0001f494 Fold", _cx, _cy - 30, (180, 80, 80), font_size=26))
+                self._flashes.append(ScreenFlash((100, 30, 30), 22, 0.22))
+            except Exception:
+                pass
             self._after_action(seat)
             return
 
@@ -825,8 +913,8 @@ class TexasHoldemGame:
 
         # Title + status
         try:
-            title = "Texas Hold'em"
-            self.renderer.draw_text(title, 24, 24, font_size=24, color=(235, 235, 235), anchor_x="left", anchor_y="top")
+            title = "TEXAS HOLD'EM"
+            draw_rainbow_title(self.renderer, title, w)
             if self.state != "player_select":
                 turn = self._seat_label(self.turn_seat)
                 self.renderer.draw_text(
@@ -971,9 +1059,85 @@ class TexasHoldemGame:
             except Exception:
                 pass
 
+        # Per-seat info zones
+        if self.state in ("playing", "showdown"):
+            self._draw_seat_zones(w, h)
+
+        # ── Animation render layer ──────────────────────────────────────────
+        try:
+            if self.renderer:
+                self._particles.draw(self.renderer)
+                for _r in self._pulse_rings: _r.draw(self.renderer)
+                for _f in self._anim_card_flips: _f.draw(self.renderer)
+                for _fl in self._flashes: _fl.draw(self.renderer, self.width, self.height)
+                for _p in self._text_pops: _p.draw(self.renderer)
+        except Exception:
+            pass
+
     def _draw_background(self, w: int, h: int) -> None:
         """Draw the poker-table Texas Hold'em background."""
         draw_game_background(self.renderer, w, h, "texas_holdem")
+
+    def _seat_anchor(self, seat: int, w: int, h: int) -> Tuple[int, int]:
+        """Return the center (x, y) for a seat's zone around the table."""
+        if seat in (0, 1, 2):
+            xs = {0: 0.22, 1: 0.50, 2: 0.78}[seat]
+            return (int(w * xs), int(h * 0.87))
+        if seat in (3, 4, 5):
+            xs = {3: 0.22, 4: 0.50, 5: 0.78}[seat]
+            return (int(w * xs), int(h * 0.13))
+        if seat == 6:
+            return (int(w * 0.09), int(h * 0.50))
+        if seat == 7:
+            return (int(w * 0.91), int(h * 0.50))
+        return (w // 2, h // 2)
+
+    def _draw_seat_zones(self, w: int, h: int) -> None:
+        """Draw per-seat info panels around the table."""
+        for s in self.active_players:
+            seat = int(s)
+            ax, ay = self._seat_anchor(seat, w, h)
+            is_turn = (self.state == "playing" and self.turn_seat == seat)
+            alive = bool(self.in_hand.get(seat, False)) if self.state == "playing" else True
+            stack = int(self.stacks.get(seat, 0) or 0)
+            bet = int(self.bet_in_round.get(seat, 0) or 0)
+
+            bw, bh = 110, 48
+            bx, by = ax - bw // 2, ay - bh // 2
+
+            # Background
+            bg = (20, 80, 50) if is_turn else (18, 28, 38)
+            border = (130, 230, 130) if is_turn else ((180, 180, 180) if alive else (90, 90, 90))
+            try:
+                self.renderer.draw_rect((0, 0, 0), (bx + 3, by - 3, bw, bh), alpha=50)
+                self.renderer.draw_rect(bg, (bx, by, bw, bh), alpha=200)
+                self.renderer.draw_rect(border, (bx, by, bw, bh), width=2 if is_turn else 1, alpha=220)
+            except Exception:
+                pass
+
+            # Name
+            name_col = (130, 255, 130) if is_turn else ((230, 230, 230) if alive else (120, 120, 120))
+            try:
+                self.renderer.draw_text(
+                    self._seat_label(seat),
+                    ax, by + 9, font_size=11, color=name_col,
+                    anchor_x="center", anchor_y="top")
+            except Exception:
+                pass
+
+            # Stack + bet
+            try:
+                status_txt = f"${stack}" + (f"  bet {bet}" if bet > 0 else "")
+                if not alive and self.state == "playing":
+                    status_txt = "FOLD"
+                elif stack == 0 and alive:
+                    status_txt = "ALL-IN"
+                self.renderer.draw_text(
+                    status_txt,
+                    ax, by + bh - 9, font_size=11, color=(210, 210, 210),
+                    anchor_x="center", anchor_y="bottom")
+            except Exception:
+                pass
 
     def _draw_card(self, rect: Tuple[int, int, int, int], label: str = "", face: bool = True) -> None:
         if not self.renderer:

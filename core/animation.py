@@ -320,3 +320,34 @@ class ScreenFlash:
         alpha = int(self.peak_alpha * (1.0 - p) ** 1.4)
         if alpha > 0:
             renderer.draw_rect(self.color, (0, 0, w, h), alpha=alpha)
+
+
+# ---------------------------------------------------------------------------
+# Rainbow title helper
+# ---------------------------------------------------------------------------
+_TITLE_RAINBOW: List[Tuple[int, int, int]] = [
+    (255, 55, 55), (255, 140, 0), (255, 220, 0),
+    (55, 200, 55), (70, 130, 255), (200, 55, 255),
+]
+
+
+def draw_rainbow_title(
+    renderer,
+    title: str,
+    w: int,
+    y: int = 12,
+    font_size: int = 22,
+    char_width: int = 16,
+) -> None:
+    """Draw a title centred horizontally with each character in a cycling rainbow colour."""
+    try:
+        tx = w // 2 - (len(title) * char_width) // 2
+        for i, ch in enumerate(title):
+            col = _TITLE_RAINBOW[i % len(_TITLE_RAINBOW)]
+            renderer.draw_text(
+                ch, tx + i * char_width, y,
+                font_size=font_size, color=col, bold=True,
+                anchor_x="left", anchor_y="top",
+            )
+    except Exception:
+        pass

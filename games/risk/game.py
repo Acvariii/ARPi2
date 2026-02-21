@@ -12,6 +12,10 @@ from pathlib import Path
 
 from config import PLAYER_COLORS
 from core.player_selection import PlayerSelectionUI
+from core.animation import (
+    ParticleSystem, CardFlyAnim, TextPopAnim, PulseRing, ScreenFlash,
+    _RAINBOW_PALETTE as _FW_COLORS, draw_rainbow_title,
+)
 
 
 class _WebButton:
@@ -159,6 +163,15 @@ class RiskGame:
         self._bg_rect: Optional[pyglet.shapes.Rectangle] = None
 
         self._ensure_map()
+
+        # ── Particle animations ─────────────────────────────────────────────
+        self._particles = ParticleSystem()
+        self._anim_card_flips: list = []
+        self._text_pops: list = []
+        self._pulse_rings: list = []
+        self._flashes: list = []
+        self._anim_prev_winner: object = None
+        self._anim_fw_timer: float = 0.0
 
     def set_name_provider(self, provider: Optional[Callable[[int], str]]) -> None:
         self._seat_name_provider = provider
@@ -1705,7 +1718,38 @@ class RiskGame:
         self._refresh_buttons()
 
     def update(self, dt: float) -> None:
-        return
+        # ── Tick animations ─────────────────────────────────────────────
+        try:
+            self._particles.update(dt)
+            for _a in list(self._anim_card_flips): _a.update(dt)
+            self._anim_card_flips = [_a for _a in self._anim_card_flips if not _a.done]
+            for _a in list(self._text_pops): _a.update(dt)
+            self._text_pops = [_a for _a in self._text_pops if not _a.done]
+            for _a in list(self._pulse_rings): _a.update(dt)
+            self._pulse_rings = [_a for _a in self._pulse_rings if not _a.done]
+            for _a in list(self._flashes): _a.update(dt)
+            self._flashes = [_a for _a in self._flashes if not _a.done]
+            if isinstance(self.winner, int) and self.winner is not self._anim_prev_winner:
+                self._anim_prev_winner = self.winner
+                _cx, _cy = self.width // 2, self.height // 2
+                for _ in range(10):
+                    self._particles.emit_firework(
+                        _cx + random.randint(-150, 150), _cy + random.randint(-100, 100),
+                        _FW_COLORS)
+                self._flashes.append(ScreenFlash((255, 220, 80), 80, 1.2))
+                self._text_pops.append(TextPopAnim(
+                    f"🏆 {self._seat_label(self.winner)} wins!", _cx, _cy - 70,
+                    (255, 220, 80), font_size=40))
+                self._anim_fw_timer = 8.0
+            if self._anim_fw_timer > 0:
+                self._anim_fw_timer = max(0.0, self._anim_fw_timer - dt)
+                if int(self._anim_fw_timer * 3) % 2 == 0:
+                    _cx, _cy = self.width // 2, self.height // 2
+                    self._particles.emit_firework(
+                        _cx + random.randint(-150, 150), _cy + random.randint(-100, 100),
+                        _FW_COLORS)
+        except Exception:
+            pass
 
     def _calc_reinforcements(self, seat: int) -> int:
         owned = [td.tid for td in self.territories if self.owner.get(td.tid) == seat]
@@ -2246,21 +2290,25 @@ class RiskGame:
         a_dice = _clamp_int(int(self._attack_dice_choice or 1), 1, int(max_a_dice))
         defender_seat = self.owner.get(d_tid)
 
-        # If defender is a human seat, let them choose defense dice.
+        # If defender is a human seat, let them choose defense dice — but only
+        # if they actually have a choice (i.e. 2 dice available).  With just 1
+        # troop there is no decision to make, so auto-resolve immediately.
         if isinstance(defender_seat, int) and int(defender_seat) in self._alive_players():
-            self.phase = "defend_choose"
-            self._defend_pending_seat = int(defender_seat)
-            self._pending_attack = {
-                "attacker": int(seat),
-                "a_tid": int(a_tid),
-                "d_tid": int(d_tid),
-                "a_dice": int(a_dice),
-                "max_d": int(max_d_dice),
-            }
-            # Default defense choice to max.
-            self._defend_dice_choice = int(max_d_dice)
-            self.last_event = f"{self._seat_label(int(defender_seat))}: choose defense dice"
-            return
+            if int(max_d_dice) >= 2:
+                self.phase = "defend_choose"
+                self._defend_pending_seat = int(defender_seat)
+                self._pending_attack = {
+                    "attacker": int(seat),
+                    "a_tid": int(a_tid),
+                    "d_tid": int(d_tid),
+                    "a_dice": int(a_dice),
+                    "max_d": int(max_d_dice),
+                }
+                # Default defense choice to max.
+                self._defend_dice_choice = int(max_d_dice)
+                self.last_event = f"{self._seat_label(int(defender_seat))}: choose defense dice"
+                return
+            # Defender has only 1 troop — no choice, auto-resolve with 1 die.
 
         # Otherwise, auto-resolve.
         d_dice = int(max_d_dice)
@@ -2614,15 +2662,7 @@ class RiskGame:
         self._bg_rect.draw()
 
         if self.state == "player_select":
-            self.renderer.draw_text(
-                "Risk",
-                24,
-                24,
-                font_size=28,
-                color=(235, 235, 235),
-                anchor_x="left",
-                anchor_y="top",
-            )
+            draw_rainbow_title(self.renderer, "RISK", w, font_size=28, char_width=22)
             self.renderer.draw_text(
                 "Select players in Web UI",
                 24,
@@ -2680,15 +2720,7 @@ class RiskGame:
 
         # Header text
         turn = self._seat_label(self.current_turn_seat)
-        self.renderer.draw_text(
-            "Risk",
-            pad,
-            22,
-            font_size=24,
-            color=(235, 235, 235),
-            anchor_x="left",
-            anchor_y="top",
-        )
+        draw_rainbow_title(self.renderer, "RISK", w)
         if self.phase == "initial_deploy":
             # Parallel deployment
             pool_sum = 0
@@ -3079,6 +3111,17 @@ class RiskGame:
                 anchor_x="left",
                 anchor_y="top",
             )
+
+        # ── Animation render layer ──────────────────────────────────────────
+        try:
+            if self.renderer:
+                self._particles.draw(self.renderer)
+                for _r in self._pulse_rings: _r.draw(self.renderer)
+                for _f in self._anim_card_flips: _f.draw(self.renderer)
+                for _fl in self._flashes: _fl.draw(self.renderer, self.width, self.height)
+                for _p in self._text_pops: _p.draw(self.renderer)
+        except Exception:
+            pass
 
 
 # Compatibility alias (some codebases expect Game class names here)

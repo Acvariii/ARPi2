@@ -57,7 +57,7 @@ export default function UnstableUnicornsPanel({ snapshot, seatLabel, send, playe
   return (
     <>
       <GameBanner game="unstable_unicorns" />
-      <Paper variant="outlined" sx={{ p: 1.5, mb: 2 }}>
+      <Paper variant="outlined" sx={{ p: 1.5, mb: 2, animation: 'fadeInUp 0.4s ease-out' }}>
         <Stack spacing={1}>
           <Typography variant="body2" color="text.secondary" align="center">
             Goal: {goal} unicorns {' · '}Deck: {uu.deck_count ?? 0} {' · '}Discard: {uu.discard_count ?? 0}
@@ -66,19 +66,19 @@ export default function UnstableUnicornsPanel({ snapshot, seatLabel, send, playe
             Turn: {turnSeat !== null ? seatLabel(turnSeat) : '—'} {' · '}Phase: {uu.turn_phase ?? '—'}
           </Typography>
           {winner !== null && (
-            <Typography variant="body1" sx={{ fontWeight: 900 }} align="center">
+            <Typography variant="body1" sx={{ fontWeight: 900, animation: 'winnerShimmer 2s linear infinite, glowText 1.5s ease-in-out infinite' }} align="center">
               Winner: {seatLabel(winner)}
             </Typography>
           )}
 
           {!!reaction && (
-            <Typography variant="body2" sx={{ fontWeight: 800 }} align="center">
+            <Typography variant="body2" sx={{ fontWeight: 800, animation: 'blink 1s ease-in-out infinite, pulseScale 1.5s ease-in-out infinite' }} align="center">
               Reaction window: awaiting {typeof reaction.awaiting_seat === 'number' ? seatLabel(reaction.awaiting_seat) : '—'}
             </Typography>
           )}
 
           {!!prompt && (
-            <Typography variant="body2" sx={{ fontWeight: 800 }} align="center">
+            <Typography variant="body2" sx={{ fontWeight: 800, animation: 'slideInRight 0.4s ease-out' }} align="center">
               Choose a target in the action buttons below.
             </Typography>
           )}
@@ -89,8 +89,8 @@ export default function UnstableUnicornsPanel({ snapshot, seatLabel, send, playe
         Actions
       </Typography>
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="center" sx={{ mb: 2, flexWrap: 'wrap' }}>
-        {actionButtons.map((b) => (
-          <Button key={b.id} variant="contained" onClick={() => sendClick(b.id)} disabled={!b.enabled || !!snapshot.popup?.active}>
+        {actionButtons.map((b, bIdx) => (
+          <Button key={b.id} variant="contained" onClick={() => sendClick(b.id)} disabled={!b.enabled || !!snapshot.popup?.active} sx={{ animation: `bounceIn 0.35s ease-out ${bIdx * 0.05}s both` }}>
             {b.text}
           </Button>
         ))}
@@ -111,17 +111,18 @@ export default function UnstableUnicornsPanel({ snapshot, seatLabel, send, playe
         }}
       >
         <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center', flexWrap: 'wrap' }}>
-          {myHand.map((c) => (
-            <EmojiCardTile
-              key={`${c.id}-${c.idx}`}
-              emoji={c.emoji || '🂠'}
-              title={c.name}
-              corner={String(c.kind || '').toUpperCase().slice(0, 4)}
-              accent={c.color}
-              enabled={!!c.playable && !snapshot.popup?.active}
-              onClick={() => typeof c.idx === 'number' && sendClick(`uu_play:${c.idx}`)}
-              width={90}
-            />
+          {myHand.map((c, i) => (
+            <Box key={`${c.id}-${c.idx}`} sx={{ animation: `flipIn 0.4s ease-out ${i * 0.05}s both` }}>
+              <EmojiCardTile
+                emoji={c.emoji || '🂠'}
+                title={c.name}
+                corner={String(c.kind || '').toUpperCase().slice(0, 4)}
+                accent={c.color}
+                enabled={!!c.playable && !snapshot.popup?.active}
+                onClick={() => typeof c.idx === 'number' && sendClick(`uu_play:${c.idx}`)}
+                width={90}
+              />
+            </Box>
           ))}
           {!myHand.length && <Typography variant="caption" color="text.secondary">No cards.</Typography>}
         </Box>
@@ -146,6 +147,7 @@ export default function UnstableUnicornsPanel({ snapshot, seatLabel, send, playe
                 borderColor: color,
                 width: '100%',
                 maxWidth: 760,
+                animation: `fadeInUp 0.3s ease-out ${seat * 0.07}s both`,
               }}
             >
               <Typography variant="body2" sx={{ fontWeight: 900 }} align="center">

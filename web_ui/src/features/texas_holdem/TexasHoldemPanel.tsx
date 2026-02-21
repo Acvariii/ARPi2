@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Box, Button, Paper, Slider, Stack, TextField, Typography } from '@mui/material';
+import { Box, Button, Chip, Paper, Slider, Stack, TextField, Typography } from '@mui/material';
 import type { Snapshot } from '../../types';
 import PlayingCard from '../../components/PlayingCard';
 import GameBanner from '../../components/GameBanner';
@@ -58,17 +58,54 @@ export default function TexasHoldemPanel({ snapshot, seatLabel, send, playerColo
   return (
     <>
       <GameBanner game="texas_holdem" />
-      <Paper variant="outlined" sx={{ p: 1.5, mb: 2 }}>
-        <Stack spacing={1}>
+      <Paper variant="outlined" sx={{ p: 1.5, mb: 2, animation: 'fadeInUp 0.4s ease-out' }}>
+        <Stack spacing={1.25}>
+          {/* Street progression */}
+          {(() => {
+            const streets = ['preflop', 'flop', 'turn', 'river', 'showdown'];
+            const currentStreet = String(th.street ?? '').toLowerCase();
+            const idx = streets.indexOf(currentStreet);
+            return (
+              <Stack direction="row" spacing={0.5} justifyContent="center" flexWrap="wrap" useFlexGap>
+                {streets.map((s, i) => (
+                  <Chip
+                    key={s}
+                    label={s.toUpperCase()}
+                    size="small"
+                    sx={{
+                      fontWeight: 700,
+                      fontSize: '0.65rem',
+                      bgcolor: i === idx ? '#1565c0' : i < idx ? '#37474f' : 'transparent',
+                      color: i <= idx ? '#fff' : 'text.secondary',
+                      border: i === idx ? 'none' : '1px solid',
+                      borderColor: i === idx ? 'transparent' : 'divider',
+                    }}
+                  />
+                ))}
+              </Stack>
+            );
+          })()}
+          {/* Pot display */}
+          <Box sx={{ textAlign: 'center' }}>
+            <Typography variant="caption" color="text.secondary">POT</Typography>
+            <Typography variant="h4" sx={{ fontWeight: 900, color: '#f9a825', lineHeight: 1.1, animation: 'potPop 0.4s ease-out, glowText 2s ease-in-out infinite' }}>
+              🎰 ${(th.pot ?? 0).toLocaleString()}
+            </Typography>
+          </Box>
+          <Stack direction="row" spacing={2} justifyContent="center">
+            <Typography variant="body2" color="text.secondary">
+              Current bet: <strong>${th.current_bet ?? 0}</strong>
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Dealer: {dealerSeat !== null ? seatLabel(dealerSeat) : '—'}
+            </Typography>
+          </Stack>
           <Typography variant="body2" color="text.secondary" align="center">
-            Street: {th.street ?? '—'} {' · '}Pot: {th.pot ?? 0} {' · '}Current bet: {th.current_bet ?? 0}
-          </Typography>
-          <Typography variant="body2" color="text.secondary" align="center">
-            Dealer: {dealerSeat !== null ? seatLabel(dealerSeat) : '—'} {' · '}Turn: {turnSeat !== null ? seatLabel(turnSeat) : '—'}
+            Turn: {turnSeat !== null ? seatLabel(turnSeat) : '—'}
           </Typography>
           {!!th.showdown?.winners?.length && (
-            <Typography variant="body2" sx={{ fontWeight: 700 }} align="center">
-              Winners: {(th.showdown.winners || []).map((s: number) => seatLabel(s)).join(', ')}
+            <Typography variant="body2" sx={{ fontWeight: 700, animation: 'winnerShimmer 2s linear infinite, glowText 1.5s ease-in-out infinite' }} align="center">
+              🏆 Winners: {(th.showdown.winners || []).map((s: number) => seatLabel(s)).join(', ')}
             </Typography>
           )}
         </Stack>
@@ -199,6 +236,9 @@ export default function TexasHoldemPanel({ snapshot, seatLabel, send, playerColo
               const seat = typeof p.seat === 'number' ? p.seat : -1;
               const isTurn = turnSeat !== null && seat === turnSeat;
               const color = seat >= 0 ? playerColors[seat % playerColors.length] : undefined;
+              const status = String(p.status ?? '').toLowerCase();
+              const isFolded = status === 'fold' || status === 'folded';
+              const isAllIn = status === 'all_in' || status === 'allin';
               const revealedCards = seat >= 0 ? revealed[String(seat)] : undefined;
               return (
                 <Paper
@@ -206,21 +246,30 @@ export default function TexasHoldemPanel({ snapshot, seatLabel, send, playerColo
                   variant="outlined"
                   sx={{
                     p: 1.25,
-                    borderColor: color,
+                    borderColor: isTurn ? color : isFolded ? '#555' : color,
+                    borderWidth: isTurn ? 2 : 1,
+                    bgcolor: isTurn ? `${color}18` : isFolded ? '#1a1a1a' : 'background.paper',
                     width: '100%',
                     maxWidth: 520,
-                    textAlign: 'center',
+                    opacity: isFolded ? 0.6 : 1,
+                    animation: isTurn ? 'turnGlow 2s ease-in-out infinite' : 'fadeInUp 0.3s ease-out',
                   }}
                 >
-                  <Typography variant="body2" sx={{ fontWeight: 700 }} align="center">
-                    {seat >= 0 ? seatLabel(seat) : 'Player'}
-                    {isTurn ? ' · (turn)' : ''}
-                    {dealerSeat !== null && seat === dealerSeat ? ' · (dealer)' : ''}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" align="center">
-                    Stack: {p.stack ?? 0} {' · '}Bet: {p.bet ?? 0} {' · '}Status: {p.status ?? '—'}
-                  </Typography>
-
+                  <Stack direction="row" justifyContent="space-between" alignItems="center">
+                    <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap">
+                      <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                        {seat >= 0 ? seatLabel(seat) : 'Player'}
+                      </Typography>
+                      {isTurn && <Chip label="Turn" size="small" color="primary" sx={{ height: 18, fontSize: '0.65rem', animation: 'badgePop 0.3s ease-out' }} />}
+                      {dealerSeat !== null && seat === dealerSeat && <Chip label="D" size="small" variant="outlined" sx={{ height: 18, fontSize: '0.65rem' }} />}
+                      {isFolded && <Chip label="Folded" size="small" sx={{ height: 18, fontSize: '0.65rem', bgcolor: '#555', color: '#fff' }} />}
+                      {isAllIn && <Chip label="All-In" size="small" sx={{ height: 18, fontSize: '0.65rem', bgcolor: '#f9a825', color: '#000', animation: 'blink 0.8s ease-in-out 3' }} />}
+                    </Stack>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <Typography variant="body2" color="text.secondary">Stack: <strong>${p.stack ?? 0}</strong></Typography>
+                      {(p.bet ?? 0) > 0 && <Typography variant="caption" color="text.secondary">Bet: ${p.bet}</Typography>}
+                    </Stack>
+                  </Stack>
                   {!!revealedCards?.length && (
                     <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center', mt: 1, flexWrap: 'wrap' }}>
                       {revealedCards.map((c, i) => (

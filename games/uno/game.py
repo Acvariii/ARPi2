@@ -7,6 +7,10 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from core.player_selection import PlayerSelectionUI
 from core.card_rendering import draw_label_card, draw_game_background
+from core.animation import (
+    ParticleSystem, CardFlyAnim, TextPopAnim, PulseRing, ScreenFlash,
+    _RAINBOW_PALETTE as _FW_COLORS, draw_rainbow_title,
+)
 
 
 @dataclass(frozen=True)
@@ -97,6 +101,16 @@ class UnoGame:
         # Optional callback for rendering real player names in the Pyglet board.
         # Signature: (seat:int) -> display name.
         self._seat_name_provider: Optional[Callable[[int], str]] = None
+
+        # ── Particle animations ─────────────────────────────────────────────
+        self._particles = ParticleSystem()
+        self._anim_card_flips: list = []
+        self._text_pops: list = []
+        self._pulse_rings: list = []
+        self._flashes: list = []
+        self._anim_prev_winner: object = None
+        self._anim_fw_timer: float = 0.0
+        self._anim_prev_turn: object = None
 
     def set_name_provider(self, provider: Optional[Callable[[int], str]]) -> None:
         self._seat_name_provider = provider
@@ -235,6 +249,53 @@ class UnoGame:
         if self._last_event_age < 999.0:
             self._last_event_age += delta
 
+        # ── Tick particle animations ──────────────────────────────────
+        try:
+            self._particles.update(delta)
+            for _a in list(self._anim_card_flips): _a.update(delta)
+            self._anim_card_flips = [_a for _a in self._anim_card_flips if not _a.done]
+            for _a in list(self._text_pops): _a.update(delta)
+            self._text_pops = [_a for _a in self._text_pops if not _a.done]
+            for _a in list(self._pulse_rings): _a.update(delta)
+            self._pulse_rings = [_a for _a in self._pulse_rings if not _a.done]
+            for _a in list(self._flashes): _a.update(delta)
+            self._flashes = [_a for _a in self._flashes if not _a.done]
+            # Turn-change pulse + sparkle
+            _curr_turn = getattr(self, 'current_turn_seat', None)
+            if (
+                self.state == "playing"
+                and isinstance(_curr_turn, int)
+                and _curr_turn != self._anim_prev_turn
+                and isinstance(self._anim_prev_turn, int)
+            ):
+                _cx, _cy = self.width // 2, self.height // 2
+                _col = _FW_COLORS[int(_curr_turn) % len(_FW_COLORS)]
+                self._pulse_rings.append(PulseRing(_cx, _cy, _col, max_radius=min(self.width, self.height) // 5, duration=0.8))
+                self._particles.emit_sparkle(_cx, _cy, _col, count=18)
+                self._flashes.append(ScreenFlash(_col, peak_alpha=40, duration=0.3))
+            self._anim_prev_turn = _curr_turn
+            if isinstance(self.winner, int) and self.winner is not self._anim_prev_winner:
+                self._anim_prev_winner = self.winner
+                _cx, _cy = self.width // 2, self.height // 2
+                for _ in range(8):
+                    self._particles.emit_firework(
+                        _cx + random.randint(-120, 120), _cy + random.randint(-80, 80),
+                        _FW_COLORS)
+                self._flashes.append(ScreenFlash((255, 220, 80), 60, 1.0))
+                self._text_pops.append(TextPopAnim(
+                    f"🎉 {self._seat_label(self.winner)} wins!", _cx, _cy - 70,
+                    (255, 220, 80), font_size=36))
+                self._anim_fw_timer = 6.0
+            if self._anim_fw_timer > 0:
+                self._anim_fw_timer = max(0.0, self._anim_fw_timer - delta)
+                if int(self._anim_fw_timer * 3) % 2 == 0:
+                    _cx, _cy = self.width // 2, self.height // 2
+                    self._particles.emit_firework(
+                        _cx + random.randint(-150, 150), _cy + random.randint(-100, 100),
+                        _FW_COLORS)
+        except Exception:
+            pass
+
         if not self._anims:
             return
         alive: List[_Anim] = []
@@ -264,7 +325,7 @@ class UnoGame:
 
         # Header
         try:
-            self.renderer.draw_text(title, 24, 24, font_size=24, color=(235, 235, 235), anchor_x="left", anchor_y="top")
+            draw_rainbow_title(self.renderer, title, w)
             self.renderer.draw_text(
                 f"Top: {tc}  ·  Color: {col}  ·  {status}",
                 24,
@@ -360,6 +421,17 @@ class UnoGame:
         if self._anims:
             for a in list(self._anims):
                 self._draw_anim(a)
+
+        # ── Animation render layer ──────────────────────────────────────────
+        try:
+            if self.renderer:
+                self._particles.draw(self.renderer)
+                for _r in self._pulse_rings: _r.draw(self.renderer)
+                for _f in self._anim_card_flips: _f.draw(self.renderer)
+                for _fl in self._flashes: _fl.draw(self.renderer, self.width, self.height)
+                for _p in self._text_pops: _p.draw(self.renderer)
+        except Exception:
+            pass
 
     # --- Snapshot helpers ---
 
@@ -465,7 +537,9 @@ class UnoGame:
             return
 
         if btn_id == "end":
-            # Basic rule enforcement: only allow end turn if no playable cards.
+            # Must have drawn before ending; and must have no playable card left.
+            if not self.drew_this_turn:
+                return
             if self._has_playable_card(seat):
                 return
             self._note_event(f"{self._seat_label(seat)} ended turn")
@@ -497,6 +571,11 @@ class UnoGame:
 
             self._note_event(f"{self._seat_label(seat)} played {card.short()}")
             self._queue_play_anim(seat, card)
+            try:
+                self._particles.emit_sparkle(self.width // 2, self.height // 2,
+                                             _FW_COLORS[int(seat) % len(_FW_COLORS)], count=14)
+            except Exception:
+                pass
 
             # Remove from hand and discard
             hand.pop(idx)
@@ -517,6 +596,18 @@ class UnoGame:
                 self._next_round_ready = {int(s): False for s in self.active_players}
                 self._rebuild_buttons()
                 return
+
+            # UNO! alert when player drops to exactly 1 card
+            if len(hand) == 1:
+                try:
+                    _cx, _cy = self.width // 2, self.height // 2
+                    from config import PLAYER_COLORS as _PC
+                    _col = _PC[int(seat) % len(_PC)]
+                    self._text_pops.append(TextPopAnim("\U0001f6a8 UNO!", _cx, _cy - 50, _col, font_size=40))
+                    self._flashes.append(ScreenFlash((220, 60, 60), 45, 0.4))
+                    self._pulse_rings.append(PulseRing(_cx, _cy, _col, max_radius=90, duration=0.8))
+                except Exception:
+                    pass
 
             # Apply effects (may advance turn)
             self._apply_card_effect(card, played_by=seat)
@@ -619,14 +710,29 @@ class UnoGame:
 
     def _apply_card_effect(self, card: UnoCard, played_by: Optional[int]) -> None:
         # Effects are applied immediately; turn advancement handled by caller.
+        _cx, _cy = self.width // 2, self.height // 2
         if card.value == "reverse":
             if len(self.active_players) == 2:
                 # In 2-player games reverse acts like skip
                 self._advance_index(1)
             else:
                 self.direction *= -1
+            try:
+                arrow = "→" if self.direction >= 0 else "←"
+                self._text_pops.append(TextPopAnim(
+                    f"🔄 REVERSE {arrow}", _cx, _cy - 30, (255, 175, 60), font_size=28))
+                self._flashes.append(ScreenFlash((255, 175, 60), peak_alpha=45, duration=0.35))
+                self._particles.emit_sparkle(_cx, _cy, (255, 175, 60), count=16)
+            except Exception:
+                pass
         elif card.value == "skip":
             self._advance_index(1)
+            try:
+                self._text_pops.append(TextPopAnim(
+                    "⏭ SKIP!", _cx, _cy - 30, (230, 80, 80), font_size=28))
+                self._flashes.append(ScreenFlash((230, 80, 80), peak_alpha=45, duration=0.35))
+            except Exception:
+                pass
         elif card.value == "draw2":
             # Next player draws 2 and is skipped
             self._advance_index(1)
@@ -635,6 +741,13 @@ class UnoGame:
                 self._note_event(f"{self._seat_label(victim)} drew +2")
                 self._draw_to_hand(victim, 2, animate=True)
                 self._advance_index(1)
+            try:
+                self._text_pops.append(TextPopAnim(
+                    "+2 Cards! 🃏", _cx, _cy - 30, (80, 160, 235), font_size=28))
+                self._flashes.append(ScreenFlash((80, 140, 230), 40, 0.35))
+                self._particles.emit_sparkle(_cx, _cy, (80, 160, 235), count=16)
+            except Exception:
+                pass
         elif card.value == "wild_draw4":
             # Next player draws 4 and is skipped
             self._advance_index(1)
@@ -643,6 +756,13 @@ class UnoGame:
                 self._note_event(f"{self._seat_label(victim)} drew +4")
                 self._draw_to_hand(victim, 4, animate=True)
                 self._advance_index(1)
+            try:
+                self._text_pops.append(TextPopAnim(
+                    "+4 Cards! 🃏", _cx, _cy - 30, (200, 90, 220), font_size=28))
+                self._flashes.append(ScreenFlash((160, 60, 200), 40, 0.35))
+                self._particles.emit_sparkle(_cx, _cy, (200, 90, 220), count=22)
+            except Exception:
+                pass
 
     def _rebuild_buttons(self) -> None:
         self.buttons = {}
@@ -672,7 +792,8 @@ class UnoGame:
         # Primary actions
         btns["draw"] = _WebButton("Draw", enabled=bool(is_turn and not self.drew_this_turn))
 
-        can_end = bool(is_turn and not self._has_playable_card(seat))
+        # Can only end your turn after you've drawn (or played a card, which auto-ends).
+        can_end = bool(is_turn and self.drew_this_turn and not self._has_playable_card(seat))
         btns["end"] = _WebButton("End Turn", enabled=can_end)
         return btns
 
