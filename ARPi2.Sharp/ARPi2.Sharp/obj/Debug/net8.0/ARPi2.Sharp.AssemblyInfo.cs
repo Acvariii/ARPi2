@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ARPi2.Sharp")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+95d76734974fa5125e37a6d7ce280ad88ba1d402")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+deed64ee6c6d229704a4a7175e17d6b13ae16151")]
 [assembly: System.Reflection.AssemblyProductAttribute("ARPi2.Sharp")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ARPi2.Sharp")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

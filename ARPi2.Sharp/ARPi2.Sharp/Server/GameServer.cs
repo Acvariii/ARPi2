@@ -39,6 +39,11 @@ public class GameServer
 {
     private readonly ARPi2Game _app;
 
+    // ─── Audio ─────────────────────────────────────────────────────
+    private readonly AudioManager _audio = new();
+    private string? _prevAudioState;
+    private readonly Dictionary<string, int> _prevDeckCounts = new();
+
     // ─── WebSocket clients ─────────────────────────────────────────
     private readonly ConcurrentDictionary<string, WebSocket> _frameClients = new();
     private readonly ConcurrentDictionary<string, WebSocket> _uiClients    = new();
@@ -392,6 +397,7 @@ public class GameServer
             _uiClientReady.TryRemove(id, out _);
             _uiClientVote.TryRemove(id, out _);
             _uiClientEndGame.TryRemove(id, out _);
+            _audio.RemoveVoter(id);
             Console.WriteLine($"UI client disconnected: {id}");
         }
     }
@@ -418,7 +424,19 @@ public class GameServer
                 case "set_player_selected":  HandleSetPlayerSelected(root); break;
                 case "end_game":             HandleEndGame(clientId, root); break;
                 case "quit":                 HandleQuit(clientId); break;
-                case "vote_music_mute":      break; // No audio yet
+                case "vote_music_mute":
+                    // Toggle: if already voted mute, un-vote; otherwise vote mute
+                    bool currentlyVoted = _audio.HasVotedMute(clientId);
+                    _audio.SetMuteVote(clientId, !currentlyVoted);
+                    break;
+                case "set_volume":
+                    if (root.TryGetProperty("volume", out var volProp))
+                    {
+                        // UI sends 0-100, server stores 0.0-1.0
+                        float vol = (float)(volProp.GetDouble() / 100.0);
+                        _audio.SetClientVolume(clientId, vol);
+                    }
+                    break;
                 case "pointer": case "tap":  HandlePointerOrTap(clientId, type, root); break;
                 case "esc": case "back":     break; // Escape request
 
@@ -458,10 +476,34 @@ public class GameServer
             catch { }
         }
 
+        // Reconnect-by-name: if a seat's previous occupant had the same name
+        // and that seat is no longer held by a connected client, reclaim it.
+        if (!string.IsNullOrEmpty(name))
+        {
+            foreach (var (seat, prevName) in PlayerNames)
+            {
+                if (!string.Equals(prevName, name, StringComparison.OrdinalIgnoreCase)) continue;
+                // Verify no connected client currently holds this seat
+                bool occupied = false;
+                foreach (var (cid, s) in _uiClientSeat)
+                {
+                    if (s == seat && _uiClients.ContainsKey(cid))
+                    { occupied = true; break; }
+                }
+                if (!occupied && TrySetSeat(clientId, seat))
+                {
+                    PlayerNames[seat] = name;
+                    _uiClientEndGame[clientId] = false;
+                    Console.WriteLine($"Reconnect: '{name}' reclaimed seat {seat}");
+                    return;
+                }
+            }
+        }
+
         TryAutoAssignSeat(clientId);
-        int seat = _uiClientSeat.GetValueOrDefault(clientId, -1);
-        if (seat >= 0 && !string.IsNullOrEmpty(name))
-            PlayerNames[seat] = name;
+        int assignedSeat = _uiClientSeat.GetValueOrDefault(clientId, -1);
+        if (assignedSeat >= 0 && !string.IsNullOrEmpty(name))
+            PlayerNames[assignedSeat] = name;
         _uiClientEndGame[clientId] = false;
     }
 
@@ -510,7 +552,21 @@ public class GameServer
         int seat = _uiClientSeat.GetValueOrDefault(clientId, -1);
         if (seat < 0) return;
         var game = _app.GetActiveGame();
-        game?.HandleClick(seat, btnId);
+        if (game == null) return;
+
+        // Special: return to lobby (any game)
+        if (btnId == "return_to_lobby")
+        {
+            _app.State = "menu";
+            ResetLobby();
+            LogHistory($"Returned to lobby from seat {seat}");
+            return;
+        }
+
+        // Play SFX based on button action
+        PlayButtonSfx(btnId, _app.State);
+
+        game.HandleClick(seat, btnId);
     }
 
     private void HandleStartGame()
@@ -805,10 +861,11 @@ public class GameServer
             ["history"] = historyCopy,
             ["audio"] = new Dictionary<string, object?>
             {
-                ["music_muted"] = false,
-                ["mute_votes"] = 0,
-                ["mute_required"] = 1,
-                ["you_voted_mute"] = false,
+                ["music_muted"] = _audio.IsMuted,
+                ["mute_votes"] = _audio.MuteVotes,
+                ["mute_required"] = _audio.MuteRequired,
+                ["you_voted_mute"] = _audio.HasVotedMute(clientId),
+                ["volume"] = (int)(_audio.GetClientVolume(clientId) * 100),
             },
             ["palette"] = new Dictionary<string, object?>
             {
@@ -1043,9 +1100,82 @@ public class GameServer
         _elapsed += dt;
         MaybeAutoStartActiveGame();
         DispatchCursorClicks();
+        AudioTick();
     }
 
     private double _elapsed;
+
+    /// <summary>Sync background music with game state, detect SFX triggers.</summary>
+    private void AudioTick()
+    {
+        // Sync BG music to current game state
+        _audio.SyncBgMusic(_app.State);
+        _prevAudioState = _app.State;
+    }
+
+    /// <summary>Play a sound effect (called from game event handlers).</summary>
+    public void PlaySfx(string filename) => _audio.PlaySfx(filename);
+
+    /// <summary>Play SFX based on button click action (mirrors Python event-driven SFX).</summary>
+    private void PlayButtonSfx(string btnId, string gameState)
+    {
+        switch (btnId)
+        {
+            // Card-related actions
+            case "draw" or "draw_card" or "hit" or "deal" or "next_hand" or "play_again":
+                _audio.PlaySfx("FlipCard.mp3");
+                break;
+
+            // Dice-related actions
+            case "roll_dice" or "roll":
+                _audio.PlaySfx("RollDice.mp3");
+                break;
+
+            // Attack/combat actions
+            case "attack" or "resolve_attack":
+                if (gameState == "risk")
+                    _audio.PlaySfx("SwordSlice.mp3");
+                else
+                    _audio.PlaySfx("Swoosh.mp3");
+                break;
+
+            // Ready/confirmation
+            case "ready" or "start":
+                _audio.PlaySfx("HeartbeatReady.mp3");
+                break;
+
+            // Movement
+            case var id when id.StartsWith("move_"):
+                _audio.PlaySfx("MovePlayer.mp3");
+                break;
+
+            // Stand / pass / skip
+            case "stand" or "pass" or "skip" or "end_turn" or "check" or "fold":
+                _audio.PlaySfx("Swoosh.mp3");
+                break;
+
+            // Betting actions
+            case "call" or "raise" or "double_down" or "split" or "bet":
+                _audio.PlaySfx("MovePlayer.mp3");
+                break;
+
+            // Nope / Neigh (counter-play)
+            case "nope" or "uu_react_neigh" or "uu_react_super" or "uu_react_pass":
+                _audio.PlaySfx("SwordSlice.mp3");
+                break;
+
+            // Generic card plays (covers uu_play:X, ek_play:X, uno_play:X, play_X, card_X)
+            case var id when id.StartsWith("play_") || id.StartsWith("card_")
+                          || id.StartsWith("uu_play:") || id.StartsWith("uu_discard:")
+                          || id.StartsWith("ek_play:") || id.StartsWith("uno_play:"):
+                _audio.PlaySfx("FlipCard.mp3");
+                break;
+
+            default:
+                // Many buttons are game-specific; only play SFX for known actions
+                break;
+        }
+    }
 
     /// <summary>
     /// Skip redundant in-game player selection — auto-start using seated clients.
@@ -1209,6 +1339,7 @@ public class GameServer
     public void Stop()
     {
         _cts.Cancel();
+        _audio.Dispose();
         try { _httpListener?.Stop(); } catch { }
         try { _wsListener?.Stop(); } catch { }
 

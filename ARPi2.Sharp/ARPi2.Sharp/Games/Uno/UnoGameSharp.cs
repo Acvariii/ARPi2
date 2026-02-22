@@ -622,7 +622,15 @@ public class UnoGameSharp : BaseGame
     {
         var btns = new Dictionary<string, (string, bool)>();
 
-        if (_winner != null) return btns;
+        if (_winner != null)
+        {
+            bool alreadyReady = _nextRoundReady.GetValueOrDefault(seat, false);
+            btns["play_again"] = ("Play Again", !alreadyReady);
+            int readyCount = _nextRoundReady.Count(kv => kv.Value && ActivePlayers.Contains(kv.Key));
+            btns["force_start"] = ($"Force Start ({readyCount}/{ActivePlayers.Count})", readyCount >= 2);
+            btns["return_to_lobby"] = ("Return to Lobby", true);
+            return btns;
+        }
 
         bool isTurn = seat == CurrentTurnSeat;
 
@@ -779,7 +787,15 @@ public class UnoGameSharp : BaseGame
         foreach (var seat in ActivePlayers)
             DrawSeatZone(r, seat, width, height);
 
-        // Winner overlay
+        // Card fly animations (under overlays)
+        foreach (var cf in _cardFlies) cf.Draw(r);
+
+        // Particles and pulse rings BEFORE winner overlay so they appear behind it
+        _particles.Draw(r);
+        foreach (var pr in _pulseRings) pr.Draw(r);
+        foreach (var fl in _flashes) fl.Draw(r, width, height);
+
+        // Winner overlay (on top of particles)
         if (_winner is int w)
         {
             r.DrawRect((0, 0, 0), (0, 0, width, height), alpha: 150);
@@ -803,11 +819,7 @@ public class UnoGameSharp : BaseGame
             r.DrawText(_lastEvent, 28, 85, 12, (200, 200, 200), anchorX: "left", anchorY: "center");
         }
 
-        // Animations
-        foreach (var cf in _cardFlies) cf.Draw(r);
-        _particles.Draw(r);
-        foreach (var pr in _pulseRings) pr.Draw(r);
-        foreach (var fl in _flashes) fl.Draw(r, width, height);
+        // Text pops on top of everything
         foreach (var tp in _textPops) tp.Draw(r);
     }
 

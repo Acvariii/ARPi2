@@ -520,6 +520,23 @@ public class UnstableUnicornsGameSharp : BaseGame
             var expected = CurrentReactionSeat;
             if (seat != expected) return;
 
+            // Allow clicking a Neigh/Super Neigh card directly from hand (uu_play:{idx})
+            if (buttonId.StartsWith("uu_play:"))
+            {
+                if (!int.TryParse(buttonId.AsSpan(8), out int idx)) return;
+                var hand = _hands.GetValueOrDefault(seat);
+                if (hand == null || idx < 0 || idx >= hand.Count) return;
+                var cid = hand[idx];
+                var c = _cards.GetValueOrDefault(cid);
+                if (c == null) return;
+                if (c.Kind == "neigh")
+                    buttonId = "uu_react_neigh";
+                else if (c.Kind == "super_neigh")
+                    buttonId = "uu_react_super";
+                else
+                    return; // Only neigh cards during reaction
+            }
+
             if (buttonId is "uu_react_pass" or "uu_react_neigh" or "uu_react_super")
             {
                 if (buttonId == "uu_react_neigh")

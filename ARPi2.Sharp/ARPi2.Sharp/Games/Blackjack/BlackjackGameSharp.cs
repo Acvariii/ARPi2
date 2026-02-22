@@ -534,6 +534,20 @@ public class BlackjackGameSharp : BaseGame
         return c;
     }
 
+    // ─── HandleMessage (game-specific messages from Web UI) ───
+    public override void HandleMessage(int playerIdx, string type, string json)
+    {
+        switch (type)
+        {
+            case "blackjack_close_result":
+                CloseWebResult(playerIdx);
+                break;
+            case "blackjack_adjust_bet":
+                HandleAdjustBet(playerIdx, json);
+                break;
+        }
+    }
+
     // ─── HandleClick (web UI) ──────────────────────────────────
     public override void HandleClick(int playerIdx, string buttonId)
     {

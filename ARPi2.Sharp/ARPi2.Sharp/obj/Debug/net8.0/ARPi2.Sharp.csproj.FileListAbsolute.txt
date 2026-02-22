@@ -35,3 +35,9 @@ D:\Github project\ARPi2\ARPi2.Sharp\ARPi2.Sharp\bin\Debug\net8.0\runtimes\osx\na
 D:\Github project\ARPi2\ARPi2.Sharp\ARPi2.Sharp\bin\Debug\net8.0\runtimes\win-arm64\native\libSkiaSharp.dll
 D:\Github project\ARPi2\ARPi2.Sharp\ARPi2.Sharp\bin\Debug\net8.0\runtimes\win-x64\native\libSkiaSharp.dll
 D:\Github project\ARPi2\ARPi2.Sharp\ARPi2.Sharp\bin\Debug\net8.0\runtimes\win-x86\native\libSkiaSharp.dll
+D:\Github project\ARPi2\ARPi2.Sharp\ARPi2.Sharp\bin\Debug\net8.0\NAudio.dll
+D:\Github project\ARPi2\ARPi2.Sharp\ARPi2.Sharp\bin\Debug\net8.0\NAudio.Asio.dll
+D:\Github project\ARPi2\ARPi2.Sharp\ARPi2.Sharp\bin\Debug\net8.0\NAudio.Core.dll
+D:\Github project\ARPi2\ARPi2.Sharp\ARPi2.Sharp\bin\Debug\net8.0\NAudio.Midi.dll
+D:\Github project\ARPi2\ARPi2.Sharp\ARPi2.Sharp\bin\Debug\net8.0\NAudio.Wasapi.dll
+D:\Github project\ARPi2\ARPi2.Sharp\ARPi2.Sharp\bin\Debug\net8.0\NAudio.WinMM.dll

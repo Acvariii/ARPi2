@@ -103,7 +103,7 @@ public class RiskGameSharp : BaseGame
     private double _totalElapsed;
 
     // ── World-map rendering ────────────────────────────────────
-    private const int MapW = 640, MapH = 360;
+    private const int MapW = 1920, MapH = 1080;
     private int[,]? _tidMap;           // tid at each pixel (-1 = ocean/uninhabited)
     private bool[,]? _landMask;        // is land
     private Dictionary<int, (int X, int Y)>? _tidCenter; // label position per territory
@@ -1614,29 +1614,64 @@ public class RiskGameSharp : BaseGame
     private void RasterizeWorldMap()
     {
         int w = MapW, h = MapH;
-        float sx = w / 320f, sy = h / 180f;
-        float SX(float v) => v * sx;
-        float SY(float v) => v * sy;
 
-        // Continent masks
         var land = new bool[h, w];
         var contAt = new string?[h, w];
 
+        // ── Helpers ──
+
+        // Lon/lat → pixel (equirectangular, top-left origin)
+        int LLx(double lon) => Clamp((int)((lon + 180.0) / 360.0 * (w - 1)), 0, w - 1);
+        int LLy(double lat) => Clamp((int)((90.0 - lat) / 180.0 * (h - 1)), 0, h - 1);
+        float DegX(float d) => d * w / 360f;
+        float DegY(float d) => d * h / 180f;
+
+        // Scanline polygon fill (even-odd rule). coords = flat [lon0,lat0, lon1,lat1, ...]
+        void FillPoly(bool[,] mask, double[] c, bool val = true)
+        {
+            int n = c.Length / 2;
+            if (n < 3) return;
+            var vx = new float[n]; var vy = new float[n];
+            for (int i = 0; i < n; i++)
+            {
+                vx[i] = (float)((c[i * 2] + 180.0) / 360.0 * (w - 1));
+                vy[i] = (float)((90.0 - c[i * 2 + 1]) / 180.0 * (h - 1));
+            }
+            float minY = vy[0], maxY = vy[0];
+            for (int i = 1; i < n; i++) { if (vy[i] < minY) minY = vy[i]; if (vy[i] > maxY) maxY = vy[i]; }
+            int y0 = Math.Max(0, (int)minY), y1 = Math.Min(h - 1, (int)maxY);
+            var xs = new List<float>();
+            for (int y = y0; y <= y1; y++)
+            {
+                xs.Clear();
+                for (int i = 0, j = n - 1; i < n; j = i++)
+                {
+                    float yi = vy[i], yj = vy[j];
+                    if ((yi <= y && yj > y) || (yj <= y && yi > y))
+                        xs.Add(vx[i] + (y - yi) / (yj - yi) * (vx[j] - vx[i]));
+                }
+                xs.Sort();
+                for (int k = 0; k + 1 < xs.Count; k += 2)
+                {
+                    int x0s = Math.Max(0, (int)xs[k]);
+                    int x1s = Math.Min(w - 1, (int)xs[k + 1]);
+                    for (int x = x0s; x <= x1s; x++) mask[y, x] = val;
+                }
+            }
+        }
+
+        // Ellipse fill (pixel coords) for small islands
         void PaintEllipse(bool[,] mask, float cx, float cy, float rx, float ry, bool val = true)
         {
             if (rx <= 0 || ry <= 0) return;
-            int x0 = Clamp((int)(cx - rx - 1), 0, w - 1);
-            int x1 = Clamp((int)(cx + rx + 1), 0, w - 1);
-            int y0 = Clamp((int)(cy - ry - 1), 0, h - 1);
-            int y1 = Clamp((int)(cy + ry + 1), 0, h - 1);
-            float invRx2 = 1f / (rx * rx);
-            float invRy2 = 1f / (ry * ry);
+            int x0 = Clamp((int)(cx - rx - 1), 0, w - 1), x1 = Clamp((int)(cx + rx + 1), 0, w - 1);
+            int y0 = Clamp((int)(cy - ry - 1), 0, h - 1), y1 = Clamp((int)(cy + ry + 1), 0, h - 1);
+            float irx2 = 1f / (rx * rx), iry2 = 1f / (ry * ry);
             for (int yy = y0; yy <= y1; yy++)
                 for (int xx = x0; xx <= x1; xx++)
                 {
                     float dx = xx - cx, dy = yy - cy;
-                    if (dx * dx * invRx2 + dy * dy * invRy2 <= 1f)
-                        mask[yy, xx] = val;
+                    if (dx * dx * irx2 + dy * dy * iry2 <= 1f) mask[yy, xx] = val;
                 }
         }
 
@@ -1663,83 +1698,368 @@ public class RiskGameSharp : BaseGame
             return cur;
         }
 
-        // ── North America ──
+        // ── NORTH AMERICA ── (detailed polygon coastline)
         var mNA = new bool[h, w];
-        PaintEllipse(mNA, SX(48), SY(150), SX(58), SY(34));
-        PaintEllipse(mNA, SX(86), SY(154), SX(70), SY(36));
-        PaintEllipse(mNA, SX(110), SY(136), SX(64), SY(34));
-        PaintEllipse(mNA, SX(106), SY(112), SX(56), SY(28));
-        PaintEllipse(mNA, SX(118), SY(92), SX(22), SY(18));
-        PaintEllipse(mNA, SX(132), SY(92), SX(10), SY(12));
-        PaintEllipse(mNA, SX(154), SY(164), SX(26), SY(14)); // Greenland
-        PaintEllipse(mNA, SX(112), SY(142), SX(18), SY(12), false); // Hudson bay
-        mNA = Smooth(mNA, 3);
+        FillPoly(mNA, new double[] {
+            // NW Alaska, clockwise
+            -168,66, -165,69, -162,71, -158,72, -155,72,
+            // Arctic coast Alaska / Canada
+            -150,71, -145,70, -142,70, -138,69, -135,71,
+            -130,74, -125,75, -120,75, -115,74, -110,74,
+            // Central Arctic / Baffin
+            -105,73, -100,73, -95,72, -90,70, -85,68,
+            // Hudson Strait / Labrador
+            -80,66, -77,65, -73,63, -68,61, -63,58, -59,54,
+            // Newfoundland / Maritimes
+            -55,49, -53,47, -56,45, -59,44, -63,44,
+            // New England coast
+            -66,44, -68,43, -70,42, -72,41,
+            // Mid-Atlantic
+            -74,40, -75,39, -76,37, -77,35,
+            // Carolinas / Georgia
+            -79,34, -80,33, -81,31,
+            // Florida east coast & tip
+            -81,28, -81,26, -80,25,
+            // Florida west coast & Gulf Coast
+            -82,26, -84,29, -86,30, -88,30,
+            -90,29, -92,30, -94,30, -96,29, -97,27,
+            // Mexico east coast
+            -97,24, -97,22, -96,20,  -94,19,
+            // Yucatan Peninsula
+            -91,18, -89,20, -87,21, -87,19,
+            // South into Central America
+            -88,16, -86,14, -84,11, -83,9, -80,8,
+            // Central America Pacific side going north
+            -80,7, -83,10, -86,12, -90,14,
+            // Mexico Pacific coast
+            -95,16, -98,17, -101,19,
+            // Baja California
+            -104,22, -107,24, -109,23, -110,23,
+            // Gulf of California / US SW
+            -112,28, -114,30, -117,33,
+            // California coast
+            -119,35, -121,37, -122,39,
+            // Oregon / Washington
+            -123,42, -124,44, -124,47,
+            // British Columbia
+            -126,50, -128,53, -131,55,
+            // Alaska Panhandle
+            -134,57, -138,58, -142,60,
+            // Alaska south coast (Gulf of Alaska)
+            -148,61, -152,60, -155,59, -158,58,
+            // Alaska Peninsula / back to start
+            -160,60, -163,63, -166,65, -168,66
+        });
+        // Greenland
+        FillPoly(mNA, new double[] {
+            -55,60, -50,60, -45,61, -40,63, -35,65,
+            -28,68, -22,72, -18,76, -20,80,
+            -28,82, -37,83, -45,83, -52,82,
+            -56,78, -58,74, -60,70, -58,65, -55,60
+        });
+        // Cuba
+        FillPoly(mNA, new double[] {
+            -85,22, -83,23, -80,23, -77,22, -75,20,
+            -77,20, -80,21, -84,21, -85,22
+        });
+        // Carve Hudson Bay
+        FillPoly(mNA, new double[] {
+            -95,67, -92,64, -88,61, -84,58, -80,56, -78,57,
+            -78,59, -80,62, -83,64, -87,66, -91,67, -95,67
+        }, false);
+        // Carve Great Lakes (simplified)
+        PaintEllipse(mNA, LLx(-84), LLy(45), DegX(5), DegY(2.2f), false);
+        mNA = Smooth(mNA, 2);
 
-        // ── South America ──
+        // ── SOUTH AMERICA ──
         var mSA = new bool[h, w];
-        PaintEllipse(mSA, SX(148), SY(66), SX(28), SY(38));
-        PaintEllipse(mSA, SX(150), SY(40), SX(22), SY(28));
-        PaintEllipse(mSA, SX(142), SY(24), SX(18), SY(22));
-        PaintEllipse(mSA, SX(162), SY(58), SX(16), SY(20));
-        PaintEllipse(mSA, SX(160), SY(16), SX(12), SY(10), false);
-        mSA = Smooth(mSA, 3);
+        FillPoly(mSA, new double[] {
+            // Northern coast (Colombia → Venezuela → Guianas)
+            -80,10, -77,11, -75,12, -73,12, -70,12, -67,11,
+            -64,10, -62,10, -59,8, -56,6, -53,4, -50,2,
+            // Brazilian coast (Amazon to bulge)
+            -48,0, -45,-1, -43,-2, -40,-3, -37,-5,
+            // Brazil eastern bulge (Natal)
+            -35,-6, -35,-9, -35,-12,
+            // Brazil south coast
+            -37,-15, -38,-17, -40,-20, -41,-23,
+            // Uruguay / Argentina coast
+            -43,-24, -47,-27, -50,-30, -53,-32,
+            // Patagonia
+            -57,-36, -60,-39, -63,-42, -65,-46,
+            // Tierra del Fuego
+            -67,-50, -68,-53, -70,-55,
+            // Chilean coast going north
+            -74,-53, -75,-49, -75,-46, -74,-42,
+            -73,-38, -72,-34, -71,-30,
+            // Peru / northern Chile coast
+            -71,-25, -70,-20, -71,-17,
+            -74,-14, -76,-12, -78,-8,
+            // Ecuador / Colombia Pacific
+            -80,-4, -80,0, -79,3, -78,6, -77,8, -80,10
+        });
+        mSA = Smooth(mSA, 2);
 
-        // ── Eurasia ──
+        // ── EURASIA ── (detailed outer coastline, clockwise from Iberian SW)
         var mEU = new bool[h, w];
-        PaintEllipse(mEU, SX(214), SY(140), SX(42), SY(20));
-        PaintEllipse(mEU, SX(236), SY(146), SX(48), SY(22));
-        PaintEllipse(mEU, SX(232), SY(160), SX(24), SY(18));
-        PaintEllipse(mEU, SX(268), SY(142), SX(46), SY(24));
-        PaintEllipse(mEU, SX(296), SY(136), SX(86), SY(54));
-        PaintEllipse(mEU, SX(316), SY(162), SX(54), SY(28));
-        PaintEllipse(mEU, SX(304), SY(108), SX(52), SY(26));
-        PaintEllipse(mEU, SX(296), SY(92), SX(24), SY(18));
-        PaintEllipse(mEU, SX(244), SY(112), SX(56), SY(12), false); // Med
-        PaintEllipse(mEU, SX(262), SY(124), SX(14), SY(10), false); // Black Sea
-        mEU = Smooth(mEU, 3);
+        FillPoly(mEU, new double[] {
+            // Portugal / Spain south coast (Gibraltar)
+            -10,37, -8,36, -6,36, -3,36,
+            // Spain Mediterranean coast
+            -1,37, 0,38, 2,39, 3,42,
+            // French Riviera
+            5,43, 7,44,
+            // Italian west coast (going south)
+            8,44, 10,43, 12,42, 14,41, 15,40,
+            // Southern Italy (toe/heel)
+            16,38, 17,38,
+            // Italy east coast (going north)
+            16,39, 15,41, 14,42, 13,44, 13,46,
+            // Adriatic head → Slovenia / Croatian coast
+            15,46, 17,44, 19,42, 20,40,
+            // Greek peninsula (Peloponnese)
+            22,38, 22,37, 24,36,
+            // Aegean → Turkey west coast
+            26,37, 27,39, 29,38,
+            // Turkey south coast / Eastern Mediterranean
+            31,37, 33,36, 35,35, 36,34,
+            // Levant (Syria → Israel → Sinai)
+            36,33, 36,31, 35,30, 34,29,
+            // Red Sea coast of Arabia → Yemen
+            36,27, 38,24, 40,21, 42,18, 44,14,
+            // Aden → Oman
+            46,12, 49,12, 52,14, 55,17,
+            // Oman → Strait of Hormuz
+            57,21, 58,24,
+            // Persian Gulf south → Iran → Pakistan
+            60,25, 62,26, 64,26, 66,25, 68,23,
+            // India west coast
+            70,20, 72,17, 73,14, 74,10, 76,8,
+            // India south tip
+            78,8, 80,8,
+            // India east coast
+            80,10, 82,13, 84,16, 86,19, 88,21, 90,22,
+            // Bangladesh / Myanmar
+            92,22, 94,20, 96,17,
+            // Thailand / Indochina west
+            99,15, 100,12, 101,8, 102,4,
+            // Malay Peninsula tip
+            103,2, 104,1,
+            // Indochina east coast (Vietnam → China)
+            105,3, 106,8, 107,10, 108,14, 110,16,
+            // China south coast
+            112,19, 114,21, 117,23, 119,25, 121,28,
+            // China east coast
+            122,30, 124,32,
+            // Korean Peninsula
+            126,34, 127,36, 129,38, 128,39,
+            // Sea of Japan → Russian Pacific
+            130,36, 132,35, 135,38, 138,40,
+            141,43, 144,46, 148,49, 152,52,
+            // Kamchatka Peninsula
+            155,54, 158,57, 162,59, 160,62,
+            // NE Siberia → Arctic coast
+            162,64, 170,65, 175,68, 170,70,
+            // Siberian Arctic coast (east to west)
+            160,69, 150,68, 140,72, 130,74,
+            120,75, 110,75, 100,74, 90,73,
+            80,72, 70,70, 60,68,
+            // Novaya Zemlya area / Barents
+            55,70, 50,67, 45,69, 40,70,
+            // White Sea / Kola
+            35,70, 30,71, 25,71, 20,70,
+            // North Cape → Norwegian coast south
+            17,69, 14,67, 12,65, 10,63,
+            8,62, 6,61, 5,60, 6,58,
+            // Denmark / Jutland
+            10,58, 12,57, 10,55, 9,54,
+            // North Sea / Netherlands
+            7,54, 5,52, 4,51, 2,50,
+            // English Channel → France
+            0,49, -2,48, -3,47,
+            // Bay of Biscay
+            -5,44, -8,44, -9,43,
+            // Spain north coast → Portugal
+            -10,42, -10,39, -10,37
+        });
+        // Carve Black Sea
+        FillPoly(mEU, new double[] {
+            28,41, 30,42, 33,43, 36,43, 39,42, 41,41,
+            40,44, 37,45, 34,46, 31,45, 28,43, 28,41
+        }, false);
+        // Carve Caspian Sea
+        PaintEllipse(mEU, LLx(51), LLy(42), DegX(3), DegY(6), false);
+        // Carve Persian Gulf
+        PaintEllipse(mEU, LLx(52), LLy(27), DegX(4.5f), DegY(2.5f), false);
+        mEU = Smooth(mEU, 2);
 
-        // ── Africa ──
+        // ── AFRICA ──
         var mAF = new bool[h, w];
-        PaintEllipse(mAF, SX(238), SY(88), SX(42), SY(30));
-        PaintEllipse(mAF, SX(226), SY(64), SX(34), SY(34));
-        PaintEllipse(mAF, SX(258), SY(66), SX(30), SY(40));
-        PaintEllipse(mAF, SX(270), SY(66), SX(18), SY(22));
-        PaintEllipse(mAF, SX(246), SY(30), SX(34), SY(26));
-        PaintEllipse(mAF, SX(276), SY(28), SX(10), SY(12)); // Madagascar
-        mAF = Smooth(mAF, 3);
+        FillPoly(mAF, new double[] {
+            // NW coast (Morocco → Western Sahara → Senegal)
+            -17,35, -17,32, -17,28, -17,24, -17,20, -17,16,
+            // Guinea coast (Senegal → Ivory Coast)
+            -16,12, -15,10, -12,8, -8,5, -5,5,
+            // Gulf of Guinea
+            0,5, 3,5, 6,4, 8,4, 10,4, 10,2,
+            // Gabon / Congo / Angola coast
+            10,0, 9,-2, 10,-4, 12,-8,
+            // Angola / Namibia
+            13,-12, 14,-16, 16,-20, 17,-24,
+            // Namibia / SW Africa
+            16,-28, 18,-32,
+            // Cape of Good Hope
+            20,-34, 25,-34, 28,-33,
+            // SE coast (Mozambique)
+            30,-30, 32,-27, 34,-24, 36,-20,
+            // Tanzania / Kenya coast
+            38,-14, 40,-8, 42,-4, 44,-1,
+            // Horn of Africa (Somalia)
+            46,2, 48,6, 50,10, 48,12,
+            // Gulf of Aden coast
+            44,12, 42,14,
+            // Red Sea coast (Eritrea / Sudan / Egypt)
+            40,16, 38,19, 36,22, 34,26, 33,28, 32,30,
+            // Egypt Mediterranean coast
+            31,31, 28,31, 25,32, 22,33,
+            // Libya coast
+            18,33, 15,33,
+            // Tunisia – northernmost point
+            11,37, 10,37,
+            // Algeria coast
+            8,37, 5,37, 3,36, 0,36,
+            // Morocco
+            -2,35, -5,35, -8,34, -13,35, -17,35
+        });
+        // Madagascar
+        FillPoly(mAF, new double[] {
+            45,-12, 47,-14, 49,-17, 50,-20,
+            50,-24, 48,-26, 46,-25,
+            44,-21, 43,-17, 44,-14, 45,-12
+        });
+        mAF = Smooth(mAF, 2);
 
-        // ── Australia ──
+        // ── AUSTRALIA ── (detailed coastline)
         var mAU = new bool[h, w];
-        PaintEllipse(mAU, SX(304), SY(34), SX(28), SY(18));
-        PaintEllipse(mAU, SX(318), SY(32), SX(20), SY(16));
-        PaintEllipse(mAU, SX(312), SY(60), SX(18), SY(12)); // New Guinea
-        PaintEllipse(mAU, SX(292), SY(70), SX(18), SY(10)); // Indonesia
-        PaintEllipse(mAU, SX(304), SY(72), SX(16), SY(10));
-        mAU = Smooth(mAU, 2);
+        FillPoly(mAU, new double[] {
+            // NW coast (Kimberley)
+            115,-14, 118,-14, 122,-14, 125,-14,
+            // Top End (Arnhem Land) → Gulf of Carpentaria west
+            128,-12, 131,-12, 133,-12,
+            // Cape York Peninsula (east side of GoC)
+            136,-12, 138,-14, 141,-15, 143,-14,
+            // East coast (Queensland)
+            145,-16, 147,-19, 149,-22,
+            // NSW
+            150,-24, 152,-27, 153,-29,
+            // Victoria / Bass Strait
+            153,-34, 151,-37, 148,-38,
+            // Great Australian Bight
+            142,-38, 137,-36, 133,-34, 129,-33,
+            // SW coast (Western Australia)
+            126,-34, 122,-34, 118,-34, 115,-33, 114,-30,
+            // Western Australia coast north
+            114,-26, 113,-22, 113,-18, 114,-15, 115,-14
+        });
+        // Carve Gulf of Carpentaria
+        FillPoly(mAU, new double[] {
+            133,-13, 135,-15, 137,-17, 139,-17, 141,-15,
+            140,-13, 137,-12, 134,-12, 133,-13
+        }, false);
+        // New Guinea
+        FillPoly(mAU, new double[] {
+            132,-1, 135,-2, 138,-3, 141,-4, 144,-5, 147,-6, 150,-8,
+            148,-10, 145,-8, 141,-7, 137,-5, 133,-3, 130,-2, 132,-1
+        });
+        // Tasmania
+        FillPoly(mAU, new double[] {
+            145,-40, 147,-40, 148,-41, 148,-43,
+            146,-44, 144,-43, 144,-41, 145,-40
+        });
+        // Sumatra (diagonal NW–SE island)
+        FillPoly(mAU, new double[] {
+            95,6, 97,5, 99,3, 101,1, 103,-1, 105,-4, 106,-6,
+            105,-7, 103,-4, 101,-1, 99,1, 97,3, 95,4, 95,6
+        });
+        // Java
+        FillPoly(mAU, new double[] {
+            105,-6, 108,-6, 111,-7, 114,-8,
+            114,-9, 111,-8, 108,-8, 105,-7, 105,-6
+        });
+        // Borneo
+        FillPoly(mAU, new double[] {
+            108,5, 111,4, 114,3, 117,1, 118,-1, 118,-3,
+            116,-4, 114,-3, 112,-1, 110,1, 108,3, 108,5
+        });
+        // Sulawesi / minor islands
+        PaintEllipse(mAU, LLx(121), LLy(-2), DegX(2.5f), DegY(4), true);
+        mAU = Smooth(mAU, 1);
 
-        // ── Islands (UK, Japan) ──
+        // ── ISLANDS (assigned to Eurasia) ──
         var mIs = new bool[h, w];
-        PaintEllipse(mIs, SX(200), SY(136), SX(10), SY(8));
-        PaintEllipse(mIs, SX(304), SY(126), SX(12), SY(10));
-        PaintEllipse(mIs, SX(312), SY(120), SX(10), SY(8));
+        // Great Britain
+        FillPoly(mIs, new double[] {
+            -6,50, -3,50, -1,51, 0,52, 1,53, 2,55,
+            1,57, 0,58, -2,59, -4,58, -6,57, -7,55,
+            -6,53, -5,51, -6,50
+        });
+        // Ireland
+        FillPoly(mIs, new double[] {
+            -10,52, -8,51, -6,52, -6,54, -7,55,
+            -9,55, -10,54, -10,52
+        });
+        // Iceland
+        FillPoly(mIs, new double[] {
+            -24,64, -20,63, -16,63, -13,64, -13,66,
+            -16,67, -20,67, -24,66, -24,64
+        });
+        // Japan (thickened arc: Kyushu → Hokkaido)
+        FillPoly(mIs, new double[] {
+            128,31, 130,33, 133,35, 136,36, 139,38, 141,41, 143,44, 145,46,
+            146,45, 144,43, 142,40, 139,37, 136,35, 133,33, 131,31, 128,31
+        });
+        // Sicily
+        PaintEllipse(mIs, LLx(14), LLy(37.5f), DegX(1.8f), DegY(1.2f), true);
+        // Sardinia
+        PaintEllipse(mIs, LLx(9), LLy(40), DegX(1.3f), DegY(1.8f), true);
+        // Sri Lanka
+        PaintEllipse(mIs, LLx(81), LLy(8), DegX(1.5f), DegY(2.5f), true);
+        // Taiwan
+        PaintEllipse(mIs, LLx(121), LLy(24), DegX(1.5f), DegY(2.5f), true);
+        // Philippines (Luzon + Mindanao crescent)
+        FillPoly(mIs, new double[] {
+            120,18, 122,16, 124,13, 126,9, 125,7,
+            123,9, 121,12, 119,15, 120,18
+        });
+        // New Zealand – North Island
+        FillPoly(mIs, new double[] {
+            174,-36, 177,-37, 178,-39, 176,-41,
+            174,-40, 173,-38, 174,-36
+        });
+        // New Zealand – South Island
+        FillPoly(mIs, new double[] {
+            170,-42, 172,-42, 174,-44, 173,-46,
+            170,-47, 168,-46, 169,-44, 170,-42
+        });
         mIs = Smooth(mIs, 1);
 
-        // ── Antarctica ──
+        // ── ANTARCTICA ──
         var mAnt = new bool[h, w];
-        PaintEllipse(mAnt, SX(160), SY(6), SX(220), SY(8));
-        PaintEllipse(mAnt, SX(240), SY(7), SX(240), SY(7));
+        FillPoly(mAnt, new double[] {
+            -170,-65, -140,-67, -120,-68, -90,-70, -60,-70,
+            -30,-68, 0,-68, 30,-70, 60,-70, 90,-68,
+            120,-68, 150,-67, 170,-65,
+            170,-90, -170,-90, -170,-65
+        });
         mAnt = Smooth(mAnt, 1);
 
-        // Apply masks → land + continent assignment
+        // ── Apply masks ──
         void ApplyMask(bool[,] mask, string? cont)
         {
             for (int yy = 0; yy < h; yy++)
                 for (int xx = 0; xx < w; xx++)
                     if (mask[yy, xx] && !land[yy, xx])
-                    {
-                        land[yy, xx] = true;
-                        contAt[yy, xx] = cont;
-                    }
+                    { land[yy, xx] = true; contAt[yy, xx] = cont; }
         }
 
         ApplyMask(mNA, "North America");
@@ -1748,40 +2068,20 @@ public class RiskGameSharp : BaseGame
         ApplyMask(mAF, "Africa");
         ApplyMask(mAU, "Australia");
         ApplyMask(mIs, "Eurasia");
-        ApplyMask(mAnt, null); // land but no territories
-
-        // Carve ocean gaps
-        void CarveChannel(int x0c, int x1c, int y0c, int y1c)
-        {
-            x0c = Clamp(x0c, 0, w - 1); x1c = Clamp(x1c, 0, w - 1);
-            y0c = Clamp(y0c, 0, h - 1); y1c = Clamp(y1c, 0, h - 1);
-            if (x1c < x0c) (x0c, x1c) = (x1c, x0c);
-            if (y1c < y0c) (y0c, y1c) = (y1c, y0c);
-            for (int yy = y0c; yy <= y1c; yy++)
-                for (int xx = x0c; xx <= x1c; xx++)
-                {
-                    land[yy, xx] = false;
-                    contAt[yy, xx] = null;
-                }
-        }
-
-        // Atlantic
-        CarveChannel((int)SX(170), (int)SX(208), (int)SY(34), (int)SY(176));
-        // Bering
-        CarveChannel((int)SX(306), (int)SX(318), (int)SY(120), (int)SY(176));
+        ApplyMask(mAnt, null);
 
         // Split Eurasia → Europe / Asia
-        int euroSplit = (int)SX(252);
+        // Europe = west of ~42°E AND north of ~35°N (captures UK, Scandinavia, Ukraine; excludes Ural, Middle East)
+        int euroSplitX = LLx(42);
+        int euroSplitY = LLy(35);
         for (int yy = 0; yy < h; yy++)
             for (int xx = 0; xx < w; xx++)
             {
                 if (contAt[yy, xx] != "Eurasia") continue;
-                contAt[yy, xx] = (xx < euroSplit && yy > (int)SY(98)) ? "Europe" : "Asia";
+                contAt[yy, xx] = (xx < euroSplitX && yy < euroSplitY) ? "Europe" : "Asia";
             }
 
-        // Compute territory seed positions in map coordinates
-        // The Python code puts y=0 at bottom; our map uses y=0 at top
-        // (lon + 180) / 360 * w → x; (90 - lat) / 180 * h → y (top-down)
+        // ── Territory seeds, Voronoi assignment, label computation ──
         var seedByTid = new Dictionary<int, (int X, int Y)>();
         var seedsByCont = new Dictionary<string, List<(int Tid, int X, int Y)>>();
 
@@ -1847,118 +2147,165 @@ public class RiskGameSharp : BaseGame
             }
 
         _tidCenter = new();
+        // Second pass: pick an interior pixel nearest the centroid to avoid border/coast drift
+        var bestPos = new Dictionary<int, (int X, int Y)>();
+        var bestLabelD2 = new Dictionary<int, long>();
+        foreach (var td in _territories)
+        {
+            bestPos[td.Tid] = seedByTid.GetValueOrDefault(td.Tid, (w / 2, h / 2));
+            bestLabelD2[td.Tid] = long.MaxValue;
+        }
+
+        // Compute centroids first
+        var centroids = new Dictionary<int, (int X, int Y)>();
         foreach (var td in _territories)
         {
             var (accX, accY, n) = sums.GetValueOrDefault(td.Tid, (0, 0, 0));
-            _tidCenter[td.Tid] = n > 0
+            centroids[td.Tid] = n > 0
                 ? ((int)(accX / n), (int)(accY / n))
                 : seedByTid.GetValueOrDefault(td.Tid, (w / 2, h / 2));
         }
+
+        for (int yy = 0; yy < h; yy++)
+            for (int xx = 0; xx < w; xx++)
+            {
+                int t2 = _tidMap[yy, xx];
+                if (t2 < 0) continue;
+                var (ccx, ccy) = centroids.GetValueOrDefault(t2, (xx, yy));
+                long ddx = xx - ccx, ddy = yy - ccy;
+                long d2 = ddx * ddx + ddy * ddy;
+                // Penalize border pixels to prefer interior placement
+                bool border = false;
+                for (int d = 0; d < 4; d++)
+                {
+                    int nx = xx + (d == 0 ? 1 : d == 1 ? -1 : 0);
+                    int ny = yy + (d == 2 ? 1 : d == 3 ? -1 : 0);
+                    if (nx < 0 || nx >= w || ny < 0 || ny >= h) { border = true; break; }
+                    if (_tidMap[ny, nx] != t2) { border = true; break; }
+                }
+                if (border) d2 += 5000;
+                if (d2 < bestLabelD2.GetValueOrDefault(t2, long.MaxValue))
+                {
+                    bestLabelD2[t2] = d2;
+                    bestPos[t2] = (xx, yy);
+                }
+            }
+
+        foreach (var td in _territories)
+            _tidCenter[td.Tid] = bestPos.GetValueOrDefault(td.Tid,
+                seedByTid.GetValueOrDefault(td.Tid, (w / 2, h / 2)));
     }
 
     private void BuildBaseTexture(Renderer r)
     {
         int w = MapW, h = MapH;
         var pixels = new Color[w * h];
-        var rng = new Random(42); // deterministic noise
 
-        // Ocean gradient + noise
-        for (int yy = 0; yy < h; yy++)
-            for (int xx = 0; xx < w; xx++)
-            {
-                float t = yy / (float)h;
-                int oceanR = (int)(12 + 18 * t);
-                int oceanG = (int)(30 + 35 * t);
-                int oceanB = (int)(60 + 50 * t);
-                int noise = rng.Next(-4, 5);
-                oceanR = Math.Clamp(oceanR + noise, 0, 255);
-                oceanG = Math.Clamp(oceanG + noise, 0, 255);
-                oceanB = Math.Clamp(oceanB + noise, 0, 255);
-                pixels[yy * w + xx] = new Color(oceanR, oceanG, oceanB);
-            }
+        // Deterministic hash-based noise (matches Python)
+        static int Noise(int x, int y)
+        {
+            uint v = (uint)((x * 374761393 + y * 668265263)) & 0xFFFFFFFF;
+            v = (v ^ (v >> 13)) & 0xFFFFFFFF;
+            v = (v * 1274126177) & 0xFFFFFFFF;
+            return (int)(v >> 28) - 8; // [-8..7]
+        }
 
-        // Land base color + noise
-        rng = new Random(42);
-        for (int yy = 0; yy < h; yy++)
-            for (int xx = 0; xx < w; xx++)
-            {
-                rng.Next(); // keep noise deterministic
-                if (_landMask![yy, xx])
-                {
-                    int noise = rng.Next(-6, 7);
-                    pixels[yy * w + xx] = new Color(
-                        Math.Clamp(70 + noise, 0, 255),
-                        Math.Clamp(105 + noise, 0, 255),
-                        Math.Clamp(74 + noise, 0, 255));
-                }
-            }
+        // Precompute thick continent-boundary mask
+        var contBorder = new bool[h, w];
+        var tidToCont = new Dictionary<int, string>();
+        foreach (var td in _territories) tidToCont[td.Tid] = td.Continent;
 
-        // Territory borders (darken pixels adjacent to different tids)
+        // Base pass: find continent border pixels
+        var baseBorder = new bool[h, w];
         for (int yy = 0; yy < h; yy++)
             for (int xx = 0; xx < w; xx++)
             {
                 int here = _tidMap![yy, xx];
                 if (here < 0) continue;
-                bool isBorder = false;
+                if (!tidToCont.TryGetValue(here, out var c0)) continue;
                 for (int d = 0; d < 4; d++)
                 {
                     int nx = xx + (d == 0 ? 1 : d == 1 ? -1 : 0);
                     int ny = yy + (d == 2 ? 1 : d == 3 ? -1 : 0);
                     if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
                     int oth = _tidMap[ny, nx];
-                    if (oth >= 0 && oth != here) { isBorder = true; break; }
+                    if (oth < 0 || oth == here) continue;
+                    if (tidToCont.TryGetValue(oth, out var c1) && c1 != c0)
+                    {
+                        baseBorder[yy, xx] = true;
+                        break;
+                    }
+                }
+            }
+
+        // Dilate by 1 pixel
+        for (int yy = 0; yy < h; yy++)
+            for (int xx = 0; xx < w; xx++)
+            {
+                if (!baseBorder[yy, xx]) continue;
+                for (int dy = -1; dy <= 1; dy++)
+                    for (int dx = -1; dx <= 1; dx++)
+                    {
+                        int ny = yy + dy, nx = xx + dx;
+                        if (ny >= 0 && ny < h && nx >= 0 && nx < w)
+                            contBorder[ny, nx] = true;
+                    }
+            }
+
+        // Render pixels
+        for (int yy = 0; yy < h; yy++)
+            for (int xx = 0; xx < w; xx++)
+            {
+                int tid = _tidMap![yy, xx];
+                bool isLand = _landMask![yy, xx];
+
+                if (!isLand)
+                {
+                    // Ocean: gradient + noise (matching Python bottom-left: t=0 south, t=1 north)
+                    float t = (float)(h - 1 - yy) / Math.Max(1, h - 1);
+                    int n = Noise(xx, yy);
+                    int oR = Math.Clamp((int)(10 + 12 * t) + n, 0, 255);
+                    int oG = Math.Clamp((int)(24 + 34 * t) + n, 0, 255);
+                    int oB = Math.Clamp((int)(56 + 40 * t) + n, 0, 255);
+                    pixels[yy * w + xx] = new Color(oR, oG, oB);
+                    continue;
                 }
 
-                if (isBorder)
-                {
-                    // Check if same continent → internal border, else continent border
-                    string? hereCont = null, othCont = null;
-                    foreach (var td in _territories)
-                    {
-                        if (td.Tid == here) hereCont = td.Continent;
-                    }
+                // Land: flat green + noise
+                int ln = Noise(xx, yy) / 2; // [-4..3] like Python's n//2
+                int lR = Math.Clamp(70 + ln, 0, 255);
+                int lG = Math.Clamp(105 + ln, 0, 255);
+                int lB = Math.Clamp(74 + ln, 0, 255);
 
-                    bool crossCont = false;
+                // Internal border darkening
+                if (tid >= 0)
+                {
+                    bool isBorder = false;
                     for (int d = 0; d < 4; d++)
                     {
                         int nx = xx + (d == 0 ? 1 : d == 1 ? -1 : 0);
                         int ny = yy + (d == 2 ? 1 : d == 3 ? -1 : 0);
                         if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
                         int oth = _tidMap[ny, nx];
-                        if (oth >= 0 && oth != here)
-                        {
-                            foreach (var td in _territories)
-                                if (td.Tid == oth) { othCont = td.Continent; break; }
-                            if (othCont != hereCont) { crossCont = true; break; }
-                        }
+                        if (oth >= 0 && oth != tid) { isBorder = true; break; }
                     }
+                    if (isBorder)
+                    {
+                        lR = (int)(lR * 0.55f);
+                        lG = (int)(lG * 0.55f);
+                        lB = (int)(lB * 0.55f);
+                    }
+                }
 
-                    var px = pixels[yy * w + xx];
-                    float dim = crossCont ? 0.25f : 0.55f;
-                    pixels[yy * w + xx] = new Color(
-                        (int)(px.R * dim), (int)(px.G * dim), (int)(px.B * dim));
+                // Continent border (thicker, darker)
+                if (contBorder[yy, xx])
+                {
+                    lR = (int)(lR * 0.25f);
+                    lG = (int)(lG * 0.25f);
+                    lB = (int)(lB * 0.25f);
                 }
-            }
 
-        // Coastline darkening (land pixels adjacent to ocean)
-        for (int yy = 0; yy < h; yy++)
-            for (int xx = 0; xx < w; xx++)
-            {
-                if (!_landMask![yy, xx]) continue;
-                bool coastal = false;
-                for (int d = 0; d < 4; d++)
-                {
-                    int nx = xx + (d == 0 ? 1 : d == 1 ? -1 : 0);
-                    int ny = yy + (d == 2 ? 1 : d == 3 ? -1 : 0);
-                    if (nx < 0 || nx >= w || ny < 0 || ny >= h) { coastal = true; break; }
-                    if (!_landMask[ny, nx]) { coastal = true; break; }
-                }
-                if (coastal)
-                {
-                    var px = pixels[yy * w + xx];
-                    pixels[yy * w + xx] = new Color(
-                        (int)(px.R * 0.6f), (int)(px.G * 0.6f), (int)(px.B * 0.6f));
-                }
+                pixels[yy * w + xx] = new Color(lR, lG, lB);
             }
 
         _baseMapTex = new Texture2D(r.GraphicsDevice, w, h, false, SurfaceFormat.Color);
@@ -2023,9 +2370,9 @@ public class RiskGameSharp : BaseGame
         // Rebuild fill overlay if ownership changed
         if (OwnerChanged()) RebuildFillOverlay(r);
 
-        // Fit map texture to screen area
-        int mapTop = 80, pad = 10;
-        int mapBottom = height - 44;
+        // Fit map texture to nearly the full screen
+        int mapTop = 62, pad = 4;
+        int mapBottom = height - 30;
         int availH = mapBottom - mapTop;
         int availW = width - pad * 2;
 
@@ -2058,56 +2405,29 @@ public class RiskGameSharp : BaseGame
         float scaleX = (float)drawW / MapW;
         float scaleY = (float)drawH / MapH;
 
-        foreach (var td in _territories)
-        {
-            if (!_tidCenter.TryGetValue(td.Tid, out var center)) continue;
-            int sx = drawX + (int)(center.X * scaleX);
-            int sy = drawY + (int)(center.Y * scaleY);
+        // Draw all cross-ocean adjacency links
+        var nameToTid = new Dictionary<string, int>();
+        foreach (var td in _territories) nameToTid[td.Name] = td.Tid;
 
-            int owner = _owner.GetValueOrDefault(td.Tid, -1);
-            int troops = _troops.GetValueOrDefault(td.Tid, 0);
-
-            // Selection highlight
-            bool isSelected = (_phase == "initial_deploy"
-                ? _deploySelected.Values.Contains(td.Tid)
-                : (_selectedFrom == td.Tid || _selectedTo == td.Tid));
-
-            if (isSelected)
-                r.DrawCircle((255, 255, 255), (sx, sy), 14, alpha: 100);
-
-            // Troop token
-            var tokenCol = owner >= 0
-                ? GameConfig.PlayerColors[owner % GameConfig.PlayerColors.Length]
-                : (80, 80, 80);
-            int tokenR = Math.Max(8, (int)(11 * scaleX));
-            r.DrawCircle((0, 0, 0), (sx + 1, sy + 1), tokenR, alpha: 80); // shadow
-            r.DrawCircle(tokenCol, (sx, sy), tokenR, alpha: 200);
-
-            // Troop count
-            int troopFs = Math.Max(7, (int)(10 * scaleX));
-            r.DrawText(troops.ToString(), sx, sy, troopFs, (255, 255, 255),
-                anchorX: "center", anchorY: "center", bold: true);
-
-            // Territory name (below token)
-            string name = td.Name;
-            if (name.Length > 12) name = name[..11] + "…";
-            int nameFs = Math.Max(5, (int)(7 * scaleX));
-            r.DrawText(name, sx, sy + tokenR + 3, nameFs, (220, 220, 220),
-                anchorX: "center", anchorY: "top");
-        }
-
-        // Draw adjacency links for cross-ocean connections
         var crossLinks = new (string A, string B)[]
         {
             ("Alaska", "Kamchatka"),
             ("Greenland", "Iceland"),
             ("Central America", "Venezuela"),
             ("Brazil", "North Africa"),
+            ("Southern Europe", "Egypt"),
+            ("Southern Europe", "North Africa"),
+            ("Western Europe", "North Africa"),
+            ("Ukraine", "Afghanistan"),
+            ("Middle East", "Egypt"),
+            ("Middle East", "East Africa"),
+            ("Middle East", "India"),
+            ("Middle East", "Afghanistan"),
+            ("Middle East", "Southern Europe"),
             ("Indonesia", "SE Asia"),
+            ("Indonesia", "New Guinea"),
+            ("New Guinea", "Eastern Australia"),
         };
-
-        var nameToTid = new Dictionary<string, int>();
-        foreach (var td in _territories) nameToTid[td.Name] = td.Tid;
 
         foreach (var (nameA, nameB) in crossLinks)
         {
@@ -2118,6 +2438,57 @@ public class RiskGameSharp : BaseGame
             int ax = drawX + (int)(cA.X * scaleX), ay = drawY + (int)(cA.Y * scaleY);
             int bx = drawX + (int)(cB.X * scaleX), by = drawY + (int)(cB.Y * scaleY);
             r.DrawLine((200, 200, 220), (ax, ay), (bx, by), alpha: 50);
+        }
+
+        // Selection pulsing
+        float pulse = 0.5f + 0.5f * MathF.Sin((float)_totalElapsed * 5f);
+
+        foreach (var td in _territories)
+        {
+            if (!_tidCenter.TryGetValue(td.Tid, out var center)) continue;
+            int sx = drawX + (int)(center.X * scaleX);
+            int sy = drawY + (int)(center.Y * scaleY);
+
+            int owner = _owner.GetValueOrDefault(td.Tid, -1);
+            int troops = _troops.GetValueOrDefault(td.Tid, 0);
+
+            // Selection highlight (pulsing)
+            bool isSelected = (_phase == "initial_deploy"
+                ? _deploySelected.Values.Contains(td.Tid)
+                : (_selectedFrom == td.Tid || _selectedTo == td.Tid));
+
+            if (isSelected)
+            {
+                int pulseR = (int)(16 + pulse * 6);
+                r.DrawCircle((255, 255, 255), (sx, sy), pulseR, alpha: (int)(80 + 60 * pulse));
+            }
+
+            // Token shadow
+            r.DrawCircle((0, 0, 0), (sx + 2, sy + 2), 14, alpha: 80);
+
+            // Current-turn glow
+            if (_currentTurnSeat is int ct && owner == ct)
+                r.DrawCircle((255, 255, 200), (sx, sy), 20, alpha: (int)(30 + 25 * pulse));
+
+            // Troop token (colored disc)
+            var tokenCol = owner >= 0
+                ? GameConfig.PlayerColors[owner % GameConfig.PlayerColors.Length]
+                : (80, 80, 80);
+            r.DrawCircle(tokenCol, (sx, sy), 14, alpha: 200);
+
+            // Highlight on top half
+            r.DrawCircle((255, 255, 255), (sx, sy - 2), 10, alpha: 25);
+
+            // Outline
+            r.DrawCircle((0, 0, 0), (sx, sy), 14, width: 1, alpha: 100);
+
+            // Troop count
+            r.DrawText(troops.ToString(), sx, sy, 13, (255, 255, 255),
+                anchorX: "center", anchorY: "center", bold: true);
+
+            // Territory name (below token)
+            r.DrawText(td.Name, sx, sy + 20, 11, (220, 220, 220),
+                anchorX: "center", anchorY: "top");
         }
     }
 }

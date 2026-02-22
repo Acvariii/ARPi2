@@ -150,6 +150,28 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
             </Typography>
           )}
 
+          {/* See the Future — private cards visible only to the player who played FUT */}
+          {Array.isArray(ek.future_cards) && ek.future_cards.length > 0 && (
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 1,
+                borderColor: '#7e57c2',
+                borderWidth: 2,
+                bgcolor: '#7e57c218',
+                textAlign: 'center',
+                animation: 'fadeInUp 0.4s ease-out',
+              }}
+            >
+              <Typography variant="caption" sx={{ fontWeight: 800, color: '#b39ddb', mb: 0.5, display: 'block' }}>
+                🔮 Top of deck (only you can see)
+              </Typography>
+              <Stack direction="row" spacing={1} justifyContent="center" flexWrap="wrap" useFlexGap>
+                {ek.future_cards.map((c: string, i: number) => renderCardTile({ key: `fut-${i}`, text: c }))}
+              </Stack>
+            </Paper>
+          )}
+
           {iAmEliminated && (
             <Typography variant="body2" color="error" sx={{ fontWeight: 800 }} align="center">
               You exploded. You&apos;re out.

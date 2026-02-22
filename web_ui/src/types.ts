@@ -15,6 +15,7 @@ export type Snapshot = {
     mute_votes: number;
     mute_required: number;
     you_voted_mute: boolean;
+    volume?: number;
   };
   end_game?: {
     pressed: boolean;
@@ -215,6 +216,7 @@ export type Snapshot = {
     nope_active?: boolean;
     nope_count?: number;
     winner?: number | null;
+    future_cards?: string[] | null;
   };
   texas_holdem?: {
     state?: string;

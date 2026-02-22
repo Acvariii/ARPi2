@@ -463,6 +463,7 @@ public sealed class MonopolyGameSharp : BaseGame
         if (isDoubles)
         {
             current.InJail = false; current.JailTurns = 0; current.ConsecutiveDoubles = 0;
+            RestoreDefaultButtons(current.Idx);
             var (sx, sy, sw, sh) = _spaces[MonopolyData.JailPosition];
             _textPops.Add(new TextPopAnim("🔓 FREE!", sx + sw / 2, sy + sh / 2 - 30, (80, 220, 120), 24));
             _pulseRings.Add(new PulseRing(sx + sw / 2, sy + sh / 2, (80, 220, 120), 55, 0.5f));
@@ -484,6 +485,7 @@ public sealed class MonopolyGameSharp : BaseGame
                 {
                     current.RemoveMoney(50);
                     current.InJail = false; current.JailTurns = 0;
+                    RestoreDefaultButtons(current.Idx);
                     int spaces = d1 + d2;
                     int oldPos = current.Position;
                     int newPos = (oldPos + spaces) % 40;
@@ -1143,6 +1145,7 @@ public sealed class MonopolyGameSharp : BaseGame
                 {
                     _players[playerIdx].RemoveMoney(50);
                     _players[playerIdx].InJail = false; _players[playerIdx].JailTurns = 0;
+                    _canRoll = true; _phase = "roll";
                     RestoreDefaultButtons(playerIdx);
                 }
                 break;
@@ -1151,6 +1154,7 @@ public sealed class MonopolyGameSharp : BaseGame
                 {
                     _players[playerIdx].GetOutOfJailCards--;
                     _players[playerIdx].InJail = false; _players[playerIdx].JailTurns = 0;
+                    _canRoll = true; _phase = "roll";
                     RestoreDefaultButtons(playerIdx);
                 }
                 break;

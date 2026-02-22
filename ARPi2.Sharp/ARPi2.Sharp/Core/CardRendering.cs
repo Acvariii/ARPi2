@@ -199,34 +199,58 @@ public static class CardRendering
     {
         var ac = accentRgb ?? (140, 140, 140);
         int x2 = rect.x, y2 = rect.y, w2 = rect.w, h2 = rect.h;
-        r.DrawRect((255, 255, 255), (x2, y2, w2, h2), alpha: 245);
-        r.DrawRect(ac, (x2, y2, w2, h2), width: 3, alpha: 200);
-        r.DrawRect(ac, (x2, y2, w2, h2), alpha: 28);
 
+        // Shadow
+        r.DrawRect((0, 0, 0), (x2 + 4, y2 + 4, w2, h2), alpha: 80);
+
+        // Card face — off-white parchment
+        r.DrawRect((248, 245, 238), (x2, y2, w2, h2), alpha: 250);
+
+        // Accent header band (top 28%)
+        r.DrawRect(ac, (x2, y2, w2, h2 * 28 / 100), alpha: 55);
+        // Subtle tint on rest of card
+        r.DrawRect(ac, (x2, y2 + h2 * 28 / 100, w2, h2 * 72 / 100), alpha: 12);
+
+        // Inner inset line for premium look
+        int inset = Math.Max(3, w2 * 6 / 100);
+        r.DrawRect(ac, (x2 + inset, y2 + inset, w2 - 2 * inset, h2 - 2 * inset), width: 1, alpha: 45);
+
+        // Accent outer border
+        r.DrawRect(ac, (x2, y2, w2, h2), width: 3, alpha: 220);
+
+        // Corner labels
         if (!string.IsNullOrEmpty(corner))
         {
-            r.DrawText(corner, x2 + 10, y2 + 10, 12, (35, 35, 35), bold: true, anchorX: "left", anchorY: "top");
-            r.DrawText(corner, x2 + w2 - 10, y2 + h2 - 10, 12, (35, 35, 35), bold: true, anchorX: "right", anchorY: "bottom");
+            int cornerFs = Math.Max(9, h2 * 9 / 100);
+            r.DrawText(corner, x2 + 8, y2 + 8, cornerFs, ac, bold: true, anchorX: "left", anchorY: "top");
+            r.DrawText(corner, x2 + w2 - 8, y2 + h2 - 8, cornerFs, ac, bold: true, anchorX: "right", anchorY: "bottom");
         }
 
-        int cx = x2 + w2 / 2, cy = y2 + h2 * 58 / 100;
-        // Count visible emoji glyphs (skip variation selectors U+FE0F and ZWJ U+200D)
+        // Emoji — large, centered higher
+        int cx = x2 + w2 / 2, cy = y2 + h2 * 48 / 100;
         int nEmoji = 0;
         foreach (char ch in emoji ?? "")
             if (ch > 0x2000 && ch != 0xFE0F && ch != 0x200D) nEmoji++;
         nEmoji = Math.Max(1, nEmoji);
-        int baseFs = Math.Max(18, h2 * 36 / 100);
-        int emojiFs = Math.Min(baseFs, Math.Max(14, w2 * 78 / 100 / nEmoji));
-        r.DrawText(emoji ?? "", cx + 1, cy + 1, emojiFs, (0, 0, 0), alpha: 90, anchorX: "center", anchorY: "center");
+        int baseFs = Math.Max(20, h2 * 38 / 100);
+        int emojiFs = Math.Min(baseFs, Math.Max(16, w2 * 78 / 100 / nEmoji));
+        r.DrawText(emoji ?? "", cx + 1, cy + 1, emojiFs, (0, 0, 0), alpha: 60, anchorX: "center", anchorY: "center");
         r.DrawText(emoji ?? "", cx, cy, emojiFs, (255, 255, 255), anchorX: "center", anchorY: "center");
 
+        // Title below emoji — accent colored
         string name = (title ?? "").Trim();
         if (name.Length > 0)
         {
-            int fsz = Math.Max(10, h2 * 14 / 100);
+            int fsz = Math.Max(10, h2 * 13 / 100);
             if (maxTitleFontSize > 0) fsz = Math.Min(fsz, maxTitleFontSize);
             string display = name.Length > 18 ? name[..18] : name;
-            r.DrawText(display, cx, y2 + h2 * 18 / 100, fsz, (35, 35, 35), bold: true, anchorX: "center", anchorY: "center");
+            // Pill background behind title
+            int pillW = display.Length * (fsz * 55 / 100) + 12;
+            int pillH = fsz + 6;
+            int pillX = cx - pillW / 2;
+            int pillY = y2 + h2 * 82 / 100 - pillH / 2;
+            r.DrawRect(ac, (pillX, pillY, pillW, pillH), alpha: 30);
+            r.DrawText(display, cx, y2 + h2 * 82 / 100, fsz, (25, 25, 25), bold: true, anchorX: "center", anchorY: "center");
         }
     }
 
@@ -394,25 +418,56 @@ public static class CardRendering
 
     private static void BgCatan(Renderer r, int w, int h)
     {
-        // Tropical ocean-ish gradient (matching Python version)
-        r.DrawRect((6, 34, 52), (0, 0, w, h));
-        // Subtle water bands — lighter towards the top
-        int steps = 64;
+        // Deep ocean base
+        r.DrawRect((4, 28, 58), (0, 0, w, h));
+
+        // Animated-look wave bands — lighter turquoise towards center
+        int steps = 48;
         for (int i = 0; i < steps; i++)
         {
             float t = i / (float)Math.Max(1, steps - 1);
-            int a = 10 + (int)(40 * t);
-            int bandY = (int)(h * (i / (float)(steps + 6)));
-            int bandH = (int)(h / (float)(steps + 6)) + 2;
-            r.DrawRect((8, 70 + (int)(75 * t), 90 + (int)(95 * t)),
-                       (0, bandY, w, bandH), alpha: a);
+            int bandY = (int)(h * (i / (float)(steps + 4)));
+            int bandH = (int)(h / (float)(steps + 4)) + 2;
+            r.DrawRect((6, 55 + (int)(65 * t), 95 + (int)(85 * t)),
+                       (0, bandY, w, bandH), alpha: 12 + (int)(35 * t));
         }
-        // Sand strip at the bottom for a "shore" feel
-        int sandH = Math.Max(18, h * 85 / 1000);
-        r.DrawRect((194, 170, 120), (0, h - sandH, w, sandH), alpha: 225);
-        r.DrawRect((176, 154, 108), (0, h - sandH, w, Math.Max(1, sandH / 3)), alpha: 140);
-        // Foam line
-        r.DrawRect((220, 210, 180), (0, h - sandH - 2, w, 2), alpha: 60);
+
+        // Diagonal subtle wave streaks
+        for (int i = 0; i < 8; i++)
+        {
+            int sy = h * i / 8;
+            int sx = -(w / 4) + (i * w / 12);
+            r.DrawRect((30, 90, 140), (sx, sy, w / 3, 2), alpha: 15);
+        }
+
+        // Warm sandy shoreline at the bottom
+        int sandH = Math.Max(24, h * 10 / 100);
+        // Sand gradient (3 layers)
+        r.DrawRect((210, 185, 135), (0, h - sandH, w, sandH), alpha: 210);
+        r.DrawRect((195, 168, 118), (0, h - sandH, w, sandH * 2 / 5), alpha: 160);
+        r.DrawRect((180, 152, 105), (0, h - sandH, w, sandH / 6), alpha: 120);
+
+        // Foam line (two passes for layered look)
+        r.DrawRect((240, 240, 230), (0, h - sandH - 3, w, 3), alpha: 50);
+        r.DrawRect((200, 230, 240), (0, h - sandH - 1, w, 1), alpha: 35);
+
+        // Top sky/horizon strip — subtle warm glow on horizon
+        int skyH = Math.Max(20, h * 6 / 100);
+        r.DrawRect((15, 35, 62), (0, 0, w, skyH), alpha: 60);
+        r.DrawRect((25, 50, 80), (0, 0, w, skyH / 2), alpha: 40);
+
+        // Palm tree silhouettes on shore edges
+        int palmFs = Math.Max(14, h / 35);
+        r.DrawText("🌴", (int)(w * 0.03), h - sandH - palmFs / 2, palmFs, (255, 255, 255), anchorX: "center", anchorY: "center");
+        r.DrawText("🌴", (int)(w * 0.10), h - sandH - palmFs / 3, (int)(palmFs * 0.8), (255, 255, 255), anchorX: "center", anchorY: "center");
+        r.DrawText("🌴", (int)(w * 0.92), h - sandH - palmFs / 2, palmFs, (255, 255, 255), anchorX: "center", anchorY: "center");
+        r.DrawText("🌴", (int)(w * 0.97), h - sandH - palmFs / 3, (int)(palmFs * 0.75), (255, 255, 255), anchorX: "center", anchorY: "center");
+
+        // Small wave emoji accents in ocean corners
+        int waveFs = Math.Max(10, h / 55);
+        r.DrawText("🌊", (int)(w * 0.02), (int)(h * 0.15), waveFs, (255, 255, 255), anchorX: "center", anchorY: "center");
+        r.DrawText("🌊", (int)(w * 0.95), (int)(h * 0.25), waveFs, (255, 255, 255), anchorX: "center", anchorY: "center");
+        r.DrawText("🌊", (int)(w * 0.06), (int)(h * 0.55), waveFs, (255, 255, 255), anchorX: "center", anchorY: "center");
     }
 
     private static void BgRisk(Renderer r, int w, int h)

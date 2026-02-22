@@ -976,14 +976,18 @@ public class CatanGameSharp : BaseGame
             string label = KindEmoji.GetValueOrDefault(t.Kind, "?");
             if (!isPort || t.Kind != "water")
             {
-                r.DrawText(label, (int)tcx, (int)tcy - 2, Math.Max(14, (int)(size * 0.45)),
+                // Draw emoji above the number circle (shifted up)
+                int emojiY = t.Number != null ? (int)(tcy - size * 0.22) : (int)tcy;
+                int emojiFs = Math.Max(12, (int)(size * 0.38));
+                r.DrawText(label, (int)tcx, emojiY, emojiFs,
                     (255, 255, 255), anchorX: "center", anchorY: "center");
             }
 
             if (t.Number is int num && t.Kind is not "water" and not "desert" and not "volcano")
             {
-                r.DrawCircle((245, 235, 210), ((int)tcx, (int)(tcy + size * 0.35)), Math.Max(10, (int)(size * 0.26)), alpha: 220);
-                r.DrawText(num.ToString(), (int)tcx, (int)(tcy + size * 0.35), Math.Max(12, (int)(size * 0.32)),
+                int numY = (int)(tcy + size * 0.25);
+                r.DrawCircle((245, 235, 210), ((int)tcx, numY), Math.Max(10, (int)(size * 0.26)), alpha: 220);
+                r.DrawText(num.ToString(), (int)tcx, numY, Math.Max(12, (int)(size * 0.32)),
                     (30, 30, 30), anchorX: "center", anchorY: "center");
             }
 
@@ -1038,19 +1042,32 @@ public class CatanGameSharp : BaseGame
             r.DrawLine(roadCol, ((int)ax, (int)ay), ((int)bx, (int)by), width: Math.Max(3, (int)(size * 0.12)));
         }
 
-        // Draw buildings
+        // Draw buildings (emoji style with colored halo + ownership dot)
         foreach (var (vid, b) in _buildings)
         {
             if (vid < 0 || vid >= _vertices.Count) continue;
             var v = _vertices[vid];
             float bx = v.X * size + offX, by = v.Y * size + offY;
             var bCol = PlayerPalette[b.Owner % PlayerPalette.Length];
-            int bRad = b.Kind == "city" ? Math.Max(8, (int)(size * 0.22)) : Math.Max(6, (int)(size * 0.16));
-            r.DrawCircle(bCol, ((int)bx, (int)by), bRad, alpha: 220);
-            r.DrawCircle((0, 0, 0), ((int)bx, (int)by), bRad, width: 2, alpha: 180);
-            string em = b.Kind == "city" ? "C" : "S";
-            r.DrawText(em, (int)bx, (int)by, Math.Max(10, (int)(size * 0.3)),
+
+            // Colored halo behind the emoji
+            int haloR = Math.Max(10, (int)(size * 0.22));
+            r.DrawCircle(bCol, ((int)bx, (int)by), haloR, alpha: 155);
+            r.DrawCircle((0, 0, 0), ((int)bx, (int)by), haloR, alpha: 120);
+
+            // Emoji building marker
+            string em = b.Kind == "city" ? "🏰" : "🏠";
+            int emFs = Math.Max(14, (int)(size * 0.48));
+            r.DrawText(em, (int)bx, (int)by - 1, emFs,
                 (255, 255, 255), anchorX: "center", anchorY: "center");
+
+            // Colored ownership dot at top
+            int dotR = Math.Max(7, (int)(size * 0.13));
+            int dotX = (int)bx;
+            int dotY = (int)(by - size * 0.32);
+            r.DrawCircle((255, 255, 255), (dotX, dotY), dotR + 4, alpha: 220);
+            r.DrawCircle((0, 0, 0), (dotX, dotY), dotR + 3, alpha: 255);
+            r.DrawCircle(bCol, (dotX, dotY), dotR, alpha: 255);
         }
 
         // Robber
@@ -1062,7 +1079,7 @@ public class CatanGameSharp : BaseGame
                 var (rpx, rpy) = AxialToPixel(rt.Q, rt.R, size);
                 float rcx = rpx + offX, rcy2 = rpy + offY;
                 r.DrawCircle((0, 0, 0), ((int)rcx, (int)rcy2), Math.Max(10, (int)(size * 0.32)), alpha: 140);
-                r.DrawText("R", (int)rcx, (int)rcy2, Math.Max(14, (int)(size * 0.45)),
+                r.DrawText("\U0001f9b9", (int)rcx, (int)rcy2, Math.Max(14, (int)(size * 0.40)),
                     (235, 235, 235), anchorX: "center", anchorY: "center");
             }
         }

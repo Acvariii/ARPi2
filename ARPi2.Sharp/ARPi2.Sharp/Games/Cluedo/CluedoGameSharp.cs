@@ -1327,7 +1327,12 @@ public class CluedoGameSharp : BaseGame
     {
         if (State == "player_select")
         {
-            base.Draw(r, width, height, dt);
+            // Show a simple waiting screen instead of seat selection UI
+            // MaybeAutoStartActiveGame in GameServer will auto-start with 3+ seated players
+            CardRendering.DrawGameBackground(r, width, height, "cluedo");
+            RainbowTitle.Draw(r, "CLUEDO", width, y: (int)(height * 0.04), fontSize: 28, charWidth: 22);
+            r.DrawText("Waiting for players... (3 required)", width / 2, height / 2, 20,
+                (200, 200, 200), anchorX: "center", anchorY: "center");
             return;
         }
 

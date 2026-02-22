@@ -10,6 +10,7 @@ import {
   Divider,
   LinearProgress,
   Paper,
+  Slider,
   Stack,
   TextField,
   Toolbar,
@@ -365,7 +366,14 @@ export default function App(): React.ReactElement {
     return 'Selecting game (vote now)';
   }, [snapshot?.lobby?.all_ready, snapshot?.lobby?.min_players, snapshot?.lobby?.seated_count]);
 
-  const audio = snapshot?.audio || null;
+  const audio = snapshot?.audio ?? null;
+  // Always show audio controls when there is a snapshot (use safe defaults)
+  const showAudio = !!snapshot;
+  const audioVolume = audio?.volume ?? 35;
+  const audioMuted = audio?.music_muted ?? false;
+  const audioVotedMute = audio?.you_voted_mute ?? false;
+  const audioMuteVotes = audio?.mute_votes ?? 0;
+  const audioMuteRequired = audio?.mute_required ?? 1;
   const voteMuteMusic = useCallback(() => {
     if (!isSeated) return;
     send({ type: 'vote_music_mute' });
@@ -425,23 +433,44 @@ export default function App(): React.ReactElement {
               Seat: {isSeated ? seatLabel(mySeat as number) : 'No seat selected'}
             </Typography>
 
-            {!!audio && (
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 2 }}>
-                <Button
-                  variant={audio.you_voted_mute ? 'contained' : 'outlined'}
-                  color={audio.music_muted ? 'warning' : 'primary'}
-                  onClick={voteMuteMusic}
-                  disabled={!isSeated || status !== 'connected'}
-                >
-                  {audio.you_voted_mute ? 'Mute vote ✓' : 'Vote: Mute music'}
-                </Button>
-                <Chip
-                  label={`Mute votes: ${audio.mute_votes}/${audio.mute_required} (${audio.music_muted ? 'muted' : 'playing'})`}
-                  color={audio.music_muted ? 'warning' : 'default'}
-                  variant={audio.music_muted ? 'filled' : 'outlined'}
-                  size="small"
-                />
-              </Stack>
+            {showAudio && (
+              <Paper variant="outlined" sx={{ p: 1.5, mb: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>🎵 Audio</Typography>
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems="center" sx={{ mb: 1 }}>
+                  <Button
+                    variant={audioVotedMute ? 'contained' : 'outlined'}
+                    color={audioMuted ? 'warning' : 'primary'}
+                    onClick={voteMuteMusic}
+                    disabled={!isSeated || status !== 'connected'}
+                    size="small"
+                  >
+                    {audioVotedMute ? 'Mute vote ✓' : 'Vote: Mute music'}
+                  </Button>
+                  <Chip
+                    label={`Mute votes: ${audioMuteVotes}/${audioMuteRequired} (${audioMuted ? 'muted' : 'playing'})`}
+                    color={audioMuted ? 'warning' : 'default'}
+                    variant={audioMuted ? 'filled' : 'outlined'}
+                    size="small"
+                  />
+                </Stack>
+                <Stack direction="row" spacing={2} alignItems="center">
+                  <Typography variant="body2" sx={{ whiteSpace: 'nowrap' }}>🔊 Vol</Typography>
+                  <Slider
+                    value={audioVolume}
+                    min={0}
+                    max={100}
+                    step={5}
+                    size="small"
+                    valueLabelDisplay="auto"
+                    disabled={!isSeated || status !== 'connected'}
+                    onChange={(_e, v) => send({ type: 'set_volume', volume: v as number })}
+                    sx={{ minWidth: 100, flex: 1 }}
+                  />
+                  <Typography variant="body2" sx={{ whiteSpace: 'nowrap' }}>
+                    {audioVolume}%
+                  </Typography>
+                </Stack>
+              </Paper>
             )}
 
             {inMenu && (

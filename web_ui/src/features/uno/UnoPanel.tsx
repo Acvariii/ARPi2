@@ -28,6 +28,7 @@ export default function UnoPanel({ snapshot, seatLabel, send, playerColors }: Pr
   const ctrlEnd = buttonById.get('end');
   const ctrlPlayAgain = buttonById.get('play_again');
   const ctrlForceStart = buttonById.get('force_start');
+  const ctrlReturnLobby = buttonById.get('return_to_lobby');
   const ctrlColors = ['R', 'G', 'B', 'Y']
     .map((c) => buttonById.get(`color:${c}`))
     .filter((b): b is NonNullable<typeof b> => !!b);
@@ -149,7 +150,7 @@ export default function UnoPanel({ snapshot, seatLabel, send, playerColors }: Pr
         </Typography>
       )}
 
-      {(!snapshot.popup?.active && (!!ctrlColors.length || !!ctrlDraw || !!ctrlEnd || !!ctrlPlayAgain || !!ctrlForceStart)) && (
+      {(!snapshot.popup?.active && (!!ctrlColors.length || !!ctrlDraw || !!ctrlEnd || !!ctrlPlayAgain || !!ctrlForceStart || !!ctrlReturnLobby)) && (
         <>
           <Typography variant="subtitle1" gutterBottom align="center">
             Actions
@@ -185,24 +186,39 @@ export default function UnoPanel({ snapshot, seatLabel, send, playerColors }: Pr
               {!ctrlColors.length && (
                 <>
                   {typeof uno.winner === 'number' && (
-                    <>
-                      {ctrlPlayAgain &&
-                        renderCardTile({
-                          key: ctrlPlayAgain.id,
-                          text: 'PLAY',
-                          enabled: !!ctrlPlayAgain.enabled,
-                          onClick: () => sendClick(ctrlPlayAgain.id),
-                          asBack: true,
-                        })}
-                      {ctrlForceStart &&
-                        renderCardTile({
-                          key: ctrlForceStart.id,
-                          text: 'FORCE',
-                          enabled: !!ctrlForceStart.enabled,
-                          onClick: () => sendClick(ctrlForceStart.id),
-                          asBack: true,
-                        })}
-                    </>
+                    <Stack direction="row" spacing={1} justifyContent="center" sx={{ gridColumn: '1 / -1' }}>
+                      {ctrlPlayAgain && (
+                        <Button
+                          variant="contained"
+                          color="success"
+                          disabled={!ctrlPlayAgain.enabled}
+                          onClick={() => sendClick(ctrlPlayAgain.id)}
+                          sx={{ fontWeight: 700, animation: 'bounceIn 0.35s ease-out' }}
+                        >
+                          Play Again
+                        </Button>
+                      )}
+                      {ctrlForceStart && (
+                        <Button
+                          variant="outlined"
+                          disabled={!ctrlForceStart.enabled}
+                          onClick={() => sendClick(ctrlForceStart.id)}
+                          sx={{ animation: 'bounceIn 0.35s ease-out 0.05s both' }}
+                        >
+                          {ctrlForceStart.text || 'Force Start'}
+                        </Button>
+                      )}
+                      {ctrlReturnLobby && (
+                        <Button
+                          variant="outlined"
+                          color="warning"
+                          onClick={() => sendClick(ctrlReturnLobby.id)}
+                          sx={{ animation: 'bounceIn 0.35s ease-out 0.1s both' }}
+                        >
+                          Lobby
+                        </Button>
+                      )}
+                    </Stack>
                   )}
 
                   {ctrlDraw &&

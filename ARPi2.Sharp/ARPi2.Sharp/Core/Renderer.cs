@@ -258,8 +258,8 @@ public sealed class Renderer : IDisposable
             _        => 0f,
         };
 
-        // If text contains emoji and no rotation, use segmented colored rendering
-        if (Math.Abs(rotation) < 0.001f && Math.Abs(scale - 1f) < 0.001f && ContainsEmoji(text))
+        // If text contains emoji, use segmented colored rendering (supports scale & rotation)
+        if (ContainsEmoji(text))
         {
             // Measure actual emoji render width for correct centering
             float emojiWidth = MeasureTextColoredWidth(font, text, scaledSize);
@@ -271,13 +271,31 @@ public sealed class Renderer : IDisposable
             };
             float eoy = anchorY switch
             {
-                "center" => measured.Y / 2f,  // use FontStashSharp height (still reasonable)
+                "center" => measured.Y / 2f,
                 "bottom" => measured.Y,
                 _        => 0f,
             };
-            float startX = x - eox;
-            float startY = y - eoy;
-            DrawTextColored(font, text, startX, startY, col, alpha);
+            // Apply scale and rotation around the anchor point
+            if (Math.Abs(rotation) < 0.001f && Math.Abs(scale - 1f) < 0.001f)
+            {
+                // Fast path: no transform needed
+                DrawTextColored(font, text, x - eox, y - eoy, col, alpha, 1f);
+            }
+            else
+            {
+                // Transform: flush batch, apply matrix, draw, restore
+                EndFrame();
+                var mat = Matrix.CreateTranslation(-eox, -eoy, 0)
+                        * Matrix.CreateScale(scale)
+                        * Matrix.CreateRotationZ(rotation * MathF.PI / 180f)
+                        * Matrix.CreateTranslation(x, y, 0);
+                _sb.Begin(SpriteSortMode.Deferred, BlendState.NonPremultiplied,
+                          SamplerState.LinearClamp, null, null, null, mat);
+                _batchOpen = true;
+                DrawTextColored(font, text, 0, 0, col, alpha, 1f);
+                EndFrame();
+                BeginFrame();
+            }
             return;
         }
 
@@ -327,7 +345,7 @@ public sealed class Renderer : IDisposable
     };
 
     private void DrawTextColored(DynamicSpriteFont font, string text, float startX, float startY,
-                                  (int R, int G, int B) baseCol, int alpha)
+                                  (int R, int G, int B) baseCol, int alpha, float scale = 1f)
     {
         float curX = startX;
         int i = 0;

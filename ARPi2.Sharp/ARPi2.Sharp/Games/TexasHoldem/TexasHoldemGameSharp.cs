@@ -917,6 +917,7 @@ public class TexasHoldemGameSharp : BaseGame
             {
                 bool already = _nextHandReadyHandId == _handId && _nextHandReady.GetValueOrDefault(s, false);
                 _buttons[s]["next_hand"] = ("Next Hand", !already);
+                _buttons[s]["return_to_lobby"] = ("Return to Lobby", true);
                 bool show = _revealHole.GetValueOrDefault(s, false);
                 _buttons[s]["toggle_reveal"] = (show ? "Hide Cards" : "Show Cards", true);
             }

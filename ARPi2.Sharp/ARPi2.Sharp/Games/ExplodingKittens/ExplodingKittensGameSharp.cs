@@ -52,6 +52,11 @@ public class ExplodingKittensGameSharp : BaseGame
     // Buttons per player
     private readonly Dictionary<int, Dictionary<string, (string Text, bool Enabled)>> _buttons = new();
 
+    // See the Future — private per-player data
+    private List<string>? _futureCards;
+    private int? _futureViewer;
+    private double _futureAge = 999.0;
+
     // Animations
     private readonly ParticleSystem _particles = new();
     private readonly List<TextPopAnim> _textPops = new();
@@ -384,6 +389,8 @@ public class ExplodingKittensGameSharp : BaseGame
             ["nope_active"] = _nopeActive,
             ["nope_count"] = _nopeCount,
             ["winner"] = _winner,
+            // Only the player who played See the Future sees the cards
+            ["future_cards"] = (_futureViewer == seat && _futureCards != null && _futureAge < 6.0) ? _futureCards : null,
         };
 
         return new Dictionary<string, object?> { ["exploding_kittens"] = snap };
@@ -662,10 +669,15 @@ public class ExplodingKittensGameSharp : BaseGame
                 break;
 
             case "FUT":
-                // Show top 3 via event
+                // Store top 3 privately – only the player who played FUT should see them
                 var top3 = _drawPile.AsEnumerable().Reverse().Take(3).Select(c => c.Short()).ToList();
                 if (top3.Count > 0)
-                    NoteEvent("Future: " + string.Join(", ", top3));
+                {
+                    _futureCards = top3;
+                    _futureViewer = seat.Value;
+                    _futureAge = 0.0;
+                    NoteEvent($"{PlayerName(seat.Value)} sees the future…");
+                }
                 break;
 
             case "FAV":
@@ -764,6 +776,14 @@ public class ExplodingKittensGameSharp : BaseGame
         float d = Math.Clamp((float)dt, 0f, 0.2f);
         if (_lastEventAge < 999.0) _lastEventAge += d;
 
+        // Tick See-the-Future display timer and auto-clear
+        if (_futureAge < 999.0) _futureAge += d;
+        if (_futureCards != null && _futureAge >= 6.0)
+        {
+            _futureCards = null;
+            _futureViewer = null;
+        }
+
         // Nope window countdown
         if (_nopeActive)
         {
@@ -803,8 +823,10 @@ public class ExplodingKittensGameSharp : BaseGame
         {
             _animPrevWinner = w;
             int cx = ScreenW / 2, cy = ScreenH / 2;
-            for (int i = 0; i < 8; i++)
-                _particles.EmitFirework(cx + Rng.Next(-120, 121), cy + Rng.Next(-80, 81), AnimPalette.Rainbow);
+            // Scatter fireworks across the whole board
+            for (int i = 0; i < 12; i++)
+                _particles.EmitFirework(Rng.Next(ScreenW * 10 / 100, ScreenW * 90 / 100),
+                    Rng.Next(ScreenH * 10 / 100, ScreenH * 90 / 100), AnimPalette.Rainbow);
             _flashes.Add(new ScreenFlash((255, 220, 80), 60, 1.0f));
             _textPops.Add(new TextPopAnim($"\U0001f3c6 {PlayerName(w)} wins!", cx, cy - 60, (255, 220, 80), fontSize: 36));
             _animFwTimer = 6.0;
@@ -814,8 +836,10 @@ public class ExplodingKittensGameSharp : BaseGame
             _animFwTimer = Math.Max(0, _animFwTimer - d);
             if ((int)(_animFwTimer * 3) % 2 == 0)
             {
-                int cx = ScreenW / 2, cy = ScreenH / 2;
-                _particles.EmitFirework(cx + Rng.Next(-150, 151), cy + Rng.Next(-100, 101), AnimPalette.Rainbow);
+                // Scatter fireworks randomly across the board
+                _particles.EmitFirework(
+                    Rng.Next(ScreenW * 5 / 100, ScreenW * 95 / 100),
+                    Rng.Next(ScreenH * 5 / 100, ScreenH * 95 / 100), AnimPalette.Rainbow);
             }
         }
     }
@@ -864,21 +888,21 @@ public class ExplodingKittensGameSharp : BaseGame
         if (_winner is int w)
         {
             r.DrawRect((0, 0, 0), (0, 0, width, height), alpha: 150);
-            int bw2 = Math.Min(600, width * 55 / 100), bh2 = 180;
+            int bw2 = Math.Min(600, width * 55 / 100), bh2 = 160;
             int bx2 = cx - bw2 / 2, by2 = cy - bh2 / 2;
             r.DrawRect((0, 0, 0), (bx2 + 5, by2 + 5, bw2, bh2), alpha: 100);
             r.DrawRect((18, 10, 24), (bx2, by2, bw2, bh2), alpha: 225);
             r.DrawRect((255, 180, 40), (bx2, by2, bw2, bh2), width: 4, alpha: 200);
             r.DrawCircle((255, 180, 40), (cx, cy), Math.Min(bw2, bh2) * 30 / 100, alpha: 12);
-            r.DrawText("\U0001f63c", cx, cy + 30, 48, (255, 200, 60), anchorX: "center", anchorY: "center");
-            r.DrawText($"Winner: {PlayerName(w)}", cx + 2, cy - 22, 40, (0, 0, 0),
+            r.DrawText("\U0001f63c", cx, by2 + bh2 - 30, 48, (255, 200, 60), anchorX: "center", anchorY: "center");
+            r.DrawText($"Winner: {PlayerName(w)}", cx + 2, by2 + 40, 40, (0, 0, 0),
                 anchorX: "center", anchorY: "center", alpha: 100);
-            r.DrawText($"Winner: {PlayerName(w)}", cx, cy - 24, 40, (255, 240, 180),
+            r.DrawText($"Winner: {PlayerName(w)}", cx, by2 + 38, 40, (255, 240, 180),
                 anchorX: "center", anchorY: "center");
         }
 
-        // Last event
-        if (!string.IsNullOrEmpty(_lastEvent) && _lastEventAge < 4.5)
+        // Last event (hide during winner to avoid overlap)
+        if (!string.IsNullOrEmpty(_lastEvent) && _lastEventAge < 4.5 && _winner == null)
         {
             int ew = Math.Max(180, _lastEvent.Length * 8);
             r.DrawRect((0, 0, 0), (20, 74, ew, 22), alpha: 120);
@@ -937,19 +961,20 @@ public class ExplodingKittensGameSharp : BaseGame
 
         // Emoji + title mapping
         string emoji = "\U0001f63a";
+        string title = t;
         switch (t)
         {
-            case "EK": emoji = "\U0001f4a3\U0001f63c"; break;
-            case "DEF": emoji = "\U0001f9ef"; break;
-            case "ATK": emoji = "\u2694"; break;
-            case "SKIP": emoji = "\u23ed"; break;
-            case "SHUF": emoji = "\U0001f500"; break;
-            case "FUT": emoji = "\U0001f52e"; break;
-            case "FAV": emoji = "\U0001f381"; break;
-            case "NOPE": emoji = "\U0001f6ab"; break;
+            case "EK":   emoji = "\U0001f4a3\U0001f63c"; title = "EXPLODING"; break;
+            case "DEF":  emoji = "\U0001f9ef";           title = "DEFUSE"; break;
+            case "ATK":  emoji = "\u2694";               title = "ATTACK"; break;
+            case "SKIP": emoji = "\u23ed";               title = "SKIP"; break;
+            case "SHUF": emoji = "\U0001f500";           title = "SHUFFLE"; break;
+            case "FUT":  emoji = "\U0001f52e";           title = "FUTURE"; break;
+            case "FAV":  emoji = "\U0001f381";           title = "FAVOR"; break;
+            case "NOPE": emoji = "\U0001f6ab";           title = "NOPE"; break;
         }
 
-        CardRendering.DrawEmojiCard(r, rect, emoji, "", accentRgb: faceColor, corner: string.IsNullOrEmpty(t) ? "EK" : t);
+        CardRendering.DrawEmojiCard(r, rect, emoji, title, accentRgb: faceColor, corner: string.IsNullOrEmpty(t) ? "EK" : t);
     }
 
     private void DrawDiscard(Renderer r, (int x, int y, int w, int h) rect)

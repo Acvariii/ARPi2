@@ -50,6 +50,9 @@ export default function UnstableUnicornsPanel({ snapshot, seatLabel, send, playe
   const reaction = uu.reaction as any;
   const prompt = uu.prompt as any;
 
+  const discardButtons = panelButtons.filter((b) => b.id.startsWith('uu_discard:'));
+  const isDiscardPhase = uu.turn_phase === 'discard';
+
   const actionButtons = panelButtons.filter(
     (b) => !b.id.startsWith('uu_play:') && !b.id.startsWith('uu_discard:')
   );
@@ -72,9 +75,16 @@ export default function UnstableUnicornsPanel({ snapshot, seatLabel, send, playe
           )}
 
           {!!reaction && (
-            <Typography variant="body2" sx={{ fontWeight: 800, animation: 'blink 1s ease-in-out infinite, pulseScale 1.5s ease-in-out infinite' }} align="center">
-              Reaction window: awaiting {typeof reaction.awaiting_seat === 'number' ? seatLabel(reaction.awaiting_seat) : '—'}
-            </Typography>
+            <Paper variant="outlined" sx={{ p: 1, borderColor: '#ef5350', borderWidth: 2, bgcolor: '#ef535012', animation: 'blink 1s ease-in-out infinite' }}>
+              <Typography variant="body2" sx={{ fontWeight: 800 }} align="center">
+                🚫 Reaction: awaiting {typeof reaction.awaiting_seat === 'number' ? seatLabel(reaction.awaiting_seat) : '—'}
+              </Typography>
+              {reaction.card && (
+                <Typography variant="caption" color="text.secondary" align="center" sx={{ display: 'block' }}>
+                  Card played: {reaction.card.emoji || ''} {reaction.card.name || ''}
+                </Typography>
+              )}
+            </Paper>
           )}
 
           {!!prompt && (
@@ -94,8 +104,32 @@ export default function UnstableUnicornsPanel({ snapshot, seatLabel, send, playe
             {b.text}
           </Button>
         ))}
-        {!actionButtons.length && <Typography variant="caption" color="text.secondary">No actions available.</Typography>}
+        {!actionButtons.length && !isDiscardPhase && <Typography variant="caption" color="text.secondary">No actions available.</Typography>}
       </Stack>
+
+      {isDiscardPhase && !!discardButtons.length && (
+        <>
+          <Typography variant="subtitle1" gutterBottom align="center" sx={{ color: '#ef5350', fontWeight: 700 }}>
+            ⚠️ Discard Phase — Select a card to discard
+          </Typography>
+          <Paper variant="outlined" sx={{ p: 1.25, mb: 2, borderColor: '#ef5350', borderWidth: 2 }}>
+            <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center', flexWrap: 'wrap' }}>
+              {discardButtons.map((b, i) => (
+                <Button
+                  key={b.id}
+                  variant="outlined"
+                  color="error"
+                  onClick={() => sendClick(b.id)}
+                  disabled={!b.enabled}
+                  sx={{ animation: `bounceIn 0.35s ease-out ${i * 0.05}s both` }}
+                >
+                  {b.text}
+                </Button>
+              ))}
+            </Box>
+          </Paper>
+        </>
+      )}
 
       <Divider sx={{ mb: 2 }} />
 
