@@ -914,9 +914,20 @@ public class DnDGameSharp : BaseGame
     private readonly List<ScreenFlash> _flashes = new();
     private readonly List<PulseRing> _pulseRings = new();
     private double _animTime;
+    private readonly AmbientSystem _ambient;
+    private readonly LightBeamSystem _lightBeams = LightBeamSystem.ForTheme("dnd");
+    private readonly VignettePulse _vignette = new();
+    private Starfield _starfield;
+    private FloatingIconSystem _floatingIcons = FloatingIconSystem.ForTheme("dnd");
+    private WaveBand _waveBand = WaveBand.ForTheme("dnd");
+    private HeatShimmer _heatShimmer = HeatShimmer.ForTheme("dnd");
 
     // ── Constructor ────────────────────────────────────────────
-    public DnDGameSharp(int w, int h, Renderer renderer) : base(w, h, renderer) { }
+    public DnDGameSharp(int w, int h, Renderer renderer) : base(w, h, renderer)
+    {
+        _ambient = AmbientSystem.ForTheme("dnd", w, h);
+        _starfield = Starfield.ForTheme("dnd", w, h);
+    }
 
     // ── Start game ─────────────────────────────────────────────
     public override void StartGame(List<int> players)
@@ -1766,6 +1777,13 @@ public class DnDGameSharp : BaseGame
         for (int i = _textPops.Count - 1; i >= 0; i--) { _textPops[i].Update(d); if (_textPops[i].Done) _textPops.RemoveAt(i); }
         for (int i = _flashes.Count - 1; i >= 0; i--) { _flashes[i].Update(d); if (_flashes[i].Done) _flashes.RemoveAt(i); }
         for (int i = _pulseRings.Count - 1; i >= 0; i--) { _pulseRings[i].Update(d); if (_pulseRings[i].Done) _pulseRings.RemoveAt(i); }
+        _ambient.Update(d, ScreenW, ScreenH);
+        _lightBeams.Update(d, ScreenW, ScreenH);
+        _vignette.Update(d);
+        _starfield.Update(d);
+        _floatingIcons.Update(d, ScreenW, ScreenH);
+        _waveBand.Update(d);
+        _heatShimmer.Update(d);
     }
 
     public override void Draw(Renderer r, int width, int height, double dt)
@@ -1777,6 +1795,10 @@ public class DnDGameSharp : BaseGame
         }
 
         CardRendering.DrawGameBackground(r, width, height, "dnd");
+        _ambient.Draw(r);
+        _lightBeams.Draw(r, width, height);
+        _starfield.Draw(r);
+        _floatingIcons.Draw(r);
         RainbowTitle.Draw(r, "D&D", width);
 
         string subtitle = _phase switch
@@ -1848,5 +1870,8 @@ public class DnDGameSharp : BaseGame
         foreach (var pr in _pulseRings) pr.Draw(r);
         foreach (var tp in _textPops) tp.Draw(r);
         foreach (var fl in _flashes) fl.Draw(r, width, height);
+        _waveBand.Draw(r, width, height);
+        _heatShimmer.Draw(r, width, height);
+        _vignette.Draw(r, width, height);
     }
 }

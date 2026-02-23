@@ -182,6 +182,13 @@ public class CatanGameSharp : BaseGame
     private readonly List<PulseRing> _pulseRings = new();
     private readonly List<ScreenFlash> _flashes = new();
     private readonly DiceRollAnimation _diceAnim = new(dieSize: 58, gap: 16, rollDuration: 1.2f, showDuration: 3.5f);
+    private readonly AmbientSystem _ambient;
+    private readonly LightBeamSystem _lightBeams = LightBeamSystem.ForTheme("catan");
+    private readonly VignettePulse _vignette = new();
+    private readonly Starfield _starfield;
+    private readonly FloatingIconSystem _floatingIcons = FloatingIconSystem.ForTheme("catan");
+    private readonly WaveBand _waveBand = WaveBand.ForTheme("catan");
+    private readonly HeatShimmer _heatShimmer = HeatShimmer.ForTheme("catan");
     private int? _animPrevTurn;
     private int? _animPrevWinner;
     private double _animFwTimer;
@@ -189,6 +196,8 @@ public class CatanGameSharp : BaseGame
     // ── Constructor ────────────────────────────────────────────
     public CatanGameSharp(int w, int h, Renderer renderer) : base(w, h, renderer)
     {
+        _ambient = AmbientSystem.ForTheme("catan", w, h);
+        _starfield = Starfield.ForTheme("catan", w, h);
         WebUIOnlyPlayerSelect = true;
         BoardOnlyMode = true;
         for (int i = 0; i < 8; i++)
@@ -839,6 +848,13 @@ public class CatanGameSharp : BaseGame
         for (int i = _textPops.Count - 1; i >= 0; i--) { _textPops[i].Update(d); if (_textPops[i].Done) _textPops.RemoveAt(i); }
         for (int i = _pulseRings.Count - 1; i >= 0; i--) { _pulseRings[i].Update(d); if (_pulseRings[i].Done) _pulseRings.RemoveAt(i); }
         for (int i = _flashes.Count - 1; i >= 0; i--) { _flashes[i].Update(d); if (_flashes[i].Done) _flashes.RemoveAt(i); }
+        _ambient.Update(d, ScreenW, ScreenH);
+        _lightBeams.Update(d, ScreenW, ScreenH);
+        _vignette.Update(d);
+        _starfield.Update(d);
+        _floatingIcons.Update(d, ScreenW, ScreenH);
+        _waveBand.Update(d);
+        _heatShimmer.Update(d);
 
         // Turn-change pulse
         var currTurn = _currentTurnSeat;
@@ -921,6 +937,10 @@ public class CatanGameSharp : BaseGame
         if (State == "player_select") { base.Draw(r, width, height, dt); return; }
 
         CardRendering.DrawGameBackground(r, width, height, "catan");
+        _ambient.Draw(r);
+        _lightBeams.Draw(r, width, height);
+        _starfield.Draw(r);
+        _floatingIcons.Draw(r);
         RainbowTitle.Draw(r, "CATAN", width);
 
         string subtitle = State == "playing"
@@ -1121,6 +1141,9 @@ public class CatanGameSharp : BaseGame
         foreach (var pr in _pulseRings) pr.Draw(r);
         foreach (var fl in _flashes) fl.Draw(r, width, height);
         foreach (var tp in _textPops) tp.Draw(r);
+        _waveBand.Draw(r, width, height);
+        _heatShimmer.Draw(r, width, height);
+        _vignette.Draw(r, width, height);
     }
 
     private void DrawSeatInfo(Renderer r, int w, int h)

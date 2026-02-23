@@ -453,6 +453,7 @@ export default function App(): React.ReactElement {
                     size="small"
                   />
                 </Stack>
+                {isSeated && mySeat === 0 && (
                 <Stack direction="row" spacing={2} alignItems="center">
                   <Typography variant="body2" sx={{ whiteSpace: 'nowrap' }}>🔊 Vol</Typography>
                   <Slider
@@ -462,7 +463,7 @@ export default function App(): React.ReactElement {
                     step={5}
                     size="small"
                     valueLabelDisplay="auto"
-                    disabled={!isSeated || status !== 'connected'}
+                    disabled={status !== 'connected'}
                     onChange={(_e, v) => send({ type: 'set_volume', volume: v as number })}
                     sx={{ minWidth: 100, flex: 1 }}
                   />
@@ -470,6 +471,7 @@ export default function App(): React.ReactElement {
                     {audioVolume}%
                   </Typography>
                 </Stack>
+                )}
               </Paper>
             )}
 

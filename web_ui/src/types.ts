@@ -249,16 +249,17 @@ export type Snapshot = {
     discard_count?: number;
     goal_unicorns?: number;
     winner?: number | null;
-    your_hand?: Array<{ idx: number; id: string; name: string; kind: string; emoji?: string; color?: string; playable: boolean }>;
+    your_hand?: Array<{ idx: number; id: string; name: string; kind: string; emoji?: string; color?: string; desc?: string; playable: boolean }>;
     // keys are stringified in JSON
-    stables?: Record<string, Array<{ id: string; name: string; kind: string; emoji?: string; color?: string }>>;
+    stables?: Record<string, Array<{ id: string; name: string; kind: string; emoji?: string; color?: string; desc?: string }>>;
     protected_turns?: Record<string, number>;
     hand_counts?: Record<string, number>;
+    revealed_hands?: Record<string, Array<{ id: string; name: string; kind: string; emoji?: string; color?: string; desc?: string }>>;
     reaction?: {
       actor?: number | null;
-      card?: { id: string; name: string; kind: string; emoji?: string; color?: string };
+      card?: { id: string; name: string; kind: string; emoji?: string; color?: string; desc?: string };
       awaiting_seat?: number | null;
-      stack?: Array<{ id: string; name: string; kind: string; emoji?: string; color?: string }>;
+      stack?: Array<{ id: string; name: string; kind: string; emoji?: string; color?: string; desc?: string }>;
     } | null;
     prompt?: any;
   };

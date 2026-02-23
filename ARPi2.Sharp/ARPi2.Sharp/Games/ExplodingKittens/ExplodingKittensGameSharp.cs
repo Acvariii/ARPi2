@@ -62,16 +62,31 @@ public class ExplodingKittensGameSharp : BaseGame
     private readonly List<TextPopAnim> _textPops = new();
     private readonly List<PulseRing> _pulseRings = new();
     private readonly List<ScreenFlash> _flashes = new();
+    private readonly List<CardShowcaseAnim> _showcases = new();
+    private AmbientSystem _ambient;
+    private LightBeamSystem _lightBeams = LightBeamSystem.ForTheme("exploding_kittens");
+    private VignettePulse _vignette = new();
+    private Starfield _starfield;
+    private FloatingIconSystem _floatingIcons = FloatingIconSystem.ForTheme("exploding_kittens");
+    private WaveBand _waveBand = WaveBand.ForTheme("exploding_kittens");
+    private HeatShimmer _heatShimmer = HeatShimmer.ForTheme("exploding_kittens");
     private string _lastEvent = "";
     private double _lastEventAge = 999.0;
     private int? _animPrevTurn;
     private int? _animPrevWinner;
     private double _animFwTimer;
+    private float _screenShakeX, _screenShakeY;
+    private float _screenShakeTimer;
+    private float _emberTimer;
 
     // Simple card-fly animations (draw/play)
     private readonly List<CardAnim> _anims = new();
 
-    public ExplodingKittensGameSharp(int w, int h, Renderer renderer) : base(w, h, renderer) { }
+    public ExplodingKittensGameSharp(int w, int h, Renderer renderer) : base(w, h, renderer)
+    {
+        _ambient = AmbientSystem.ForTheme("exploding_kittens", w, h);
+        _starfield = Starfield.ForTheme("exploding_kittens", w, h);
+    }
 
     // ─── Current turn seat ─────────────────────────────────────
     private int? CurrentTurnSeat
@@ -331,6 +346,19 @@ public class ExplodingKittensGameSharp : BaseGame
                 _flashes.Add(new ScreenFlash(acol, 35, 0.3f));
                 _textPops.Add(new TextPopAnim(actionLabel, cx, cy - 40, acol, fontSize: 28));
                 _pulseRings.Add(new PulseRing(cx, cy, acol, maxRadius: 70, duration: 0.6f));
+
+                // Showcase the played card face-up at center
+                var emoji2 = card.Kind switch
+                {
+                    "ATK" => "\u2694\ufe0f", "SKIP" => "\u23ed\ufe0f", "SHUF" => "\ud83d\udd00",
+                    "FUT" => "\ud83d\udd2e", "FAV" => "\ud83c\udf81", _ => "\ud83d\ude3a",
+                };
+                var seatPos = SeatAnchor(seat, ScreenW, ScreenH);
+                _showcases.Add(new CardShowcaseAnim(cx, cy + 30, emoji2, "",
+                    accentColor: acol, corner: card.Kind,
+                    cardW: 110, cardH: 156,
+                    flyDuration: 0.3f, holdDuration: 1.2f, fadeDuration: 0.35f,
+                    src: (seatPos.x, seatPos.y)));
             }
             catch { }
 
@@ -528,8 +556,18 @@ public class ExplodingKittensGameSharp : BaseGame
                 {
                     int cx = ScreenW / 2, cy = ScreenH / 2;
                     _flashes.Add(new ScreenFlash((60, 200, 100), 60, 0.4f));
+                    _flashes.Add(new ScreenFlash((180, 255, 180), 30, 0.15f));
                     _textPops.Add(new TextPopAnim($"\U0001f9f0 DEFUSED! {PlayerName(seat)}", cx, cy - 40, (80, 230, 130), fontSize: 30));
-                    _particles.EmitSparkle(cx, cy, (80, 230, 130), 22);
+                    _particles.EmitSparkle(cx, cy, (80, 230, 130), 30);
+                    _particles.EmitSparkle(cx, cy, (200, 255, 200), 15);
+                    _pulseRings.Add(new PulseRing(cx, cy, (80, 230, 130), maxRadius: Math.Min(ScreenW, ScreenH) / 4, duration: 0.6f));
+                    // Cascade sparkles from top
+                    for (int sp = 0; sp < 6; sp++)
+                    {
+                        float sx = cx + (float)(Rng.NextDouble() * 200 - 100);
+                        _particles.Emit(sx, cy - 60, (120, 255, 160), count: 3, speed: 40f, gravity: 80f,
+                            life: 1.2f, radius: 2.5f);
+                    }
                 }
                 catch { }
             }
@@ -564,8 +602,13 @@ public class ExplodingKittensGameSharp : BaseGame
         {
             int cx = ScreenW / 2, cy = ScreenH / 2;
             _flashes.Add(new ScreenFlash((255, 80, 30), 80, 0.5f));
+            _flashes.Add(new ScreenFlash((255, 255, 200), 130, 0.15f)); // bright initial flash
             _textPops.Add(new TextPopAnim($"\U0001f4a5 KABOOM! {PlayerName(seat)}", cx, cy - 50, (255, 90, 40), fontSize: 36));
-            for (int i = 0; i < 6; i++)
+            _pulseRings.Add(new PulseRing(cx, cy, (255, 120, 0), maxRadius: Math.Min(ScreenW, ScreenH) / 3, duration: 0.9f));
+            _pulseRings.Add(new PulseRing(cx, cy, (255, 60, 0), maxRadius: Math.Min(ScreenW, ScreenH) / 4, duration: 0.6f));
+            // Screen shake
+            _screenShakeTimer = 0.8f;
+            for (int i = 0; i < 8; i++)
             {
                 _particles.EmitFirework(
                     cx + Rng.Next(-140, 141), cy + Rng.Next(-90, 91),
@@ -797,6 +840,14 @@ public class ExplodingKittensGameSharp : BaseGame
         for (int i = _textPops.Count - 1; i >= 0; i--) { _textPops[i].Update(d); if (_textPops[i].Done) _textPops.RemoveAt(i); }
         for (int i = _pulseRings.Count - 1; i >= 0; i--) { _pulseRings[i].Update(d); if (_pulseRings[i].Done) _pulseRings.RemoveAt(i); }
         for (int i = _flashes.Count - 1; i >= 0; i--) { _flashes[i].Update(d); if (_flashes[i].Done) _flashes.RemoveAt(i); }
+        for (int i = _showcases.Count - 1; i >= 0; i--) { _showcases[i].Update(d, _particles); if (_showcases[i].Done) _showcases.RemoveAt(i); }
+        _ambient.Update((float)d, ScreenW, ScreenH);
+        _lightBeams.Update((float)d, ScreenW, ScreenH);
+        _vignette.Update((float)d);
+        _starfield.Update((float)d);
+        _floatingIcons.Update((float)d, ScreenW, ScreenH);
+        _waveBand.Update((float)d);
+        _heatShimmer.Update((float)d);
 
         // Card fly animations
         for (int i = _anims.Count - 1; i >= 0; i--)
@@ -804,6 +855,29 @@ public class ExplodingKittensGameSharp : BaseGame
             _anims[i].Elapsed += d;
             if (_anims[i].Elapsed - _anims[i].Delay >= _anims[i].Duration)
                 _anims.RemoveAt(i);
+        }
+
+        // Screen shake decay
+        if (_screenShakeTimer > 0)
+        {
+            _screenShakeTimer -= d;
+            float intensity = _screenShakeTimer * 12f;
+            _screenShakeX = (float)(Rng.NextDouble() * 2 - 1) * intensity;
+            _screenShakeY = (float)(Rng.NextDouble() * 2 - 1) * intensity;
+        }
+        else
+        {
+            _screenShakeX = 0; _screenShakeY = 0;
+        }
+
+        // Ambient embers floating up from bottom
+        _emberTimer += d;
+        if (_emberTimer > 0.4f && State == "playing" && _winner == null)
+        {
+            _emberTimer -= 0.4f;
+            float ex = (float)(Rng.NextDouble() * ScreenW);
+            _particles.Emit(ex, ScreenH + 10, (180, 80, 20), count: 1, speed: 30f, gravity: -60f,
+                life: 2.5f, radius: 2f);
         }
 
         // Turn change pulse
@@ -848,8 +922,15 @@ public class ExplodingKittensGameSharp : BaseGame
     {
         if (State == "player_select") { base.Draw(r, width, height, dt); return; }
 
+        // Apply screen shake offset
+        int shX = (int)_screenShakeX, shY = (int)_screenShakeY;
+
         CardRendering.DrawGameBackground(r, width, height, "exploding_kittens");
-        int cx = width / 2, cy = height / 2;
+        _ambient.Draw(r);
+        _lightBeams.Draw(r, width, height);
+        _starfield.Draw(r);
+        _floatingIcons.Draw(r);
+        int cx = width / 2 + shX, cy = height / 2 + shY;
 
         // Title
         RainbowTitle.Draw(r, "EXPLODING KITTENS", width);
@@ -914,11 +995,18 @@ public class ExplodingKittensGameSharp : BaseGame
         foreach (var a in _anims)
             DrawAnim(r, a);
 
+        // Showcases
+        foreach (var sc in _showcases)
+            sc.Draw(r);
+
         // Animation layers
         _particles.Draw(r);
         foreach (var pr in _pulseRings) pr.Draw(r);
         foreach (var fl in _flashes) fl.Draw(r, width, height);
         foreach (var tp in _textPops) tp.Draw(r);
+        _waveBand.Draw(r, width, height);
+        _heatShimmer.Draw(r, width, height);
+        _vignette.Draw(r, width, height);
     }
 
     // ─── Drawing helpers ───────────────────────────────────────
@@ -958,23 +1046,7 @@ public class ExplodingKittensGameSharp : BaseGame
     private void DrawCardFace(Renderer r, (int x, int y, int w, int h) rect, string text, (int, int, int) faceColor)
     {
         string t = (text ?? "").Trim().ToUpperInvariant();
-
-        // Emoji + title mapping
-        string emoji = "\U0001f63a";
-        string title = t;
-        switch (t)
-        {
-            case "EK":   emoji = "\U0001f4a3\U0001f63c"; title = "EXPLODING"; break;
-            case "DEF":  emoji = "\U0001f9ef";           title = "DEFUSE"; break;
-            case "ATK":  emoji = "\u2694";               title = "ATTACK"; break;
-            case "SKIP": emoji = "\u23ed";               title = "SKIP"; break;
-            case "SHUF": emoji = "\U0001f500";           title = "SHUFFLE"; break;
-            case "FUT":  emoji = "\U0001f52e";           title = "FUTURE"; break;
-            case "FAV":  emoji = "\U0001f381";           title = "FAVOR"; break;
-            case "NOPE": emoji = "\U0001f6ab";           title = "NOPE"; break;
-        }
-
-        CardRendering.DrawEmojiCard(r, rect, emoji, title, accentRgb: faceColor, corner: string.IsNullOrEmpty(t) ? "EK" : t);
+        CardRendering.DrawEKCard(r, rect, t);
     }
 
     private void DrawDiscard(Renderer r, (int x, int y, int w, int h) rect)

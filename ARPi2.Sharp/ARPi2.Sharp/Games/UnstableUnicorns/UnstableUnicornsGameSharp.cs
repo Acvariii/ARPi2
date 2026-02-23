@@ -22,13 +22,14 @@ public class UUCardDef
     public string Emoji { get; }
     public string Color { get; }
     public int Count { get; }
+    public string Desc { get; }
     public Dictionary<string, JsonElement> Effect { get; }
 
     public UUCardDef(string id, string name, string kind, string emoji, string color, int count,
-                     Dictionary<string, JsonElement> effect)
+                     Dictionary<string, JsonElement> effect, string desc = "")
     {
         Id = id; Name = name; Kind = kind; Emoji = emoji; Color = color; Count = count;
-        Effect = effect;
+        Effect = effect; Desc = desc;
     }
 
     public string EffectType => Effect.TryGetValue("type", out var v) ? v.GetString() ?? "NONE" : "NONE";
@@ -62,14 +63,14 @@ public class UnstableUnicornsGameSharp : BaseGame
     private int _currentPlayerIdx;
     private string _turnPhase = "begin"; // begin|action|discard|reaction|prompt
     private bool _actionTaken;
+    private int _forcedDiscardCount; // e.g. Good Deal forces discarding 1 card of choice
 
-    // Reaction window (Neigh stack)
+    // Reaction window (Neigh stack) — simultaneous: all non-actor players choose at once
     private bool _reactionActive;
     private int? _reactionActor;
     private string? _reactionCardId;
     private Dictionary<string, object?>? _reactionTarget;
-    private List<int> _reactionOrder = new();
-    private int _reactionIdx;
+    private HashSet<int> _reactionPending = new();   // seats that haven't responded yet
     private List<string> _reactionStack = new();
 
     // Prompting (target selection etc.)
@@ -78,6 +79,10 @@ public class UnstableUnicornsGameSharp : BaseGame
     // Win
     private int? _winner;
     private int _goalUnicorns = 7;
+
+    // Unicorn Lasso tracking
+    private string? _lassoStolenCard;
+    private int _lassoStolenFrom = -1;
 
     // Buttons per player
     private readonly Dictionary<int, Dictionary<string, (string Text, bool Enabled)>> _buttons = new();
@@ -89,6 +94,13 @@ public class UnstableUnicornsGameSharp : BaseGame
     private readonly List<TextPopAnim> _textPops = new();
     private readonly List<PulseRing> _pulseRings = new();
     private readonly List<ScreenFlash> _flashes = new();
+    private AmbientSystem _ambient;
+    private readonly LightBeamSystem _lightBeams = LightBeamSystem.ForTheme("unstable_unicorns");
+    private readonly VignettePulse _vignette = new();
+    private Starfield _starfield;
+    private readonly FloatingIconSystem _floatingIcons = FloatingIconSystem.ForTheme("unstable_unicorns");
+    private readonly WaveBand _waveBand = WaveBand.ForTheme("unstable_unicorns");
+    private readonly HeatShimmer _heatShimmer = HeatShimmer.ForTheme("unstable_unicorns");
     private readonly Dictionary<int, (int X, int Y)> _zoneCenters = new();
     private int? _animPrevTurn;
     private bool _animPrevReaction;
@@ -107,6 +119,8 @@ public class UnstableUnicornsGameSharp : BaseGame
 
     public UnstableUnicornsGameSharp(int w, int h, Renderer renderer) : base(w, h, renderer)
     {
+        _ambient = AmbientSystem.ForTheme("unstable_unicorns", w, h);
+        _starfield = Starfield.ForTheme("unstable_unicorns", w, h);
         LoadCardSets(includeExpansions: true);
         RebuildButtons();
     }
@@ -226,8 +240,9 @@ public class UnstableUnicornsGameSharp : BaseGame
                             foreach (var prop in noneDoc.RootElement.EnumerateObject())
                                 effect[prop.Name] = prop.Value.Clone();
                         }
+                        string desc = raw.TryGetProperty("desc", out var dEl) ? dEl.GetString() ?? "" : "";
 
-                        _cards[cid] = new UUCardDef(cid, name, kind, emoji, color, count, effect);
+                        _cards[cid] = new UUCardDef(cid, name, kind, emoji, color, count, effect, desc);
                     }
                     catch { /* skip bad card */ }
                 }
@@ -361,15 +376,282 @@ public class UnstableUnicornsGameSharp : BaseGame
 
         _turnPhase = "begin";
         _actionTaken = false;
+        _forcedDiscardCount = 0;
+
+        // ─── Beginning-of-turn stable effects ──────────────
+        ProcessBeginningOfTurnEffects(s);
 
         int drawN = 1 + Math.Max(0, DrawBonus(s));
         DrawToHand(s, drawN);
         _turnPhase = (_hands.GetValueOrDefault(s)?.Count ?? 0) > HandLimit(s) ? "discard" : "action";
     }
 
+    /// <summary>Process all beginning-of-turn card effects for the active player.</summary>
+    private void ProcessBeginningOfTurnEffects(int seat)
+    {
+        var stable = _stables.GetValueOrDefault(seat);
+        if (stable == null) return;
+        bool blinded = HasBlindingLight(seat);
+
+        // Iterate a copy since effects may modify stable
+        var stableSnapshot = stable.ToList();
+        foreach (var cid in stableSnapshot)
+        {
+            // Skip if the card was removed from stable by a previous effect this turn
+            if (!stable.Contains(cid)) continue;
+            var c = _cards.GetValueOrDefault(cid);
+            if (c == null) continue;
+            var typ = c.EffectType;
+
+            // Blinding Light suppresses unicorn effects
+            if (blinded && c.Kind is "unicorn" or "baby_unicorn") continue;
+
+            // ── Sadistic Ritual (forced): sacrifice a unicorn, draw 1 ──
+            if (typ == "PASSIVE_SADISTIC")
+            {
+                var unicornIdxs = new List<int>();
+                for (int i = 0; i < stable.Count; i++)
+                {
+                    var ck = _cards.GetValueOrDefault(stable[i])?.Kind ?? "";
+                    if (ck is "baby_unicorn" or "unicorn") unicornIdxs.Add(i);
+                }
+                if (unicornIdxs.Count > 0)
+                {
+                    int ri = unicornIdxs[Rng.Next(unicornIdxs.Count)];
+                    TrySacrificeStableCard(seat, ri);
+                    DrawToHand(seat, 1);
+                }
+            }
+
+            // ── Extremely Fertile Unicorn: discard a card → get baby unicorn ──
+            if (typ == "PASSIVE_FERTILE")
+            {
+                var hand = _hands.GetValueOrDefault(seat);
+                if (hand != null && hand.Count > 0)
+                {
+                    int ri = Rng.Next(hand.Count);
+                    _discardPile.Add(hand[ri]);
+                    hand.RemoveAt(ri);
+                    AddToStable(seat, "baby_unicorn");
+                }
+            }
+
+            // ── Zombie Unicorn: discard a unicorn-kind card → rescue unicorn from discard ──
+            if (typ == "PASSIVE_ZOMBIE")
+            {
+                var hand = _hands.GetValueOrDefault(seat);
+                if (hand != null)
+                {
+                    var handUnicornIdxs = new List<int>();
+                    for (int i = 0; i < hand.Count; i++)
+                    {
+                        var ck = _cards.GetValueOrDefault(hand[i])?.Kind ?? "";
+                        if (ck is "baby_unicorn" or "unicorn") handUnicornIdxs.Add(i);
+                    }
+                    if (handUnicornIdxs.Count > 0)
+                    {
+                        int ri = handUnicornIdxs[Rng.Next(handUnicornIdxs.Count)];
+                        _discardPile.Add(hand[ri]);
+                        hand.RemoveAt(ri);
+                        // Rescue a random unicorn from discard
+                        var discUnicornIdxs = new List<int>();
+                        for (int i = 0; i < _discardPile.Count; i++)
+                        {
+                            var ck = _cards.GetValueOrDefault(_discardPile[i])?.Kind ?? "";
+                            if (ck is "baby_unicorn" or "unicorn") discUnicornIdxs.Add(i);
+                        }
+                        if (discUnicornIdxs.Count > 0)
+                        {
+                            int di = discUnicornIdxs[Rng.Next(discUnicornIdxs.Count)];
+                            var rescued = _discardPile[di];
+                            _discardPile.RemoveAt(di);
+                            AddToStable(seat, rescued);
+                        }
+                    }
+                }
+            }
+
+            // ── Rhinocorn: destroy random unicorn from any opponent → each other player discards ──
+            if (typ == "PASSIVE_RHINOCORN")
+            {
+                // Pick a random opponent with unicorns
+                var opponents = ActivePlayers.Where(p => p != seat).ToList();
+                var withUnicorns = opponents.Where(p =>
+                {
+                    var st = _stables.GetValueOrDefault(p, new List<string>());
+                    return st.Any(ci => (_cards.GetValueOrDefault(ci)?.Kind ?? "") is "baby_unicorn" or "unicorn");
+                }).ToList();
+                if (withUnicorns.Count > 0)
+                {
+                    int t = withUnicorns[Rng.Next(withUnicorns.Count)];
+                    var tStable = _stables[t];
+                    var uIdxs = new List<int>();
+                    for (int i = 0; i < tStable.Count; i++)
+                    {
+                        var ck = _cards.GetValueOrDefault(tStable[i])?.Kind ?? "";
+                        if (ck is "baby_unicorn" or "unicorn") uIdxs.Add(i);
+                    }
+                    if (uIdxs.Count > 0)
+                    {
+                        int ui = uIdxs[Rng.Next(uIdxs.Count)];
+                        TryDestroyStableCard(t, ui);
+                        // Each other player discards 1
+                        foreach (var op in ActivePlayers)
+                        {
+                            if (op == seat) continue;
+                            var h = _hands.GetValueOrDefault(op);
+                            if (h != null && h.Count > 0)
+                            {
+                                int hi = Rng.Next(h.Count);
+                                _discardPile.Add(h[hi]);
+                                h.RemoveAt(hi);
+                            }
+                        }
+                        try { EmitDestroyFx(t); } catch { }
+                    }
+                }
+            }
+
+            // ── Glitter Bomb: sacrifice a card from your stable → destroy a card in another stable ──
+            if (typ == "PASSIVE_GLITTER_BOMB")
+            {
+                if (stable.Count > 1) // need at least 1 card + the glitter bomb itself
+                {
+                    // Sacrifice a random card (but not the Glitter Bomb itself)
+                    var sacrificeIdxs = new List<int>();
+                    for (int i = 0; i < stable.Count; i++)
+                    {
+                        if (stable[i] != cid) sacrificeIdxs.Add(i);
+                    }
+                    if (sacrificeIdxs.Count > 0)
+                    {
+                        int si = sacrificeIdxs[Rng.Next(sacrificeIdxs.Count)];
+                        TrySacrificeStableCard(seat, si);
+
+                        // Destroy a random card from a random opponent's stable
+                        var opponents = ActivePlayers.Where(p => p != seat).ToList();
+                        var withCards = opponents.Where(p => (_stables.GetValueOrDefault(p)?.Count ?? 0) > 0).ToList();
+                        if (withCards.Count > 0)
+                        {
+                            int t = withCards[Rng.Next(withCards.Count)];
+                            var tStable = _stables[t];
+                            if (tStable.Count > 0)
+                            {
+                                int di = Rng.Next(tStable.Count);
+                                TryDestroyStableCard(t, di);
+                                try { EmitDestroyFx(t); } catch { }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── Summoning Ritual: sacrifice 2 cards → rescue unicorn from discard ──
+            if (typ == "PASSIVE_SUMMONING")
+            {
+                // Need at least 2 other cards in stable to sacrifice
+                int otherCount = stable.Count(ci => ci != cid);
+                if (otherCount >= 2)
+                {
+                    // Sacrifice 2 random cards (not the summoning ritual itself)
+                    for (int d = 0; d < 2; d++)
+                    {
+                        var sacIdxs = new List<int>();
+                        for (int i = 0; i < stable.Count; i++)
+                        {
+                            if (stable[i] != cid) sacIdxs.Add(i);
+                        }
+                        if (sacIdxs.Count > 0)
+                        {
+                            int si = sacIdxs[Rng.Next(sacIdxs.Count)];
+                            TrySacrificeStableCard(seat, si);
+                        }
+                    }
+                    // Rescue a random unicorn from discard
+                    var discUnicornIdxs = new List<int>();
+                    for (int i = 0; i < _discardPile.Count; i++)
+                    {
+                        var ck = _cards.GetValueOrDefault(_discardPile[i])?.Kind ?? "";
+                        if (ck is "baby_unicorn" or "unicorn") discUnicornIdxs.Add(i);
+                    }
+                    if (discUnicornIdxs.Count > 0)
+                    {
+                        int ri = discUnicornIdxs[Rng.Next(discUnicornIdxs.Count)];
+                        var rescued = _discardPile[ri];
+                        _discardPile.RemoveAt(ri);
+                        AddToStable(seat, rescued);
+                    }
+                }
+            }
+
+            // ── Unicorn Lasso: steal a random unicorn, return at end of turn ──
+            if (typ == "PASSIVE_LASSO")
+            {
+                var opponents = ActivePlayers.Where(p => p != seat).ToList();
+                var withUnicorns = opponents.Where(p =>
+                {
+                    var st = _stables.GetValueOrDefault(p, new List<string>());
+                    return st.Any(ci => (_cards.GetValueOrDefault(ci)?.Kind ?? "") is "baby_unicorn" or "unicorn");
+                }).ToList();
+                if (withUnicorns.Count > 0)
+                {
+                    int t = withUnicorns[Rng.Next(withUnicorns.Count)];
+                    var tStable = _stables[t];
+                    var uIdxs = new List<int>();
+                    for (int i = 0; i < tStable.Count; i++)
+                    {
+                        var ck = _cards.GetValueOrDefault(tStable[i])?.Kind ?? "";
+                        if (ck is "baby_unicorn" or "unicorn") uIdxs.Add(i);
+                    }
+                    if (uIdxs.Count > 0)
+                    {
+                        int ui = uIdxs[Rng.Next(uIdxs.Count)];
+                        var stolen = tStable[ui];
+                        tStable.RemoveAt(ui);
+                        TriggerBarbedWire(t); // left source
+                        AddToStable(seat, stolen);
+                        _lassoStolenCard = stolen;
+                        _lassoStolenFrom = t;
+                        try { EmitStealFx(seat, t); } catch { }
+                    }
+                }
+            }
+        }
+
+        // Enforce Tiny Stable after beginning-of-turn effects
+        EnforceTinyStable();
+        CheckWin();
+    }
+
     private void EndTurn()
     {
         if (ActivePlayers.Count == 0) return;
+
+        // Unicorn Lasso: return stolen unicorn at end of turn
+        if (_lassoStolenCard != null && _lassoStolenFrom >= 0)
+        {
+            var seat = CurrentTurnSeat;
+            if (seat is int s)
+            {
+                var myStable = _stables.GetValueOrDefault(s);
+                if (myStable != null)
+                {
+                    int li = myStable.IndexOf(_lassoStolenCard);
+                    if (li >= 0)
+                    {
+                        myStable.RemoveAt(li);
+                        TriggerBarbedWire(s); // unicorn leaving
+                        if (ActivePlayers.Contains(_lassoStolenFrom))
+                            AddToStable(_lassoStolenFrom, _lassoStolenCard);
+                        else
+                            _discardPile.Add(_lassoStolenCard);
+                    }
+                }
+            }
+            _lassoStolenCard = null;
+            _lassoStolenFrom = -1;
+        }
+
         _currentPlayerIdx = (_currentPlayerIdx + 1) % ActivePlayers.Count;
         _prompt = null;
         ClearReaction();
@@ -409,6 +691,18 @@ public class UnstableUnicornsGameSharp : BaseGame
 
     private int UnicornCount(int seat)
     {
+        // Check for Pandamonium downgrade — unicorns don't count
+        bool hasPanda = false;
+        int extraUnicorns = 0;
+        foreach (var cid in _stables.GetValueOrDefault(seat, new List<string>()))
+        {
+            var c = _cards.GetValueOrDefault(cid);
+            if (c == null) continue;
+            if (c.EffectType == "PASSIVE_PANDAMONIUM") hasPanda = true;
+            if (c.EffectType == "PASSIVE_EXTRA_UNICORN") extraUnicorns += c.EffectInt("amount");
+        }
+        if (hasPanda) return Math.Max(0, extraUnicorns);
+
         int count = 0;
         foreach (var cid in _stables.GetValueOrDefault(seat, new List<string>()))
         {
@@ -416,7 +710,156 @@ public class UnstableUnicornsGameSharp : BaseGame
             if (kind is "baby_unicorn" or "unicorn")
                 count++;
         }
-        return count;
+        return count + extraUnicorns;
+    }
+
+    /// <summary>Check if a player has the "Yay" (PASSIVE_CANNOT_DESTROY) upgrade in their stable.</summary>
+    private bool HasCannotDestroy(int seat)
+    {
+        foreach (var cid in _stables.GetValueOrDefault(seat, new List<string>()))
+        {
+            var c = _cards.GetValueOrDefault(cid);
+            if (c != null && c.EffectType == "PASSIVE_CANNOT_DESTROY") return true;
+        }
+        return false;
+    }
+
+    /// <summary>Check if a player has Blinding Light (all unicorns treated as basic, no effects).</summary>
+    private bool HasBlindingLight(int seat)
+    {
+        foreach (var cid in _stables.GetValueOrDefault(seat, new List<string>()))
+            if (cid.StartsWith("blinding_light")) return true;
+        return false;
+    }
+
+    /// <summary>Check if any player owns Queen Bee. Returns the owner seat or -1.</summary>
+    private int QueenBeeOwner()
+    {
+        foreach (var s in ActivePlayers)
+        {
+            if (HasBlindingLight(s)) continue; // Blinding Light neutralises unicorn abilities
+            foreach (var cid in _stables.GetValueOrDefault(s, new List<string>()))
+                if (cid.StartsWith("queen_bee_unicorn")) return s;
+        }
+        return -1;
+    }
+
+    /// <summary>Check if a player has Unicorn Phoenix in stable (and it's not suppressed by Blinding Light).</summary>
+    private bool HasPhoenix(int seat)
+    {
+        if (HasBlindingLight(seat)) return false;
+        foreach (var cid in _stables.GetValueOrDefault(seat, new List<string>()))
+            if (cid.StartsWith("unicorn_phoenix")) return true;
+        return false;
+    }
+
+    /// <summary>Check if a player has Black Knight Unicorn in stable (and it's not suppressed by Blinding Light).</summary>
+    private bool HasBlackKnight(int seat)
+    {
+        if (HasBlindingLight(seat)) return false;
+        foreach (var cid in _stables.GetValueOrDefault(seat, new List<string>()))
+            if (cid.StartsWith("black_knight_unicorn")) return true;
+        return false;
+    }
+
+    /// <summary>Check if a player has Barbed Wire in their stable.</summary>
+    private bool HasBarbedWire(int seat)
+    {
+        foreach (var cid in _stables.GetValueOrDefault(seat, new List<string>()))
+            if (cid.StartsWith("barbed_wire")) return true;
+        return false;
+    }
+
+    /// <summary>Trigger Barbed Wire: each player discards 1 random card.</summary>
+    private void TriggerBarbedWire(int seat)
+    {
+        if (!HasBarbedWire(seat)) return;
+        foreach (var s in ActivePlayers)
+        {
+            var h = _hands.GetValueOrDefault(s);
+            if (h != null && h.Count > 0)
+            {
+                int ri = Rng.Next(h.Count);
+                _discardPile.Add(h[ri]);
+                h.RemoveAt(ri);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Try to destroy a card in a player's stable. Handles Yay, Black Knight substitution,
+    /// and Unicorn Phoenix indestructibility. Returns true if the card was actually removed.
+    /// </summary>
+    private bool TryDestroyStableCard(int seat, int idx)
+    {
+        var stable = _stables.GetValueOrDefault(seat);
+        if (stable == null || idx < 0 || idx >= stable.Count) return false;
+        if (HasCannotDestroy(seat)) return false;
+
+        var cardId = stable[idx];
+        var ck = _cards.GetValueOrDefault(cardId)?.Kind ?? "";
+
+        // Unicorn Phoenix: indestructible — stays in stable
+        if (cardId.StartsWith("unicorn_phoenix") && !HasBlindingLight(seat))
+            return false;
+
+        // Black Knight: if a unicorn would be destroyed and we have Black Knight, sacrifice BK instead
+        if (ck is "baby_unicorn" or "unicorn" && HasBlackKnight(seat))
+        {
+            int bkIdx = stable.FindIndex(c => c.StartsWith("black_knight_unicorn"));
+            if (bkIdx >= 0 && bkIdx != idx)
+            {
+                _discardPile.Add(stable[bkIdx]);
+                stable.RemoveAt(bkIdx);
+                TriggerBarbedWire(seat); // BK leaving = unicorn leaving
+                return false; // original card stays
+            }
+        }
+
+        _discardPile.Add(stable[idx]);
+        stable.RemoveAt(idx);
+
+        // Barbed Wire trigger if a unicorn left
+        if (ck is "baby_unicorn" or "unicorn")
+            TriggerBarbedWire(seat);
+
+        return true;
+    }
+
+    /// <summary>
+    /// Try to sacrifice a card from a player's stable. Handles Unicorn Phoenix.
+    /// Returns true if the card was actually removed.
+    /// </summary>
+    private bool TrySacrificeStableCard(int seat, int idx)
+    {
+        var stable = _stables.GetValueOrDefault(seat);
+        if (stable == null || idx < 0 || idx >= stable.Count) return false;
+
+        var cardId = stable[idx];
+        var ck = _cards.GetValueOrDefault(cardId)?.Kind ?? "";
+
+        // Unicorn Phoenix: cannot be sacrificed — stays in stable
+        if (cardId.StartsWith("unicorn_phoenix") && !HasBlindingLight(seat))
+            return false;
+
+        _discardPile.Add(stable[idx]);
+        stable.RemoveAt(idx);
+
+        // Barbed Wire trigger if a unicorn left
+        if (ck is "baby_unicorn" or "unicorn")
+            TriggerBarbedWire(seat);
+
+        return true;
+    }
+
+    /// <summary>Add a unicorn to a player's stable and trigger Barbed Wire if applicable.</summary>
+    private void AddToStable(int seat, string cardId)
+    {
+        if (!_stables.ContainsKey(seat)) _stables[seat] = new List<string>();
+        _stables[seat].Add(cardId);
+        var ck = _cards.GetValueOrDefault(cardId)?.Kind ?? "";
+        if (ck is "baby_unicorn" or "unicorn")
+            TriggerBarbedWire(seat);
     }
 
     private void CheckWin()
@@ -452,8 +895,7 @@ public class UnstableUnicornsGameSharp : BaseGame
         _reactionCardId = cardId;
         _reactionTarget = target != null ? new Dictionary<string, object?>(target) : new();
         _reactionStack = new List<string>();
-        _reactionOrder = ActivePlayers.Where(s => s != actor).ToList();
-        _reactionIdx = 0;
+        _reactionPending = new HashSet<int>(ActivePlayers.Where(s => s != actor));
         _turnPhase = "reaction";
     }
 
@@ -463,19 +905,8 @@ public class UnstableUnicornsGameSharp : BaseGame
         _reactionActor = null;
         _reactionCardId = null;
         _reactionTarget = null;
-        _reactionOrder = new List<int>();
-        _reactionIdx = 0;
+        _reactionPending = new HashSet<int>();
         _reactionStack = new List<string>();
-    }
-
-    private int? CurrentReactionSeat
-    {
-        get
-        {
-            if (!_reactionActive) return null;
-            if (_reactionIdx < 0 || _reactionIdx >= _reactionOrder.Count) return null;
-            return _reactionOrder[_reactionIdx];
-        }
     }
 
     private bool ReactionResultAllowsResolve()
@@ -517,8 +948,8 @@ public class UnstableUnicornsGameSharp : BaseGame
         // Reaction buttons
         if (_reactionActive)
         {
-            var expected = CurrentReactionSeat;
-            if (seat != expected) return;
+            // Simultaneous: any pending (non-actor) player can respond
+            if (!_reactionPending.Contains(seat)) return;
 
             // Allow clicking a Neigh/Super Neigh card directly from hand (uu_play:{idx})
             if (buttonId.StartsWith("uu_play:"))
@@ -561,10 +992,17 @@ public class UnstableUnicornsGameSharp : BaseGame
                     _flashes.Add(new ScreenFlash((220, 30, 30), 110, 0.38f));
                     _textPops.Add(new TextPopAnim("NEIGH! \ud83d\udeab", cx, cy - 20,
                         (255, 80, 60), fontSize: 52, duration: 1.6f));
+
+                    // A Neigh/Super Neigh immediately ends the reaction window
+                    _reactionPending.Clear();
+                    ResolveReaction();
+                    RebuildButtons();
+                    return;
                 }
 
-                _reactionIdx++;
-                if (_reactionIdx >= _reactionOrder.Count)
+                // Pass: mark this player as responded
+                _reactionPending.Remove(seat);
+                if (_reactionPending.Count == 0)
                     ResolveReaction();
                 RebuildButtons();
             }
@@ -582,6 +1020,20 @@ public class UnstableUnicornsGameSharp : BaseGame
                 if (!int.TryParse(buttonId.AsSpan(17), out int t)) return;
                 _prompt["target_player"] = t;
                 AdvancePrompt();
+                RebuildButtons();
+            }
+            else if (buttonId == "uu_cancel_prompt")
+            {
+                // Cancel the prompt: return the card to hand and reset
+                var cardId = PromptString("card_id");
+                if (!string.IsNullOrEmpty(cardId))
+                {
+                    if (!_hands.ContainsKey(actor)) _hands[actor] = new List<string>();
+                    _hands[actor].Add(cardId);
+                }
+                _prompt = null;
+                _turnPhase = "action";
+                _actionTaken = false;
                 RebuildButtons();
             }
             else if (buttonId.StartsWith("uu_target_card:"))
@@ -630,7 +1082,8 @@ public class UnstableUnicornsGameSharp : BaseGame
             if (!isTurn || _turnPhase != "discard") return;
             if (!int.TryParse(buttonId.AsSpan(11), out int idx)) return;
             DiscardFromHand(seat, idx);
-            if ((_hands.GetValueOrDefault(seat)?.Count ?? 0) <= HandLimit(seat))
+            if (_forcedDiscardCount > 0) _forcedDiscardCount--;
+            if (_forcedDiscardCount <= 0 && (_hands.GetValueOrDefault(seat)?.Count ?? 0) <= HandLimit(seat))
                 _turnPhase = "action";
             RebuildButtons();
             return;
@@ -732,6 +1185,62 @@ public class UnstableUnicornsGameSharp : BaseGame
         _discardPile.Add(cid);
     }
 
+    /// <summary>Check if a player has Broken Stable in their stable (cannot play upgrades).</summary>
+    private bool HasBrokenStable(int seat)
+    {
+        foreach (var cid in _stables.GetValueOrDefault(seat, new List<string>()))
+        {
+            if (cid.StartsWith("broken_stable")) return true;
+        }
+        return false;
+    }
+
+    /// <summary>Count raw unicorns (baby + unicorn kind) in stable, ignoring extras.</summary>
+    private int RawUnicornCount(int seat)
+    {
+        int count = 0;
+        foreach (var cid in _stables.GetValueOrDefault(seat, new List<string>()))
+        {
+            var kind = _cards.GetValueOrDefault(cid)?.Kind ?? "";
+            if (kind is "baby_unicorn" or "unicorn") count++;
+        }
+        return count;
+    }
+
+    /// <summary>Check if a player has Tiny Stable in their stable.</summary>
+    private bool HasTinyStable(int seat)
+    {
+        foreach (var cid in _stables.GetValueOrDefault(seat, new List<string>()))
+        {
+            if (cid.StartsWith("tiny_stable")) return true;
+        }
+        return false;
+    }
+
+    /// <summary>Enforce Tiny Stable: if a player has Tiny Stable and more than 5 unicorns, sacrifice excess randomly.</summary>
+    private void EnforceTinyStable()
+    {
+        foreach (var s in ActivePlayers)
+        {
+            if (!HasTinyStable(s)) continue;
+            while (RawUnicornCount(s) > 5)
+            {
+                var stable = _stables.GetValueOrDefault(s);
+                if (stable == null) break;
+                var unicornIdxs = new List<int>();
+                for (int i = 0; i < stable.Count; i++)
+                {
+                    var kind = _cards.GetValueOrDefault(stable[i])?.Kind ?? "";
+                    if (kind is "baby_unicorn" or "unicorn") unicornIdxs.Add(i);
+                }
+                if (unicornIdxs.Count == 0) break;
+                int ri = unicornIdxs[Rng.Next(unicornIdxs.Count)];
+                _discardPile.Add(stable[ri]);
+                stable.RemoveAt(ri);
+            }
+        }
+    }
+
     private void PlayFromHand(int seat, int idx)
     {
         if (State != "playing") return;
@@ -759,16 +1268,42 @@ public class UnstableUnicornsGameSharp : BaseGame
         if (_turnPhase != "action") return;
         if (_actionTaken) return;
 
+        // Broken Stable: cannot play upgrade cards
+        if (c.Kind == "upgrade" && HasBrokenStable(seat)) return;
+
+        // Queen Bee: basic unicorns cannot enter any other player's stable
+        if (c.Kind == "unicorn" && c.Id.StartsWith("unicorn_basic"))
+        {
+            int qbOwner = QueenBeeOwner();
+            if (qbOwner >= 0 && qbOwner != seat) return; // blocked by Queen Bee
+        }
+
         // Remove from hand now
         hand.RemoveAt(idx);
 
         // Some effects require target selection
         var effectType = c.EffectType;
-        if (effectType is "STEAL_UNICORN" or "DESTROY_STABLE_CARD" or "SWAP_UNICORN")
+        bool needsPickPlayerAndCard = effectType is "STEAL_UNICORN" or "DESTROY_STABLE_CARD" or "SWAP_UNICORN"
+            or "DESTROY_UD_ON_ENTER" or "RETURN_CARD_ON_ENTER" or "RETURN_UNICORN_ON_ENTER" or "DESTROY_UNICORN_ON_ENTER"
+            or "BACK_KICK" or "TARGETED_DESTRUCTION" or "STEAL_ON_ENTER";
+        bool needsPickPlayerOnly = effectType is "FORCE_DISCARD_ON_ENTER" or "BLATANT_THIEVERY"
+            or "TWO_FOR_ONE" or "TRADE_HANDS" or "SHRINK_RAY";
+
+        // Downgrades always target another player's stable
+        if (c.Kind == "downgrade" && !needsPickPlayerAndCard && !needsPickPlayerOnly)
+            needsPickPlayerOnly = true;
+
+        if (needsPickPlayerAndCard || needsPickPlayerOnly)
         {
+            // Downgrades that weren't already in a specific targeting flow use generic kind
+            string promptKind = effectType;
+            if (c.Kind == "downgrade" && effectType is not "FORCE_DISCARD_ON_ENTER"
+                and not "BLATANT_THIEVERY" and not "TWO_FOR_ONE" and not "TRADE_HANDS")
+                promptKind = "DOWNGRADE_TARGET";
+
             _prompt = new Dictionary<string, object?>
             {
-                ["kind"] = effectType,
+                ["kind"] = promptKind,
                 ["actor"] = seat,
                 ["card_id"] = cid,
                 ["step"] = "pick_player",
@@ -806,13 +1341,51 @@ public class UnstableUnicornsGameSharp : BaseGame
 
         if (kind == "PLAY") return;
 
-        if (kind is "STEAL_UNICORN" or "DESTROY_STABLE_CARD" or "SWAP_UNICORN")
+        if (kind is "STEAL_UNICORN" or "DESTROY_STABLE_CARD" or "SWAP_UNICORN"
+            or "DESTROY_UD_ON_ENTER" or "RETURN_CARD_ON_ENTER" or "RETURN_UNICORN_ON_ENTER" or "DESTROY_UNICORN_ON_ENTER"
+            or "BACK_KICK" or "TARGETED_DESTRUCTION" or "STEAL_ON_ENTER"
+            or "FORCE_DISCARD_ON_ENTER" or "BLATANT_THIEVERY" or "TWO_FOR_ONE" or "TRADE_HANDS"
+            or "DOWNGRADE_TARGET" or "SHRINK_RAY")
         {
             var step = PromptString("step");
             if (step == "pick_player")
             {
                 int t = PromptInt("target_player", -1);
-                if (t < 0 || !ActivePlayers.Contains(t) || t == actor) return;
+                if (t < 0 || !ActivePlayers.Contains(t)) return;
+
+                // Effects that must NOT target self (steal/swap/thievery/downgrades etc.)
+                bool noSelfTarget = kind is "STEAL_UNICORN" or "SWAP_UNICORN"
+                    or "FORCE_DISCARD_ON_ENTER" or "BLATANT_THIEVERY"
+                    or "TWO_FOR_ONE" or "TRADE_HANDS" or "DOWNGRADE_TARGET"
+                    or "STEAL_ON_ENTER" or "SHRINK_RAY";
+                if (noSelfTarget && t == actor) return;
+
+                // Types that only need pick_player go straight to reaction
+                bool pickPlayerOnly = kind is "FORCE_DISCARD_ON_ENTER" or "BLATANT_THIEVERY"
+                    or "TWO_FOR_ONE" or "TRADE_HANDS" or "DOWNGRADE_TARGET" or "SHRINK_RAY";
+                if (pickPlayerOnly)
+                {
+                    OpenReaction(actor: actor, cardId: cardId,
+                        target: new Dictionary<string, object?>
+                        {
+                            ["target_player"] = t,
+                            ["kind"] = kind,
+                        });
+                    _prompt = new Dictionary<string, object?>
+                    {
+                        ["kind"] = "PLAY",
+                        ["actor"] = actor,
+                        ["card_id"] = cardId,
+                        ["target"] = new Dictionary<string, object?>
+                        {
+                            ["target_player"] = t,
+                            ["kind"] = kind,
+                        },
+                    };
+                    _turnPhase = "reaction";
+                    return;
+                }
+
                 _prompt["step"] = "pick_card";
                 return;
             }
@@ -823,13 +1396,24 @@ public class UnstableUnicornsGameSharp : BaseGame
                 int idx = PromptInt("target_index", -1);
                 var targetStable = _stables.GetValueOrDefault(t, new List<string>()).ToList();
 
-                if (kind is "STEAL_UNICORN" or "SWAP_UNICORN")
+                if (kind is "STEAL_UNICORN" or "SWAP_UNICORN" or "DESTROY_UNICORN_ON_ENTER" or "STEAL_ON_ENTER"
+                    or "RETURN_UNICORN_ON_ENTER")
                 {
                     var eligible = new List<int>();
                     for (int i = 0; i < targetStable.Count; i++)
                     {
                         var ck = _cards.GetValueOrDefault(targetStable[i])?.Kind ?? "";
                         if (ck is "baby_unicorn" or "unicorn") eligible.Add(i);
+                    }
+                    if (!eligible.Contains(idx)) return;
+                }
+                else if (kind is "DESTROY_UD_ON_ENTER" or "TARGETED_DESTRUCTION")
+                {
+                    var eligible = new List<int>();
+                    for (int i = 0; i < targetStable.Count; i++)
+                    {
+                        var ck = _cards.GetValueOrDefault(targetStable[i])?.Kind ?? "";
+                        if (ck is "upgrade" or "downgrade") eligible.Add(i);
                     }
                     if (!eligible.Contains(idx)) return;
                 }
@@ -885,11 +1469,18 @@ public class UnstableUnicornsGameSharp : BaseGame
         if (resolves)
             ResolveEffect(actor, cardId, target);
 
-        // Discard the played card either way
-        _discardPile.Add(cardId);
+        // Enforce Tiny Stable limit for all players after effect resolution
+        EnforceTinyStable();
+
+        // Discard the played card (magic/instant cards); stable cards were already placed by ResolveEffect
+        var rc = _cards.GetValueOrDefault(cardId);
+        bool placedInStable = rc != null && rc.Kind is not "magic" and not "instant" and not "neigh" and not "super_neigh";
+        if (!placedInStable)
+            _discardPile.Add(cardId);
         _prompt = null;
         _actionTaken = true;
-        _turnPhase = (_hands.GetValueOrDefault(actor)?.Count ?? 0) > HandLimit(actor) ? "discard" : "action";
+        bool needsDiscard = (_hands.GetValueOrDefault(actor)?.Count ?? 0) > HandLimit(actor) || _forcedDiscardCount > 0;
+        _turnPhase = needsDiscard ? "discard" : "action";
         CheckWin();
     }
 
@@ -901,12 +1492,287 @@ public class UnstableUnicornsGameSharp : BaseGame
 
         if (typ == "NONE") return;
 
+        // ─── Cards that go into the player's stable ──────
         if (typ == "STABLE_ADD_SELF")
         {
-            if (!_stables.ContainsKey(actor)) _stables[actor] = new List<string>();
-            _stables[actor].Add(cardId);
+            // Downgrades go into the target player's stable
+            int stableSeat = actor;
+            if (c.Kind == "downgrade" && target != null)
+            {
+                int ts = TargetInt(target, "target_player", -1);
+                if (ts >= 0 && ActivePlayers.Contains(ts)) stableSeat = ts;
+            }
+            if (!_stables.ContainsKey(stableSeat)) _stables[stableSeat] = new List<string>();
+            _stables[stableSeat].Add(cardId);
             return;
         }
+
+        // ─── Passive stable effects (upgrade/downgrade) ──
+        if (typ is "PASSIVE_DRAW_BONUS" or "PASSIVE_HAND_LIMIT_MOD"
+            or "PASSIVE_EXTRA_UNICORN" or "PASSIVE_PANDAMONIUM"
+            or "PASSIVE_CANNOT_DESTROY"
+            or "PASSIVE_BLACK_KNIGHT" or "PASSIVE_QUEEN_BEE"
+            or "PASSIVE_PHOENIX" or "PASSIVE_FERTILE"
+            or "PASSIVE_RHINOCORN" or "PASSIVE_ZOMBIE"
+            or "PASSIVE_GLITTER_BOMB" or "PASSIVE_LASSO"
+            or "PASSIVE_SUMMONING" or "PASSIVE_SADISTIC"
+            or "PASSIVE_BLINDING_LIGHT" or "PASSIVE_BARBED_WIRE")
+        {
+            // Downgrades go into the target player's stable; upgrades into the actor's
+            int stableSeat = actor;
+            if (c.Kind == "downgrade" && target != null)
+            {
+                int ts = TargetInt(target, "target_player", -1);
+                if (ts >= 0 && ActivePlayers.Contains(ts)) stableSeat = ts;
+            }
+            if (!_stables.ContainsKey(stableSeat)) _stables[stableSeat] = new List<string>();
+            _stables[stableSeat].Add(cardId);
+            return;
+        }
+
+        // ─── Enter-stable effects (unicorn goes to stable + bonus) ──
+
+        // Blinding Light suppression: if actor has Blinding Light, unicorn enter effects are neutralised
+        bool enterSuppressed = (c.Kind is "unicorn" or "baby_unicorn") && HasBlindingLight(actor);
+
+        if (typ == "DRAW_ON_ENTER")
+        {
+            AddToStable(actor, cardId);
+            if (!enterSuppressed)
+            {
+                int n = c.EffectInt("amount", 1);
+                DrawToHand(actor, Math.Max(0, n));
+            }
+            return;
+        }
+
+        if (typ == "STEAL_RANDOM_ON_ENTER")
+        {
+            AddToStable(actor, cardId);
+            if (!enterSuppressed)
+            {
+                // Steal a random card from a random opponent's hand
+                var opponents = ActivePlayers.Where(s => s != actor).ToList();
+                var withCards = opponents.Where(s => (_hands.GetValueOrDefault(s)?.Count ?? 0) > 0).ToList();
+                if (withCards.Count > 0)
+                {
+                    int t = withCards[Rng.Next(withCards.Count)];
+                    var h = _hands[t];
+                    int ri = Rng.Next(h.Count);
+                    var stolen = h[ri];
+                    h.RemoveAt(ri);
+                    if (!_hands.ContainsKey(actor)) _hands[actor] = new List<string>();
+                    _hands[actor].Add(stolen);
+                    try { EmitStealFx(actor, t); } catch { }
+                }
+            }
+            return;
+        }
+
+        if (typ == "SEARCH_DECK_ON_ENTER")
+        {
+            AddToStable(actor, cardId);
+            if (!enterSuppressed)
+            {
+                // Search draw pile for a card matching criteria
+                string? searchKind = null;
+                string? searchName = null;
+                if (c.Effect.TryGetValue("search_kind", out var skEl))
+                    searchKind = skEl.GetString();
+                if (c.Effect.TryGetValue("search_name", out var snEl))
+                    searchName = snEl.GetString();
+
+                int foundIdx = -1;
+                for (int i = 0; i < _drawPile.Count; i++)
+                {
+                    var dc = _cards.GetValueOrDefault(_drawPile[i]);
+                    if (dc == null) continue;
+                    if (searchKind != null && dc.Kind != searchKind) continue;
+                    if (searchName != null && !dc.Name.Contains(searchName, StringComparison.OrdinalIgnoreCase)) continue;
+                    foundIdx = i;
+                    break;
+                }
+                if (foundIdx >= 0)
+                {
+                    var found = _drawPile[foundIdx];
+                    _drawPile.RemoveAt(foundIdx);
+                    if (!_hands.ContainsKey(actor)) _hands[actor] = new List<string>();
+                    _hands[actor].Add(found);
+                    ShuffleList(_drawPile);
+                    var fname = _cards.GetValueOrDefault(found)?.Name ?? found;
+                    try
+                    {
+                        _textPops.Add(new TextPopAnim($"Found: {fname}!", ScreenW / 2, ScreenH / 2 - 30,
+                            (180, 220, 255), fontSize: 20, duration: 1.6f));
+                    }
+                    catch { }
+                }
+            }
+            return;
+        }
+
+        if (typ == "DRAW_AND_DISCARD_ON_ENTER")
+        {
+            AddToStable(actor, cardId);
+            if (!enterSuppressed)
+            {
+                int drawN = c.EffectInt("draw", 2);
+                int discN = c.EffectInt("discard", 1);
+                DrawToHand(actor, Math.Max(0, drawN));
+                _forcedDiscardCount += Math.Max(0, discN);
+            }
+            return;
+        }
+
+        if (typ == "ALL_DISCARD_ON_ENTER")
+        {
+            AddToStable(actor, cardId);
+            if (!enterSuppressed)
+            {
+                foreach (var s in ActivePlayers)
+                {
+                    if (s == actor) continue;
+                    var h = _hands.GetValueOrDefault(s);
+                    if (h != null && h.Count > 0)
+                    {
+                        int ri = Rng.Next(h.Count);
+                        _discardPile.Add(h[ri]);
+                        h.RemoveAt(ri);
+                    }
+                }
+            }
+            return;
+        }
+
+        if (typ == "FORCE_DISCARD_ON_ENTER")
+        {
+            AddToStable(actor, cardId);
+            if (!enterSuppressed)
+            {
+                int t = TargetInt(target, "target_player", -1);
+                if (ActivePlayers.Contains(t))
+                {
+                    var h = _hands.GetValueOrDefault(t);
+                    if (h != null && h.Count > 0)
+                    {
+                        int ri = Rng.Next(h.Count);
+                        _discardPile.Add(h[ri]);
+                        h.RemoveAt(ri);
+                    }
+                }
+            }
+            return;
+        }
+
+        if (typ == "DESTROY_UD_ON_ENTER")
+        {
+            AddToStable(actor, cardId);
+            if (!enterSuppressed)
+            {
+                int t = TargetInt(target, "target_player", -1);
+                int idx = TargetInt(target, "target_index", -1);
+                if (!ActivePlayers.Contains(t)) return;
+                var src = _stables.GetValueOrDefault(t);
+                if (src == null || idx < 0 || idx >= src.Count) return;
+                var ck = _cards.GetValueOrDefault(src[idx])?.Kind ?? "";
+                if (ck is not ("upgrade" or "downgrade")) return;
+                TryDestroyStableCard(t, idx);
+                try { EmitDestroyFx(t); } catch { }
+            }
+            return;
+        }
+
+        if (typ is "RETURN_CARD_ON_ENTER" or "RETURN_UNICORN_ON_ENTER")
+        {
+            AddToStable(actor, cardId);
+            if (!enterSuppressed)
+            {
+                int t = TargetInt(target, "target_player", -1);
+                int idx = TargetInt(target, "target_index", -1);
+                if (!ActivePlayers.Contains(t)) return;
+                var src = _stables.GetValueOrDefault(t);
+                if (src == null || idx < 0 || idx >= src.Count) return;
+                var moved = src[idx];
+                src.RemoveAt(idx);
+                if (!_hands.ContainsKey(t)) _hands[t] = new List<string>();
+                _hands[t].Add(moved);
+                // Barbed Wire: unicorn left target's stable
+                var mvk = _cards.GetValueOrDefault(moved)?.Kind ?? "";
+                if (mvk is "baby_unicorn" or "unicorn") TriggerBarbedWire(t);
+            }
+            return;
+        }
+
+        if (typ == "DESTROY_UNICORN_ON_ENTER")
+        {
+            AddToStable(actor, cardId);
+            if (!enterSuppressed)
+            {
+                int t = TargetInt(target, "target_player", -1);
+                int idx = TargetInt(target, "target_index", -1);
+                if (!ActivePlayers.Contains(t)) return;
+                var src = _stables.GetValueOrDefault(t);
+                if (src == null || idx < 0 || idx >= src.Count) return;
+                if (TryDestroyStableCard(t, idx))
+                    try { EmitDestroyFx(t); } catch { }
+                // Narwhal Torpedo: sacrifice self after destroying
+                if (cardId.StartsWith("narwhal_torpedo"))
+                {
+                    var myStable = _stables.GetValueOrDefault(actor);
+                    if (myStable != null)
+                    {
+                        int si = myStable.IndexOf(cardId);
+                        if (si >= 0) TrySacrificeStableCard(actor, si);
+                    }
+                }
+            }
+            return;
+        }
+
+        if (typ == "STEAL_ON_ENTER")
+        {
+            AddToStable(actor, cardId);
+            if (!enterSuppressed)
+            {
+                int t = TargetInt(target, "target_player", -1);
+                int idx = TargetInt(target, "target_index", -1);
+                if (!ActivePlayers.Contains(t)) return;
+                if (_protectedTurns.GetValueOrDefault(t, 0) > 0) return;
+                var src = _stables.GetValueOrDefault(t);
+                if (src == null || idx < 0 || idx >= src.Count) return;
+                var moved = src[idx];
+                src.RemoveAt(idx);
+                TriggerBarbedWire(t); // unicorn left target's stable
+                AddToStable(actor, moved);
+                try { EmitStealFx(actor, t); } catch { }
+            }
+            return;
+        }
+
+        if (typ == "RESCUE_FROM_DISCARD")
+        {
+            AddToStable(actor, cardId);
+            if (!enterSuppressed)
+            {
+                // Find a random unicorn in the discard pile and move it to actor's stable
+                var unicornIdxs = new List<int>();
+                for (int i = 0; i < _discardPile.Count; i++)
+                {
+                    var ck = _cards.GetValueOrDefault(_discardPile[i])?.Kind ?? "";
+                    if (ck is "baby_unicorn" or "unicorn") unicornIdxs.Add(i);
+                }
+                if (unicornIdxs.Count > 0)
+                {
+                    int ri = unicornIdxs[Rng.Next(unicornIdxs.Count)];
+                    var rescued = _discardPile[ri];
+                    _discardPile.RemoveAt(ri);
+                    AddToStable(actor, rescued);
+                }
+            }
+            return;
+        }
+
+        // ─── Standard effects ────────────────────────────
 
         if (typ == "DRAW")
         {
@@ -932,8 +1798,9 @@ public class UnstableUnicornsGameSharp : BaseGame
             if (src == null || idx < 0 || idx >= src.Count) return;
             var moved = src[idx];
             src.RemoveAt(idx);
-            if (!_stables.ContainsKey(actor)) _stables[actor] = new List<string>();
-            _stables[actor].Add(moved);
+            TriggerBarbedWire(t); // unicorn left
+            AddToStable(actor, moved);
+            try { EmitStealFx(actor, t); } catch { }
             return;
         }
 
@@ -945,9 +1812,8 @@ public class UnstableUnicornsGameSharp : BaseGame
             if (_protectedTurns.GetValueOrDefault(t, 0) > 0) return;
             var src = _stables.GetValueOrDefault(t);
             if (src == null || idx < 0 || idx >= src.Count) return;
-            var moved = src[idx];
-            src.RemoveAt(idx);
-            _discardPile.Add(moved);
+            if (TryDestroyStableCard(t, idx))
+                try { EmitDestroyFx(t); } catch { }
             return;
         }
 
@@ -974,6 +1840,16 @@ public class UnstableUnicornsGameSharp : BaseGame
             int myI = myUnicornIdxs[Rng.Next(myUnicornIdxs.Count)];
 
             (mine[myI], their[idx]) = (their[idx], mine[myI]);
+            TriggerBarbedWire(actor); // unicorn swap triggers barbed wire
+            TriggerBarbedWire(t);
+            try
+            {
+                int cx = ScreenW / 2, cy = ScreenH / 2;
+                _flashes.Add(new ScreenFlash((180, 120, 255), 40, 0.3f));
+                _pulseRings.Add(new PulseRing(cx, cy, (180, 160, 255), maxRadius: Math.Min(ScreenW, ScreenH) / 5, duration: 0.5f));
+                _textPops.Add(new TextPopAnim("🔄 SWAP!", cx, cy - 30, (200, 180, 255), fontSize: 26));
+            }
+            catch { }
             return;
         }
 
@@ -991,12 +1867,275 @@ public class UnstableUnicornsGameSharp : BaseGame
                 if (unicornIdxs.Count > 0)
                 {
                     int i = unicornIdxs[Rng.Next(unicornIdxs.Count)];
-                    _discardPile.Add(mine[i]);
-                    mine.RemoveAt(i);
+                    TrySacrificeStableCard(actor, i);
                 }
             }
             int n = c.EffectInt("amount");
             DrawToHand(actor, Math.Max(0, n));
+            return;
+        }
+
+        // ─── New magic card effects ──────────────────────
+
+        if (typ == "BACK_KICK")
+        {
+            int t = TargetInt(target, "target_player", -1);
+            int idx = TargetInt(target, "target_index", -1);
+            if (!ActivePlayers.Contains(t)) return;
+            var src = _stables.GetValueOrDefault(t);
+            if (src == null || idx < 0 || idx >= src.Count) return;
+            var moved = src[idx];
+            src.RemoveAt(idx);
+            if (!_hands.ContainsKey(t)) _hands[t] = new List<string>();
+            _hands[t].Add(moved);
+            return;
+        }
+
+        if (typ == "BLATANT_THIEVERY")
+        {
+            int t = TargetInt(target, "target_player", -1);
+            if (!ActivePlayers.Contains(t)) return;
+            var h = _hands.GetValueOrDefault(t);
+            if (h == null || h.Count == 0)
+            {
+                _textPops.Add(new TextPopAnim("No cards to steal!", ScreenW / 2, ScreenH / 2 - 30,
+                    (200, 200, 200), fontSize: 20, duration: 1.4f));
+                return;
+            }
+            int ri = Rng.Next(h.Count);
+            var stolen = h[ri];
+            h.RemoveAt(ri);
+            if (!_hands.ContainsKey(actor)) _hands[actor] = new List<string>();
+            _hands[actor].Add(stolen);
+            var stolenName = _cards.GetValueOrDefault(stolen)?.Name ?? stolen;
+            try
+            {
+                EmitStealFx(actor, t);
+                _textPops.Add(new TextPopAnim($"Stole {stolenName}!", ScreenW / 2, ScreenH / 2 + 20,
+                    (180, 255, 180), fontSize: 20, duration: 1.6f));
+            }
+            catch { }
+            return;
+        }
+
+        if (typ == "CHANGE_OF_LUCK")
+        {
+            var h = _hands.GetValueOrDefault(actor);
+            if (h == null) return;
+            int count = h.Count;
+            foreach (var cid in h) _discardPile.Add(cid);
+            h.Clear();
+            DrawToHand(actor, count);
+            return;
+        }
+
+        if (typ == "GOOD_DEAL")
+        {
+            DrawToHand(actor, 3);
+            // Player must choose 1 card to discard (handled via forced discard phase)
+            _forcedDiscardCount += 1;
+            return;
+        }
+
+        if (typ == "GLITTER_TORNADO")
+        {
+            foreach (var s in ActivePlayers)
+            {
+                var stable = _stables.GetValueOrDefault(s);
+                if (stable == null || stable.Count == 0) continue;
+                int ri = Rng.Next(stable.Count);
+                var returned = stable[ri];
+                stable.RemoveAt(ri);
+                if (!_hands.ContainsKey(s)) _hands[s] = new List<string>();
+                _hands[s].Add(returned);
+            }
+            try
+            {
+                int cx = ScreenW / 2, cy = ScreenH / 2;
+                _flashes.Add(new ScreenFlash((180, 255, 220), 50, 0.35f));
+                _textPops.Add(new TextPopAnim("🌪️ GLITTER TORNADO!", cx, cy - 30, (120, 255, 200), fontSize: 28));
+                for (int sp = 0; sp < 8; sp++)
+                {
+                    float sx = cx + (float)(Rng.NextDouble() * 300 - 150);
+                    float sy = cy + (float)(Rng.NextDouble() * 200 - 100);
+                    _particles.EmitSparkle((int)sx, (int)sy, (150, 255, 220), 6);
+                }
+                _pulseRings.Add(new PulseRing(cx, cy, (120, 255, 180), maxRadius: Math.Min(ScreenW, ScreenH) / 3, duration: 0.6f));
+            }
+            catch { }
+            return;
+        }
+
+        if (typ == "MYSTICAL_VORTEX")
+        {
+            foreach (var s in ActivePlayers)
+            {
+                var h = _hands.GetValueOrDefault(s);
+                if (h != null && h.Count > 0)
+                {
+                    int ri = Rng.Next(h.Count);
+                    _discardPile.Add(h[ri]);
+                    h.RemoveAt(ri);
+                }
+            }
+            _drawPile.AddRange(_discardPile);
+            _discardPile.Clear();
+            ShuffleList(_drawPile);
+            try
+            {
+                int cx = ScreenW / 2, cy = ScreenH / 2;
+                _flashes.Add(new ScreenFlash((80, 60, 180), 70, 0.4f));
+                _textPops.Add(new TextPopAnim("🌀 MYSTICAL VORTEX!", cx, cy - 30, (160, 140, 255), fontSize: 28));
+                _pulseRings.Add(new PulseRing(cx, cy, (130, 100, 255), maxRadius: Math.Min(ScreenW, ScreenH) / 4, duration: 0.7f));
+                _particles.EmitSparkle(cx, cy, (160, 120, 255), 35);
+            }
+            catch { }
+            return;
+        }
+
+        if (typ == "RESET_BUTTON")
+        {
+            foreach (var s in ActivePlayers)
+            {
+                var h = _hands.GetValueOrDefault(s);
+                if (h != null)
+                {
+                    _drawPile.AddRange(h);
+                    h.Clear();
+                }
+            }
+            ShuffleList(_drawPile);
+            foreach (var s in ActivePlayers)
+                DrawToHand(s, 5);
+            try
+            {
+                int cx = ScreenW / 2, cy = ScreenH / 2;
+                _flashes.Add(new ScreenFlash((255, 255, 255), 90, 0.5f));
+                _textPops.Add(new TextPopAnim("🔄 RESET!", cx, cy - 30, (255, 255, 200), fontSize: 32));
+                _pulseRings.Add(new PulseRing(cx, cy, (255, 240, 100), maxRadius: Math.Min(ScreenW, ScreenH) / 3, duration: 0.6f));
+                _particles.EmitSparkle(cx, cy, (255, 255, 180), 40);
+            }
+            catch { }
+            return;
+        }
+
+        if (typ == "SHAKE_UP")
+        {
+            var allCards = new List<string>();
+            foreach (var s in ActivePlayers)
+            {
+                var h = _hands.GetValueOrDefault(s);
+                if (h != null) { allCards.AddRange(h); h.Clear(); }
+            }
+            ShuffleList(allCards);
+            int idx2 = 0;
+            while (idx2 < allCards.Count)
+            {
+                foreach (var s in ActivePlayers)
+                {
+                    if (idx2 >= allCards.Count) break;
+                    if (!_hands.ContainsKey(s)) _hands[s] = new List<string>();
+                    _hands[s].Add(allCards[idx2++]);
+                }
+            }
+            try
+            {
+                int cx = ScreenW / 2, cy = ScreenH / 2;
+                _flashes.Add(new ScreenFlash((255, 200, 100), 55, 0.35f));
+                _textPops.Add(new TextPopAnim("🃏 SHAKE UP!", cx, cy - 30, (255, 220, 130), fontSize: 28));
+                _particles.EmitSparkle(cx, cy, (255, 200, 100), 25);
+            }
+            catch { }
+            return;
+        }
+
+        if (typ == "TARGETED_DESTRUCTION")
+        {
+            int t = TargetInt(target, "target_player", -1);
+            int idx = TargetInt(target, "target_index", -1);
+            if (!ActivePlayers.Contains(t)) return;
+            if (t != actor && _protectedTurns.GetValueOrDefault(t, 0) > 0) return;
+            var src = _stables.GetValueOrDefault(t);
+            if (src == null || idx < 0 || idx >= src.Count) return;
+            var ck = _cards.GetValueOrDefault(src[idx])?.Kind ?? "";
+            if (ck is not ("upgrade" or "downgrade")) return;
+            if (TryDestroyStableCard(t, idx))
+                try { EmitDestroyFx(t); } catch { }
+            return;
+        }
+
+        if (typ == "TWO_FOR_ONE")
+        {
+            // Sacrifice a random card from actor's stable
+            var mine = _stables.GetValueOrDefault(actor);
+            if (mine != null && mine.Count > 0)
+            {
+                int ri = Rng.Next(mine.Count);
+                TrySacrificeStableCard(actor, ri);
+            }
+            // Destroy up to 2 from target's stable
+            int t = TargetInt(target, "target_player", -1);
+            if (!ActivePlayers.Contains(t)) return;
+            var their = _stables.GetValueOrDefault(t);
+            if (their == null) return;
+            for (int d = 0; d < 2 && their.Count > 0; d++)
+            {
+                int ri = Rng.Next(their.Count);
+                TryDestroyStableCard(t, ri);
+            }
+            try { EmitDestroyFx(t); } catch { }
+            return;
+        }
+
+        if (typ == "SHRINK_RAY")
+        {
+            int t = TargetInt(target, "target_player", -1);
+            if (!ActivePlayers.Contains(t)) return;
+            var stable = _stables.GetValueOrDefault(t);
+            if (stable == null) return;
+            // Replace all non-baby unicorns with baby unicorns
+            int replaced = 0;
+            for (int i = stable.Count - 1; i >= 0; i--)
+            {
+                var ck = _cards.GetValueOrDefault(stable[i])?.Kind ?? "";
+                if (ck == "unicorn")
+                {
+                    _discardPile.Add(stable[i]);
+                    stable[i] = "baby_unicorn";
+                    replaced++;
+                }
+            }
+            if (replaced > 0)
+            {
+                try
+                {
+                    int cx = ScreenW / 2, cy = ScreenH / 2;
+                    _flashes.Add(new ScreenFlash((160, 100, 255), 50, 0.35f));
+                    _textPops.Add(new TextPopAnim($"🔫 SHRINK! ({replaced} unicorns)", cx, cy - 30, (180, 140, 255), fontSize: 24));
+                    _particles.EmitSparkle(cx, cy, (200, 160, 255), 20);
+                }
+                catch { }
+            }
+            return;
+        }
+
+        if (typ == "TRADE_HANDS")
+        {
+            int t = TargetInt(target, "target_player", -1);
+            if (!ActivePlayers.Contains(t)) return;
+            var myHand = _hands.GetValueOrDefault(actor, new List<string>());
+            var theirHand = _hands.GetValueOrDefault(t, new List<string>());
+            _hands[actor] = theirHand;
+            _hands[t] = myHand;
+            try
+            {
+                int cx = ScreenW / 2, cy = ScreenH / 2;
+                _flashes.Add(new ScreenFlash((200, 160, 255), 45, 0.3f));
+                _textPops.Add(new TextPopAnim("🤝 TRADE HANDS!", cx, cy - 30, (220, 190, 255), fontSize: 26));
+                _pulseRings.Add(new PulseRing(cx, cy, (190, 160, 255), maxRadius: Math.Min(ScreenW, ScreenH) / 5, duration: 0.5f));
+            }
+            catch { }
+            return;
         }
     }
 
@@ -1007,6 +2146,27 @@ public class UnstableUnicornsGameSharp : BaseGame
         if (v is int i) return i;
         if (v is long l) return (int)l;
         return fallback;
+    }
+
+    // ─── Animation FX helpers ──────────────────────────────────
+
+    private void EmitDestroyFx(int targetSeat)
+    {
+        var pos = _zoneCenters.GetValueOrDefault(targetSeat, (ScreenW / 2, ScreenH / 2));
+        _flashes.Add(new ScreenFlash((220, 50, 50), 60, 0.3f));
+        _particles.EmitSparkle(pos.Item1, pos.Item2, (255, 80, 60), 20);
+        _textPops.Add(new TextPopAnim("💥 DESTROYED!", ScreenW / 2, ScreenH / 2 - 30, (255, 100, 80), fontSize: 26));
+    }
+
+    private void EmitStealFx(int thief, int victim)
+    {
+        var from = _zoneCenters.GetValueOrDefault(victim, (ScreenW / 2, ScreenH / 2));
+        var to = _zoneCenters.GetValueOrDefault(thief, (ScreenW / 2, ScreenH / 2));
+        _flashes.Add(new ScreenFlash((200, 100, 255), 40, 0.25f));
+        _particles.EmitSparkle(from.Item1, from.Item2, (220, 160, 255), 12);
+        _particles.EmitSparkle(to.Item1, to.Item2, (180, 255, 180), 12);
+        _textPops.Add(new TextPopAnim("🦄 STOLEN!", ScreenW / 2, ScreenH / 2 - 30, (220, 180, 255), fontSize: 26));
+        _cardFlips.Add(new CardFlyAnim((from.Item1, from.Item2), (to.Item1, to.Item2), color: SeatColors[thief % SeatColors.Length]));
     }
 
     // ─── Card summary for snapshot ─────────────────────────────
@@ -1021,7 +2181,7 @@ public class UnstableUnicornsGameSharp : BaseGame
             };
         return new Dictionary<string, object?>
         {
-            ["id"] = c.Id, ["name"] = c.Name, ["kind"] = c.Kind, ["emoji"] = c.Emoji, ["color"] = c.Color,
+            ["id"] = c.Id, ["name"] = c.Name, ["kind"] = c.Kind, ["emoji"] = c.Emoji, ["color"] = c.Color, ["desc"] = c.Desc,
         };
     }
 
@@ -1040,13 +2200,21 @@ public class UnstableUnicornsGameSharp : BaseGame
             if (_winner != null) return false;
             if (_reactionActive)
             {
-                if (seat != CurrentReactionSeat) return false;
+                if (!_reactionPending.Contains(seat)) return false;
                 return c.Kind is "neigh" or "super_neigh";
             }
             if (_prompt != null) return false;
             if (c.Kind == "instant") return true;
             if (c.Kind is "neigh" or "super_neigh") return false;
             if (!isTurn || _turnPhase != "action" || _actionTaken) return false;
+            // Broken Stable: cannot play upgrade cards
+            if (c.Kind == "upgrade" && HasBrokenStable(seat)) return false;
+            // Queen Bee: basic unicorns can't enter other players' stables
+            if (c.Kind == "unicorn" && c.Id.StartsWith("unicorn_basic"))
+            {
+                int qbOwner = QueenBeeOwner();
+                if (qbOwner >= 0 && qbOwner != seat) return false;
+            }
             return true;
         }
 
@@ -1064,7 +2232,7 @@ public class UnstableUnicornsGameSharp : BaseGame
             {
                 ["actor"] = _reactionActor,
                 ["card"] = CardSummary(_reactionCardId ?? ""),
-                ["awaiting_seat"] = CurrentReactionSeat,
+                ["awaiting_seats"] = _reactionPending.ToList(),
                 ["stack"] = _reactionStack.Select(cid => CardSummary(cid)).ToList(),
             };
         }
@@ -1089,6 +2257,20 @@ public class UnstableUnicornsGameSharp : BaseGame
         foreach (var s in ActivePlayers)
             handCounts[s.ToString()] = _hands.GetValueOrDefault(s)?.Count ?? 0;
 
+        // Nanny Cam: reveal hands of players who have nanny_cam in their stable (to other players)
+        var revealedHands = new Dictionary<string, object?>();
+        foreach (var s in ActivePlayers)
+        {
+            if (s == seat) continue; // don't include your own hand again
+            var stable = _stables.GetValueOrDefault(s, new List<string>());
+            bool hasNannyCam = stable.Any(cid => cid.StartsWith("nanny_cam"));
+            if (hasNannyCam)
+            {
+                var hand = _hands.GetValueOrDefault(s, new List<string>());
+                revealedHands[s.ToString()] = hand.Select(cid => CardSummary(cid)).ToList();
+            }
+        }
+
         var snap = new Dictionary<string, object?>
         {
             ["state"] = State,
@@ -1104,6 +2286,7 @@ public class UnstableUnicornsGameSharp : BaseGame
             ["stables"] = stablesSnap,
             ["protected_turns"] = protSnap,
             ["hand_counts"] = handCounts,
+            ["revealed_hands"] = revealedHands,
             ["reaction"] = reaction,
             ["prompt"] = promptSnap,
         };
@@ -1135,12 +2318,12 @@ public class UnstableUnicornsGameSharp : BaseGame
 
         if (_winner != null) return;
 
-        // Reaction-only buttons
+        // Reaction-only buttons — simultaneous for all pending players
         if (_reactionActive)
         {
-            var reacting = CurrentReactionSeat;
-            if (reacting is int rs && ActivePlayers.Contains(rs))
+            foreach (var rs in _reactionPending)
             {
+                if (!ActivePlayers.Contains(rs)) continue;
                 var rHand = _hands.GetValueOrDefault(rs, new List<string>());
                 bool canNeigh = rHand.Any(cid => (_cards.GetValueOrDefault(cid)?.Kind ?? "") == "neigh");
                 bool canSuper = rHand.Any(cid => (_cards.GetValueOrDefault(cid)?.Kind ?? "") == "super_neigh");
@@ -1162,24 +2345,43 @@ public class UnstableUnicornsGameSharp : BaseGame
 
                 if (step == "pick_player")
                 {
+                    // Effects that must NOT target self
+                    bool noSelfTarget = kind is "STEAL_UNICORN" or "SWAP_UNICORN"
+                        or "FORCE_DISCARD_ON_ENTER" or "BLATANT_THIEVERY"
+                        or "TWO_FOR_ONE" or "TRADE_HANDS" or "DOWNGRADE_TARGET"
+                        or "STEAL_ON_ENTER" or "SHRINK_RAY";
+                    int targetCount = 0;
                     foreach (var t in ActivePlayers)
                     {
-                        if (t == actor) continue;
+                        if (noSelfTarget && t == actor) continue;
                         _buttons[actor][$"uu_target_player:{t}"] = ($"Target: {PlayerName(t)}", true);
+                        targetCount++;
                     }
+                    // Always allow cancel during targeting to prevent soft-lock
+                    _buttons[actor]["uu_cancel_prompt"] = ("Cancel", true);
                 }
                 else if (step == "pick_card")
                 {
                     int t = PromptInt("target_player", -1);
                     var stable = _stables.GetValueOrDefault(t, new List<string>()).ToList();
                     List<int> eligible;
-                    if (kind is "STEAL_UNICORN" or "SWAP_UNICORN")
+                    if (kind is "STEAL_UNICORN" or "SWAP_UNICORN" or "DESTROY_UNICORN_ON_ENTER" or "STEAL_ON_ENTER"
+                        or "RETURN_UNICORN_ON_ENTER")
                     {
                         eligible = new List<int>();
                         for (int i = 0; i < stable.Count; i++)
                         {
                             var ck = _cards.GetValueOrDefault(stable[i])?.Kind ?? "";
                             if (ck is "baby_unicorn" or "unicorn") eligible.Add(i);
+                        }
+                    }
+                    else if (kind is "DESTROY_UD_ON_ENTER" or "TARGETED_DESTRUCTION")
+                    {
+                        eligible = new List<int>();
+                        for (int i = 0; i < stable.Count; i++)
+                        {
+                            var ck = _cards.GetValueOrDefault(stable[i])?.Kind ?? "";
+                            if (ck is "upgrade" or "downgrade") eligible.Add(i);
                         }
                     }
                     else
@@ -1191,6 +2393,12 @@ public class UnstableUnicornsGameSharp : BaseGame
                     {
                         var label = _cards.GetValueOrDefault(stable[i])?.Name ?? stable[i];
                         _buttons[actor][$"uu_target_card:{t}:{i}"] = ($"Pick: {label}", true);
+                    }
+
+                    // If no eligible cards, show a Cancel button to prevent soft-lock
+                    if (eligible.Count == 0)
+                    {
+                        _buttons[actor]["uu_cancel_prompt"] = ("Cancel (no valid targets)", true);
                     }
                 }
             }
@@ -1224,6 +2432,14 @@ public class UnstableUnicornsGameSharp : BaseGame
             if (c == null) continue;
             if (c.Kind is "neigh" or "super_neigh") continue;
             if (c.Kind != "instant" && _actionTaken) continue;
+            // Broken Stable: cannot play upgrade cards
+            if (c.Kind == "upgrade" && HasBrokenStable(turnSeat)) continue;
+            // Queen Bee: basic unicorns blocked for non-owners
+            if (c.Kind == "unicorn" && c.Id.StartsWith("unicorn_basic"))
+            {
+                int qbOwner = QueenBeeOwner();
+                if (qbOwner >= 0 && qbOwner != turnSeat) continue;
+            }
             _buttons[turnSeat][$"uu_play:{i}"] = ($"Play: {c.Name}", true);
         }
     }
@@ -1240,6 +2456,14 @@ public class UnstableUnicornsGameSharp : BaseGame
         for (int i = _textPops.Count - 1; i >= 0; i--) { _textPops[i].Update(d); if (_textPops[i].Done) _textPops.RemoveAt(i); }
         for (int i = _pulseRings.Count - 1; i >= 0; i--) { _pulseRings[i].Update(d); if (_pulseRings[i].Done) _pulseRings.RemoveAt(i); }
         for (int i = _flashes.Count - 1; i >= 0; i--) { _flashes[i].Update(d); if (_flashes[i].Done) _flashes.RemoveAt(i); }
+
+        _ambient.Update(d, ScreenW, ScreenH);
+        _lightBeams.Update(d, ScreenW, ScreenH);
+        _vignette.Update(d);
+        _starfield.Update(d);
+        _floatingIcons.Update(d, ScreenW, ScreenH);
+        _waveBand.Update(d);
+        _heatShimmer.Update(d);
 
         // Detect turn change
         var currTurn = CurrentTurnSeat;
@@ -1303,6 +2527,10 @@ public class UnstableUnicornsGameSharp : BaseGame
         }
 
         CardRendering.DrawGameBackground(r, width, height, "unstable_unicorns");
+        _ambient.Draw(r);
+        _lightBeams.Draw(r, width, height);
+        _starfield.Draw(r);
+        _floatingIcons.Draw(r);
 
         // Title
         string title = _winner is int w ? $"WINNER: {PlayerName(w)}" : "UNSTABLE UNICORNS";
@@ -1335,11 +2563,32 @@ public class UnstableUnicornsGameSharp : BaseGame
             r.DrawRect((255, 255, 255), (zx, zy, zoneW, zoneH), alpha: 10);
             r.DrawRect((255, 255, 255), (zx, zy, zoneW, zoneH), width: 2, alpha: 40);
 
+            // Near-win glow (6+ unicorns out of 7 needed)
+            int uCount = UnicornCount(s);
+            if (uCount >= _goalUnicorns - 1 && _winner == null)
+            {
+                int glowAlpha = uCount >= _goalUnicorns ? 45 : 25;
+                var glowCol = uCount >= _goalUnicorns ? (255, 215, 0) : (255, 180, 80);
+                r.DrawRect(glowCol, (zx, zy, zoneW, zoneH), alpha: glowAlpha);
+                r.DrawRect(glowCol, (zx, zy, zoneW, zoneH), width: 3, alpha: 120);
+            }
+
+            // Protected shield indicator
+            if (_protectedTurns.GetValueOrDefault(s, 0) > 0)
+            {
+                r.DrawRect((60, 180, 255), (zx, zy, zoneW, zoneH), width: 2, alpha: 80);
+                r.DrawText("🛡️", zx + zoneW - 20, zy + 8, 14, (120, 200, 255), anchorX: "center", anchorY: "top");
+            }
+
             // Player label
             var pcol = GameConfig.PlayerColors[s % GameConfig.PlayerColors.Length];
             bool isTurn = s == CurrentTurnSeat;
             var nameCol = isTurn ? (255, 240, 100) : pcol;
             r.DrawText(PlayerName(s), zx + 6, zy + 6, 13, nameCol, bold: isTurn, anchorX: "left", anchorY: "top");
+
+            // Unicorn count badge
+            string countLabel = $"🦄 {uCount}/{_goalUnicorns}";
+            r.DrawText(countLabel, zx + zoneW - 40, zy + 6, 11, (200, 180, 220), anchorX: "center", anchorY: "top");
 
             // Zone center for animations
             _zoneCenters[s] = (zx + zoneW / 2, zy + zoneH / 2);
@@ -1364,13 +2613,18 @@ public class UnstableUnicornsGameSharp : BaseGame
         foreach (var sc in _showcases) sc.Draw(r);
         foreach (var flash in _flashes) flash.Draw(r, width, height);
         foreach (var pop in _textPops) pop.Draw(r);
+        _waveBand.Draw(r, width, height);
+        _heatShimmer.Draw(r, width, height);
+        _vignette.Draw(r, width, height);
 
         // Reaction overlay
         if (_reactionActive)
         {
             r.DrawRect((0, 0, 0), (0, 0, width, height), alpha: 120);
-            var awaiting = CurrentReactionSeat;
-            string txt = awaiting is int aw ? $"Reaction: {PlayerName(aw)}" : "Reaction...";
+            string names = _reactionPending.Count > 0
+                ? string.Join(", ", _reactionPending.Select(s => PlayerName(s)))
+                : "...";
+            string txt = $"Reaction: {names}";
             r.DrawText(txt, width / 2, height / 2, 34, (245, 245, 245), anchorX: "center", anchorY: "center");
         }
     }
@@ -1380,8 +2634,6 @@ public class UnstableUnicornsGameSharp : BaseGame
         var c = _cards.GetValueOrDefault(cid);
         if (c == null) return;
         var rgb = HexToRgb(c.Color, (140, 140, 140));
-        CardRendering.DrawEmojiCard(r, rect, c.Emoji, "", accentRgb: rgb,
-            corner: c.Kind.Length > 4 ? c.Kind[..4].ToUpperInvariant() : c.Kind.ToUpperInvariant(),
-            maxTitleFontSize: 11);
+        CardRendering.DrawUUCard(r, rect, c.Emoji, c.Name, c.Kind, rgb, c.Desc);
     }
 }

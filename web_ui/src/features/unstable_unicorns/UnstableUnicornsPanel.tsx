@@ -17,6 +17,7 @@ type CardSummary = {
   kind: string;
   emoji?: string;
   color?: string;
+  desc?: string;
   playable?: boolean;
   idx?: number;
 };
@@ -39,6 +40,7 @@ export default function UnstableUnicornsPanel({ snapshot, seatLabel, send, playe
   const stables = (uu.stables || {}) as Record<string, CardSummary[]>;
   const protectedTurns = (uu.protected_turns || {}) as Record<string, number>;
   const handCounts = (uu.hand_counts || {}) as Record<string, number>;
+  const revealedHands = (uu.revealed_hands || {}) as Record<string, CardSummary[]>;
 
   const activePlayers = useMemo(() => {
     const a = Array.isArray(uu.active_players) ? (uu.active_players as number[]) : [];
@@ -77,7 +79,7 @@ export default function UnstableUnicornsPanel({ snapshot, seatLabel, send, playe
           {!!reaction && (
             <Paper variant="outlined" sx={{ p: 1, borderColor: '#ef5350', borderWidth: 2, bgcolor: '#ef535012', animation: 'blink 1s ease-in-out infinite' }}>
               <Typography variant="body2" sx={{ fontWeight: 800 }} align="center">
-                🚫 Reaction: awaiting {typeof reaction.awaiting_seat === 'number' ? seatLabel(reaction.awaiting_seat) : '—'}
+                🚫 Reaction: awaiting {Array.isArray(reaction.awaiting_seats) ? (reaction.awaiting_seats as number[]).map(s => seatLabel(s)).join(', ') : '—'}
               </Typography>
               {reaction.card && (
                 <Typography variant="caption" color="text.secondary" align="center" sx={{ display: 'block' }}>
@@ -152,6 +154,7 @@ export default function UnstableUnicornsPanel({ snapshot, seatLabel, send, playe
                 title={c.name}
                 corner={String(c.kind || '').toUpperCase().slice(0, 4)}
                 accent={c.color}
+                desc={c.desc}
                 enabled={!!c.playable && !snapshot.popup?.active}
                 onClick={() => typeof c.idx === 'number' && sendClick(`uu_play:${c.idx}`)}
                 width={90}
@@ -198,12 +201,40 @@ export default function UnstableUnicornsPanel({ snapshot, seatLabel, send, playe
                     title={c.name}
                     corner={String(c.kind || '').toUpperCase().slice(0, 4)}
                     accent={c.color}
+                    desc={c.desc}
                     enabled={false}
                     width={90}
                   />
                 ))}
                 {!stable.length && <Typography variant="caption" color="text.secondary">Empty stable.</Typography>}
               </Box>
+              {Array.isArray(revealedHands[String(seat)]) && (
+                <Box sx={{ mt: 1.5, p: 1, bgcolor: '#6366f112', border: '1px solid #6366f133', borderRadius: 1 }}>
+                  <Typography variant="caption" sx={{ fontWeight: 700, color: '#6366f1' }} align="center" display="block">
+                    📷 Nanny Cam — Revealed Hand ({(revealedHands[String(seat)] as CardSummary[]).length} cards)
+                  </Typography>
+                  {(revealedHands[String(seat)] as CardSummary[]).length > 0 ? (
+                    <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center', flexWrap: 'wrap', mt: 0.5 }}>
+                      {(revealedHands[String(seat)] as CardSummary[]).map((c, i) => (
+                        <EmojiCardTile
+                          key={`revealed-${seat}-${c.id}-${i}`}
+                          emoji={c.emoji || '🂠'}
+                          title={c.name}
+                          corner={String(c.kind || '').toUpperCase().slice(0, 4)}
+                          accent={c.color}
+                          desc={c.desc}
+                          enabled={false}
+                          width={75}
+                        />
+                      ))}
+                    </Box>
+                  ) : (
+                    <Typography variant="caption" color="text.secondary" align="center" display="block" sx={{ mt: 0.5 }}>
+                      No cards in hand.
+                    </Typography>
+                  )}
+                </Box>
+              )}
             </Paper>
           );
         })}

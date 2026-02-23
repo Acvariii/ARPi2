@@ -123,6 +123,13 @@ public sealed class MonopolyGameSharp : BaseGame
     private readonly List<PulseRing> _pulseRings = new();
     private readonly List<ScreenFlash> _flashes = new();
     private readonly List<CardFlipInPlace> _cardFlips = new();
+    private readonly AmbientSystem _ambient;
+    private readonly LightBeamSystem _lightBeams = LightBeamSystem.ForTheme("monopoly");
+    private readonly VignettePulse _vignette = new();
+    private readonly Starfield _starfield;
+    private readonly FloatingIconSystem _floatingIcons = FloatingIconSystem.ForTheme("monopoly");
+    private readonly WaveBand _waveBand = WaveBand.ForTheme("monopoly");
+    private readonly HeatShimmer _heatShimmer = HeatShimmer.ForTheme("monopoly");
     private bool _animPrevGameOver;
     private float _animFwTimer;
 
@@ -146,6 +153,9 @@ public sealed class MonopolyGameSharp : BaseGame
 
         for (int i = 0; i < 8; i++)
             _players.Add(new MonopolyPlayer(i, GameConfig.PlayerColors[i]));
+
+        _ambient = AmbientSystem.ForTheme("monopoly", w, h);
+        _starfield = Starfield.ForTheme("monopoly", w, h);
 
         CalculateBoardGeometry();
     }
@@ -353,6 +363,13 @@ public sealed class MonopolyGameSharp : BaseGame
         _pulseRings.RemoveAll(a => a.Done);
         foreach (var a in _flashes) a.Update(fdt);
         _flashes.RemoveAll(a => a.Done);
+        _ambient.Update(fdt, ScreenW, ScreenH);
+        _lightBeams.Update(fdt, ScreenW, ScreenH);
+        _vignette.Update(fdt);
+        _starfield.Update(fdt);
+        _floatingIcons.Update(fdt, ScreenW, ScreenH);
+        _waveBand.Update(fdt);
+        _heatShimmer.Update(fdt);
 
         // Winner fireworks
         bool isWin = State == "winner";
@@ -2227,6 +2244,10 @@ public sealed class MonopolyGameSharp : BaseGame
         {
             // Full-screen board, no panels
             CardRendering.DrawGameBackground(r, width, height, "monopoly");
+            _ambient.Draw(r);
+            _lightBeams.Draw(r, width, height);
+            _starfield.Draw(r);
+            _floatingIcons.Draw(r);
             int margin = 10;
             int size = Math.Max(200, Math.Min(width - 2 * margin, height - 2 * margin));
             int bx = margin + (width - 2 * margin - size) / 2;
@@ -2243,6 +2264,10 @@ public sealed class MonopolyGameSharp : BaseGame
 
         // Background
         CardRendering.DrawGameBackground(r, width, height, "monopoly");
+        _ambient.Draw(r);
+        _lightBeams.Draw(r, width, height);
+        _starfield.Draw(r);
+        _floatingIcons.Draw(r);
 
         // Panels
         DrawPanels(r);
@@ -2731,5 +2756,8 @@ public sealed class MonopolyGameSharp : BaseGame
         foreach (var cf in _cardFlips) cf.Draw(r);
         foreach (var fl in _flashes) fl.Draw(r, w, h);
         foreach (var tp in _textPops) tp.Draw(r);
+        _waveBand.Draw(r, w, h);
+        _heatShimmer.Draw(r, w, h);
+        _vignette.Draw(r, w, h);
     }
 }

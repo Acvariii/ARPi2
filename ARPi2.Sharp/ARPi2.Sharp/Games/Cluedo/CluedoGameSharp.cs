@@ -149,6 +149,13 @@ public class CluedoGameSharp : BaseGame
     private readonly List<TextPopAnim> _textPops = new();
     private readonly List<PulseRing> _pulseRings = new();
     private readonly List<ScreenFlash> _flashes = new();
+    private readonly AmbientSystem _ambient;
+    private readonly LightBeamSystem _lightBeams = LightBeamSystem.ForTheme("cluedo");
+    private readonly VignettePulse _vignette = new();
+    private readonly Starfield _starfield;
+    private readonly FloatingIconSystem _floatingIcons = FloatingIconSystem.ForTheme("cluedo");
+    private readonly WaveBand _waveBand = WaveBand.ForTheme("cluedo");
+    private readonly HeatShimmer _heatShimmer = HeatShimmer.ForTheme("cluedo");
     private int? _animPrevTurn;
     private int? _animPrevWinner;
     private double _animFwTimer;
@@ -164,6 +171,8 @@ public class CluedoGameSharp : BaseGame
     {
         WebUIOnlyPlayerSelect = true;
         BoardOnlyMode = true;
+        _ambient = AmbientSystem.ForTheme("cluedo", w, h);
+        _starfield = Starfield.ForTheme("cluedo", w, h);
         EnsureBoard();
         _doors = new Dictionary<(int R, int C), (string Arrow, string RoomName)>(_staticDoors);
         _roomExits = DeepCopyExits(_staticRoomExits);
@@ -1242,6 +1251,13 @@ public class CluedoGameSharp : BaseGame
             _flashes[i].Update((float)dt);
             if (_flashes[i].Done) _flashes.RemoveAt(i);
         }
+        _ambient.Update((float)dt, ScreenW, ScreenH);
+        _lightBeams.Update((float)dt, ScreenW, ScreenH);
+        _vignette.Update((float)dt);
+        _starfield.Update((float)dt);
+        _floatingIcons.Update((float)dt, ScreenW, ScreenH);
+        _waveBand.Update((float)dt);
+        _heatShimmer.Update((float)dt);
 
         // Turn-change pulse
         var currTurn = CurrentTurnSeat;
@@ -1338,6 +1354,10 @@ public class CluedoGameSharp : BaseGame
 
         // Background
         CardRendering.DrawGameBackground(r, width, height, "cluedo");
+        _ambient.Draw(r);
+        _lightBeams.Draw(r, width, height);
+        _starfield.Draw(r);
+        _floatingIcons.Draw(r);
 
         // Title
         RainbowTitle.Draw(r, "CLUEDO", width, y: (int)(height * 0.04), fontSize: 28, charWidth: 22);
@@ -1618,5 +1638,8 @@ public class CluedoGameSharp : BaseGame
         foreach (var pr in _pulseRings) pr.Draw(r);
         foreach (var fl in _flashes) fl.Draw(r, width, height);
         foreach (var tp in _textPops) tp.Draw(r);
+        _waveBand.Draw(r, width, height);
+        _heatShimmer.Draw(r, width, height);
+        _vignette.Draw(r, width, height);
     }
 }

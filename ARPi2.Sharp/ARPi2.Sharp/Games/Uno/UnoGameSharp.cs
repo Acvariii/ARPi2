@@ -63,13 +63,24 @@ public class UnoGameSharp : BaseGame
     private readonly List<PulseRing> _pulseRings = new();
     private readonly List<ScreenFlash> _flashes = new();
     private readonly List<CardFlyAnim> _cardFlies = new();
+    private AmbientSystem _ambient;
+    private readonly LightBeamSystem _lightBeams = LightBeamSystem.ForTheme("uno");
+    private readonly VignettePulse _vignette = new();
+    private Starfield _starfield;
+    private readonly FloatingIconSystem _floatingIcons = FloatingIconSystem.ForTheme("uno");
+    private readonly WaveBand _waveBand = WaveBand.ForTheme("uno");
+    private readonly HeatShimmer _heatShimmer = HeatShimmer.ForTheme("uno");
     private string _lastEvent = "";
     private double _lastEventAge = 999.0;
     private int? _animPrevTurn;
     private int? _animPrevWinner;
     private double _animFwTimer;
 
-    public UnoGameSharp(int w, int h, Renderer renderer) : base(w, h, renderer) { }
+    public UnoGameSharp(int w, int h, Renderer renderer) : base(w, h, renderer)
+    {
+        _ambient = AmbientSystem.ForTheme("uno", w, h);
+        _starfield = Starfield.ForTheme("uno", w, h);
+    }
 
     // ─── Top card & current turn ───────────────────────────────
     private UnoCard? TopCard => _discardPile.Count > 0 ? _discardPile[^1] : null;
@@ -678,6 +689,13 @@ public class UnoGameSharp : BaseGame
         for (int i = _pulseRings.Count - 1; i >= 0; i--) { _pulseRings[i].Update(d); if (_pulseRings[i].Done) _pulseRings.RemoveAt(i); }
         for (int i = _flashes.Count - 1; i >= 0; i--) { _flashes[i].Update(d); if (_flashes[i].Done) _flashes.RemoveAt(i); }
         for (int i = _cardFlies.Count - 1; i >= 0; i--) { _cardFlies[i].Update(d); if (_cardFlies[i].Done) _cardFlies.RemoveAt(i); }
+        _ambient.Update(d, ScreenW, ScreenH);
+        _lightBeams.Update(d, ScreenW, ScreenH);
+        _vignette.Update(d);
+        _starfield.Update(d);
+        _floatingIcons.Update(d, ScreenW, ScreenH);
+        _waveBand.Update(d);
+        _heatShimmer.Update(d);
 
         // Turn change pulse
         var currTurn = CurrentTurnSeat;
@@ -717,6 +735,10 @@ public class UnoGameSharp : BaseGame
         if (State == "player_select") { base.Draw(r, width, height, dt); return; }
 
         CardRendering.DrawGameBackground(r, width, height, "uno");
+        _ambient.Draw(r);
+        _lightBeams.Draw(r, width, height);
+        _starfield.Draw(r);
+        _floatingIcons.Draw(r);
         int cx = width / 2, cy = height / 2;
 
         // Title
@@ -818,6 +840,11 @@ public class UnoGameSharp : BaseGame
             r.DrawRect((0, 0, 0), (20, 74, ew, 22), alpha: 120);
             r.DrawText(_lastEvent, 28, 85, 12, (200, 200, 200), anchorX: "left", anchorY: "center");
         }
+
+        // Vignette on top of animations
+        _waveBand.Draw(r, width, height);
+        _heatShimmer.Draw(r, width, height);
+        _vignette.Draw(r, width, height);
 
         // Text pops on top of everything
         foreach (var tp in _textPops) tp.Draw(r);

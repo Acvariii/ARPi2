@@ -124,8 +124,19 @@ public class BlackjackGameSharp : BaseGame
     private readonly List<ScreenFlash> _flashes = new();
     private readonly List<PulseRing> _pulseRings = new();
     private readonly List<CardFlipInPlace> _cardFlips = new();
+    private readonly AmbientSystem _ambient;
+    private readonly LightBeamSystem _lightBeams = LightBeamSystem.ForTheme("blackjack");
+    private readonly VignettePulse _vignette = new();
+    private readonly Starfield _starfield;
+    private readonly FloatingIconSystem _floatingIcons = FloatingIconSystem.ForTheme("blackjack");
+    private readonly WaveBand _waveBand = WaveBand.ForTheme("blackjack");
+    private readonly HeatShimmer _heatShimmer = HeatShimmer.ForTheme("blackjack");
 
-    public BlackjackGameSharp(int w, int h, Renderer renderer) : base(w, h, renderer) { }
+    public BlackjackGameSharp(int w, int h, Renderer renderer) : base(w, h, renderer)
+    {
+        _ambient = AmbientSystem.ForTheme("blackjack", w, h);
+        _starfield = Starfield.ForTheme("blackjack", w, h);
+    }
 
     // ─── Start game ────────────────────────────────────────────
     public override void StartGame(List<int> players)
@@ -829,6 +840,13 @@ public class BlackjackGameSharp : BaseGame
             _cardFlips[i].Update((float)dt);
             if (_cardFlips[i].Done) _cardFlips.RemoveAt(i);
         }
+        _ambient.Update((float)dt, ScreenW, ScreenH);
+        _lightBeams.Update((float)dt, ScreenW, ScreenH);
+        _vignette.Update((float)dt);
+        _starfield.Update((float)dt);
+        _floatingIcons.Update((float)dt, ScreenW, ScreenH);
+        _waveBand.Update((float)dt);
+        _heatShimmer.Update((float)dt);
     }
 
     public override void Draw(Renderer r, int width, int height, double dt)
@@ -840,6 +858,10 @@ public class BlackjackGameSharp : BaseGame
         }
 
         CardRendering.DrawGameBackground(r, width, height, "blackjack");
+        _ambient.Draw(r);
+        _lightBeams.Draw(r, width, height);
+        _starfield.Draw(r);
+        _floatingIcons.Draw(r);
         int cx = width / 2, cy = height / 2;
 
         // Title
@@ -896,6 +918,9 @@ public class BlackjackGameSharp : BaseGame
         foreach (var pr in _pulseRings) pr.Draw(r);
         foreach (var tp in _textPops) tp.Draw(r);
         foreach (var fl in _flashes) fl.Draw(r, width, height);
+        _waveBand.Draw(r, width, height);
+        _heatShimmer.Draw(r, width, height);
+        _vignette.Draw(r, width, height);
     }
 
     private void DrawHand(Renderer r, BjHand hand, int cx, int y, bool hideSecond)

@@ -263,8 +263,19 @@ public class TexasHoldemGameSharp : BaseGame
     private int? _animPrevTurnSeat;
     private string _animPrevStreet = "";
     private float _animFwTimer;
+    private readonly AmbientSystem _ambient;
+    private readonly LightBeamSystem _lightBeams = LightBeamSystem.ForTheme("texas_holdem");
+    private readonly VignettePulse _vignette = new();
+    private readonly Starfield _starfield;
+    private readonly FloatingIconSystem _floatingIcons = FloatingIconSystem.ForTheme("texas_holdem");
+    private readonly WaveBand _waveBand = WaveBand.ForTheme("texas_holdem");
+    private readonly HeatShimmer _heatShimmer = HeatShimmer.ForTheme("texas_holdem");
 
-    public TexasHoldemGameSharp(int w, int h, Renderer renderer) : base(w, h, renderer) { }
+    public TexasHoldemGameSharp(int w, int h, Renderer renderer) : base(w, h, renderer)
+    {
+        _ambient = AmbientSystem.ForTheme("texas_holdem", w, h);
+        _starfield = Starfield.ForTheme("texas_holdem", w, h);
+    }
 
     // ════════════════════════════════════════════════════════════
     //  Lifecycle
@@ -1061,6 +1072,14 @@ public class TexasHoldemGameSharp : BaseGame
             if (_cardFlies[i].Done) _cardFlies.RemoveAt(i);
         }
 
+        _ambient.Update(fdt, ScreenW, ScreenH);
+        _lightBeams.Update(fdt, ScreenW, ScreenH);
+        _vignette.Update(fdt);
+        _starfield.Update(fdt);
+        _floatingIcons.Update(fdt, ScreenW, ScreenH);
+        _waveBand.Update(fdt);
+        _heatShimmer.Update(fdt);
+
         // Fireworks on new showdown
         if (_lastShowdown != null && !ReferenceEquals(_lastShowdown, _animPrevShowdown))
         {
@@ -1140,6 +1159,10 @@ public class TexasHoldemGameSharp : BaseGame
         }
 
         CardRendering.DrawGameBackground(r, width, height, "texas_holdem");
+        _ambient.Draw(r);
+        _lightBeams.Draw(r, width, height);
+        _starfield.Draw(r);
+        _floatingIcons.Draw(r);
 
         // Title + status
         RainbowTitle.Draw(r, "TEXAS HOLD'EM", width);
@@ -1215,6 +1238,9 @@ public class TexasHoldemGameSharp : BaseGame
         foreach (var cf in _cardFlips) cf.Draw(r);
         foreach (var fl in _flashes) fl.Draw(r, width, height);
         foreach (var tp in _textPops) tp.Draw(r);
+        _waveBand.Draw(r, width, height);
+        _heatShimmer.Draw(r, width, height);
+        _vignette.Draw(r, width, height);
     }
 
     // ── Drawing helpers ────────────────────────────────────────

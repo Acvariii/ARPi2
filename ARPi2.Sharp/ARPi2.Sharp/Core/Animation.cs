@@ -580,3 +580,725 @@ public static class RainbowTitle
         }
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Ambient background animation system — looping, low-key visual effects
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// <summary>A single floating ambient element (mote, star, bubble, etc.).</summary>
+public struct AmbientMote
+{
+    public float X, Y, VX, VY, Life, MaxLife, Radius, Phase;
+    public (int R, int G, int B) Color;
+    public byte Kind; // 0=circle, 1=diamond, 2=star-cross, 3=line-dash
+
+    public bool Alive => Life > 0f;
+    public float Alpha01 => MathF.Min(Life / MaxLife, MathF.Min(1f, (MaxLife - Life) / 0.6f));
+}
+
+/// <summary>
+/// Constantly emits and ticks ambient background motes. Each game creates one
+/// with its own theme. Call Update every frame, Draw after the background but
+/// before game content.
+/// </summary>
+public class AmbientSystem
+{
+    private readonly List<AmbientMote> _motes = new();
+    private readonly Random _rng = new();
+    private float _timer;
+
+    // Config — set once at construction
+    public float EmitInterval = 0.18f;
+    public int MaxMotes = 70;
+    public float MinLife = 3f, MaxLifeVal = 7f;
+    public float MinRadius = 1.5f, MaxRadius = 4f;
+    public float MinSpeed = 8f, MaxSpeed = 30f;
+    public float Gravity;   // positive = down
+    public float Drift;     // horizontal oscillation strength
+    public int BaseAlpha = 35;
+    public (int R, int G, int B)[] Palette = { (255, 255, 255) };
+    public byte[] AllowedKinds = { 0 };
+    public bool EmitFromTop, EmitFromBottom = true, EmitFromSides;
+    public bool RisingOnly;
+
+    /// <summary>Pre-made theme presets.</summary>
+    public static AmbientSystem ForTheme(string theme, int w, int h) => theme switch
+    {
+        "blackjack" or "texas_holdem" => new AmbientSystem
+        {
+            EmitInterval = 0.28f, MaxMotes = 50, MinLife = 4f, MaxLifeVal = 8f,
+            MinRadius = 1f, MaxRadius = 3f, MinSpeed = 6f, MaxSpeed = 18f,
+            Gravity = -4f, Drift = 12f, BaseAlpha = 22,
+            Palette = new[] { (255, 215, 80), (220, 180, 60), (180, 140, 50), (255, 240, 160) },
+            AllowedKinds = new byte[] { 0, 1 }, EmitFromBottom = true, RisingOnly = true,
+        },
+        "catan" => new AmbientSystem
+        {
+            EmitInterval = 0.32f, MaxMotes = 45, MinLife = 5f, MaxLifeVal = 9f,
+            MinRadius = 1.5f, MaxRadius = 3.5f, MinSpeed = 10f, MaxSpeed = 25f,
+            Gravity = 0f, Drift = 18f, BaseAlpha = 20,
+            Palette = new[] { (200, 160, 80), (180, 220, 100), (120, 180, 220), (240, 200, 120) },
+            AllowedKinds = new byte[] { 0, 3 }, EmitFromSides = true,
+        },
+        "cluedo" => new AmbientSystem
+        {
+            EmitInterval = 0.4f, MaxMotes = 35, MinLife = 5f, MaxLifeVal = 10f,
+            MinRadius = 1f, MaxRadius = 2.5f, MinSpeed = 4f, MaxSpeed = 12f,
+            Gravity = -2f, Drift = 6f, BaseAlpha = 18,
+            Palette = new[] { (160, 140, 180), (120, 100, 160), (200, 180, 220), (100, 80, 140) },
+            AllowedKinds = new byte[] { 0 }, EmitFromBottom = true, RisingOnly = true,
+        },
+        "monopoly" => new AmbientSystem
+        {
+            EmitInterval = 0.25f, MaxMotes = 55, MinLife = 3.5f, MaxLifeVal = 7f,
+            MinRadius = 1.5f, MaxRadius = 3f, MinSpeed = 8f, MaxSpeed = 22f,
+            Gravity = 5f, Drift = 15f, BaseAlpha = 18,
+            Palette = new[] { (120, 200, 120), (255, 215, 0), (200, 200, 200), (100, 180, 255) },
+            AllowedKinds = new byte[] { 0, 1 }, EmitFromTop = true,
+        },
+        "risk" => new AmbientSystem
+        {
+            EmitInterval = 0.35f, MaxMotes = 40, MinLife = 4f, MaxLifeVal = 8f,
+            MinRadius = 1f, MaxRadius = 2.5f, MinSpeed = 12f, MaxSpeed = 30f,
+            Gravity = 0f, Drift = 10f, BaseAlpha = 16,
+            Palette = new[] { (200, 80, 80), (80, 120, 200), (200, 200, 80), (180, 180, 180) },
+            AllowedKinds = new byte[] { 0, 2 }, EmitFromSides = true,
+        },
+        "dnd" => new AmbientSystem
+        {
+            EmitInterval = 0.22f, MaxMotes = 55, MinLife = 4f, MaxLifeVal = 8f,
+            MinRadius = 1f, MaxRadius = 3.5f, MinSpeed = 5f, MaxSpeed = 15f,
+            Gravity = -6f, Drift = 8f, BaseAlpha = 25,
+            Palette = new[] { (255, 160, 40), (255, 120, 20), (255, 200, 80), (200, 80, 20) },
+            AllowedKinds = new byte[] { 0, 1 }, EmitFromBottom = true, RisingOnly = true,
+        },
+        "exploding_kittens" => new AmbientSystem
+        {
+            EmitInterval = 0.3f, MaxMotes = 45, MinLife = 3f, MaxLifeVal = 6f,
+            MinRadius = 1.5f, MaxRadius = 3f, MinSpeed = 8f, MaxSpeed = 20f,
+            Gravity = -8f, Drift = 10f, BaseAlpha = 20,
+            Palette = new[] { (255, 100, 40), (255, 160, 20), (255, 60, 20), (200, 50, 10) },
+            AllowedKinds = new byte[] { 0 }, EmitFromBottom = true, RisingOnly = true,
+        },
+        "unstable_unicorns" => new AmbientSystem
+        {
+            EmitInterval = 0.2f, MaxMotes = 60, MinLife = 4f, MaxLifeVal = 8f,
+            MinRadius = 1f, MaxRadius = 3f, MinSpeed = 5f, MaxSpeed = 14f,
+            Gravity = -3f, Drift = 12f, BaseAlpha = 22,
+            Palette = new[] { (200, 150, 255), (255, 180, 220), (150, 200, 255), (255, 255, 180) },
+            AllowedKinds = new byte[] { 0, 1, 2 }, EmitFromBottom = true, RisingOnly = true,
+        },
+        "uno" => new AmbientSystem
+        {
+            EmitInterval = 0.22f, MaxMotes = 55, MinLife = 3f, MaxLifeVal = 7f,
+            MinRadius = 1.5f, MaxRadius = 3.5f, MinSpeed = 10f, MaxSpeed = 28f,
+            Gravity = 0f, Drift = 20f, BaseAlpha = 18,
+            Palette = new[] { (255, 55, 55), (55, 120, 255), (55, 200, 55), (255, 220, 50) },
+            AllowedKinds = new byte[] { 0, 1 }, EmitFromSides = true,
+        },
+        _ => new AmbientSystem(),
+    };
+
+    private int _screenW, _screenH;
+
+    public void Update(float dt, int screenW, int screenH)
+    {
+        _screenW = screenW; _screenH = screenH;
+        _timer += dt;
+
+        // Emit new motes
+        while (_timer >= EmitInterval && _motes.Count < MaxMotes)
+        {
+            _timer -= EmitInterval;
+            EmitOne(screenW, screenH);
+        }
+        if (_timer >= EmitInterval) _timer = 0; // cap
+
+        // Tick existing
+        for (int i = _motes.Count - 1; i >= 0; i--)
+        {
+            var m = _motes[i];
+            m.X += m.VX * dt + Drift * MathF.Sin(m.Phase + m.Life * 0.7f) * dt;
+            m.Y += m.VY * dt;
+            m.VY += Gravity * dt;
+            m.Life -= dt;
+            if (!m.Alive || m.X < -20 || m.X > screenW + 20 || m.Y < -20 || m.Y > screenH + 20)
+                _motes.RemoveAt(i);
+            else
+                _motes[i] = m;
+        }
+    }
+
+    private void EmitOne(int w, int h)
+    {
+        float x, y;
+        if (EmitFromSides && _rng.Next(3) == 0)
+        {
+            x = _rng.Next(2) == 0 ? -5f : w + 5f;
+            y = (float)(_rng.NextDouble() * h);
+        }
+        else if (EmitFromTop && (!EmitFromBottom || _rng.Next(2) == 0))
+        {
+            x = (float)(_rng.NextDouble() * w);
+            y = -5f;
+        }
+        else
+        {
+            x = (float)(_rng.NextDouble() * w);
+            y = h + 5f;
+        }
+
+        float angle = (float)(_rng.NextDouble() * MathF.PI * 2);
+        float spd = MinSpeed + (float)_rng.NextDouble() * (MaxSpeed - MinSpeed);
+        float vx = MathF.Cos(angle) * spd;
+        float vy = MathF.Sin(angle) * spd;
+        if (RisingOnly) vy = -MathF.Abs(vy);
+
+        float life = MinLife + (float)_rng.NextDouble() * (MaxLifeVal - MinLife);
+        float rad = MinRadius + (float)_rng.NextDouble() * (MaxRadius - MinRadius);
+        var col = Palette[_rng.Next(Palette.Length)];
+        byte kind = AllowedKinds[_rng.Next(AllowedKinds.Length)];
+
+        _motes.Add(new AmbientMote
+        {
+            X = x, Y = y, VX = vx, VY = vy,
+            Life = life, MaxLife = life, Radius = rad,
+            Color = col, Kind = kind,
+            Phase = (float)(_rng.NextDouble() * MathF.PI * 2),
+        });
+    }
+
+    public void Draw(Renderer r)
+    {
+        foreach (ref readonly var m in System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_motes))
+        {
+            int a = Math.Clamp((int)(BaseAlpha * m.Alpha01), 0, 255);
+            if (a <= 0) continue;
+            int ix = (int)m.X, iy = (int)m.Y;
+            int ir = Math.Max(1, (int)(m.Radius * (0.5f + 0.5f * m.Alpha01)));
+
+            switch (m.Kind)
+            {
+                case 0: // circle
+                    r.DrawCircle(m.Color, (ix, iy), ir, alpha: a);
+                    break;
+                case 1: // diamond (4 lines)
+                    r.DrawLine(m.Color, (ix, iy - ir), (ix + ir, iy), alpha: a);
+                    r.DrawLine(m.Color, (ix + ir, iy), (ix, iy + ir), alpha: a);
+                    r.DrawLine(m.Color, (ix, iy + ir), (ix - ir, iy), alpha: a);
+                    r.DrawLine(m.Color, (ix - ir, iy), (ix, iy - ir), alpha: a);
+                    break;
+                case 2: // star-cross
+                    r.DrawLine(m.Color, (ix - ir, iy), (ix + ir, iy), alpha: a);
+                    r.DrawLine(m.Color, (ix, iy - ir), (ix, iy + ir), alpha: a);
+                    break;
+                case 3: // horizontal dash
+                    r.DrawLine(m.Color, (ix - ir, iy), (ix + ir, iy), alpha: a);
+                    break;
+            }
+        }
+    }
+}
+
+/// <summary>
+/// Slowly drifting light beams that sweep across the background.
+/// Creates a subtle god-ray / spotlight effect.
+/// </summary>
+public class LightBeamSystem
+{
+    public struct Beam
+    {
+        public float X, Angle, Width, Speed, Alpha, Life, MaxLife;
+        public (int R, int G, int B) Color;
+    }
+
+    private readonly List<Beam> _beams = new();
+    private readonly Random _rng = new();
+    private float _timer;
+
+    public float EmitInterval = 2.5f;
+    public int MaxBeams = 4;
+    public int BaseAlpha = 12;
+    public (int R, int G, int B)[] Palette = { (255, 255, 200) };
+
+    public static LightBeamSystem ForTheme(string theme) => theme switch
+    {
+        "blackjack" or "texas_holdem" => new LightBeamSystem
+        {
+            EmitInterval = 3f, MaxBeams = 3, BaseAlpha = 10,
+            Palette = new[] { (255, 230, 150), (200, 180, 100) },
+        },
+        "catan" => new LightBeamSystem
+        {
+            EmitInterval = 4f, MaxBeams = 2, BaseAlpha = 8,
+            Palette = new[] { (255, 240, 180), (220, 200, 140) },
+        },
+        "cluedo" => new LightBeamSystem
+        {
+            EmitInterval = 5f, MaxBeams = 2, BaseAlpha = 6,
+            Palette = new[] { (180, 160, 220), (140, 120, 200) },
+        },
+        "monopoly" => new LightBeamSystem
+        {
+            EmitInterval = 3.5f, MaxBeams = 3, BaseAlpha = 8,
+            Palette = new[] { (200, 255, 200), (180, 220, 180) },
+        },
+        "risk" => new LightBeamSystem
+        {
+            EmitInterval = 4f, MaxBeams = 2, BaseAlpha = 7,
+            Palette = new[] { (200, 180, 160), (180, 160, 140) },
+        },
+        "dnd" => new LightBeamSystem
+        {
+            EmitInterval = 2f, MaxBeams = 4, BaseAlpha = 12,
+            Palette = new[] { (255, 180, 60), (255, 140, 40), (200, 100, 20) },
+        },
+        "exploding_kittens" => new LightBeamSystem
+        {
+            EmitInterval = 2.5f, MaxBeams = 3, BaseAlpha = 10,
+            Palette = new[] { (255, 120, 40), (255, 80, 20) },
+        },
+        "unstable_unicorns" => new LightBeamSystem
+        {
+            EmitInterval = 2f, MaxBeams = 3, BaseAlpha = 10,
+            Palette = new[] { (200, 160, 255), (180, 140, 240), (255, 200, 255) },
+        },
+        "uno" => new LightBeamSystem
+        {
+            EmitInterval = 2.5f, MaxBeams = 3, BaseAlpha = 9,
+            Palette = new[] { (255, 255, 200), (200, 200, 255) },
+        },
+        _ => new LightBeamSystem(),
+    };
+
+    public void Update(float dt, int screenW, int screenH)
+    {
+        _timer += dt;
+        while (_timer >= EmitInterval && _beams.Count < MaxBeams)
+        {
+            _timer -= EmitInterval;
+            float x = (float)(_rng.NextDouble() * screenW);
+            float angle = -0.3f + (float)_rng.NextDouble() * 0.6f; // near vertical
+            float w = 40 + (float)_rng.NextDouble() * 80;
+            float spd = 15 + (float)_rng.NextDouble() * 25;
+            float life = 4f + (float)_rng.NextDouble() * 5f;
+            _beams.Add(new Beam
+            {
+                X = x, Angle = angle, Width = w, Speed = spd,
+                Alpha = 0, Life = life, MaxLife = life,
+                Color = Palette[_rng.Next(Palette.Length)],
+            });
+        }
+        if (_timer >= EmitInterval) _timer = 0;
+
+        for (int i = _beams.Count - 1; i >= 0; i--)
+        {
+            var b = _beams[i];
+            b.X += b.Speed * dt;
+            b.Life -= dt;
+            // Fade in first 20%, fade out last 30%
+            float p = 1f - b.Life / b.MaxLife; // 0→1 over lifetime
+            b.Alpha = p < 0.2f ? p / 0.2f : (p > 0.7f ? (1f - p) / 0.3f : 1f);
+            if (b.Life <= 0) _beams.RemoveAt(i);
+            else _beams[i] = b;
+        }
+    }
+
+    public void Draw(Renderer r, int screenW, int screenH)
+    {
+        foreach (ref readonly var b in System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_beams))
+        {
+            int a = Math.Clamp((int)(BaseAlpha * b.Alpha), 0, 255);
+            if (a <= 0) continue;
+
+            // Draw as a series of translucent vertical strips
+            int hw = (int)(b.Width / 2);
+            int bx = (int)b.X;
+            for (int dx = -hw; dx <= hw; dx += 3)
+            {
+                float dist = MathF.Abs(dx) / (float)hw;
+                int stripA = (int)(a * (1f - dist * dist));
+                if (stripA <= 0) continue;
+                int sx = bx + dx;
+                r.DrawLine(b.Color, (sx, 0), (sx + (int)(b.Angle * screenH), screenH), alpha: stripA);
+            }
+        }
+    }
+}
+
+/// <summary>
+/// Periodically spawning vignette pulse — a subtle radial darkening/brightening
+/// that breathes at the screen edges.
+/// </summary>
+public class VignettePulse
+{
+    private float _phase;
+    public float Speed = 0.3f;
+    public int DarkAlpha = 30;
+    public (int R, int G, int B) TintColor = (0, 0, 0);
+
+    public void Update(float dt) => _phase += dt * Speed;
+
+    public void Draw(Renderer r, int w, int h)
+    {
+        // Breathing alpha at corners
+        float breath = 0.6f + 0.4f * MathF.Sin(_phase);
+        int a = (int)(DarkAlpha * breath);
+        if (a <= 0) return;
+        int edgeW = w / 5, edgeH = h / 5;
+
+        // Top/bottom edge darkening
+        r.DrawRect(TintColor, (0, 0, w, edgeH), alpha: a);
+        r.DrawRect(TintColor, (0, h - edgeH, w, edgeH), alpha: a);
+        // Left/right edge darkening (narrower)
+        r.DrawRect(TintColor, (0, edgeH, edgeW / 2, h - edgeH * 2), alpha: a * 2 / 3);
+        r.DrawRect(TintColor, (w - edgeW / 2, edgeH, edgeW / 2, h - edgeH * 2), alpha: a * 2 / 3);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Starfield — twinkling background dots that fade in and out
+// ═══════════════════════════════════════════════════════════════
+
+public class Starfield
+{
+    private struct Star
+    {
+        public float X, Y, Phase, Speed, Radius;
+        public (int R, int G, int B) Color;
+    }
+
+    private readonly Star[] _stars;
+
+    public Starfield(int count, int w, int h, (int R, int G, int B)[]? palette = null)
+    {
+        var rng = new Random(42);
+        palette ??= new[] { (255, 255, 255), (200, 220, 255), (255, 230, 200) };
+        _stars = new Star[count];
+        for (int i = 0; i < count; i++)
+        {
+            _stars[i] = new Star
+            {
+                X = rng.Next(w),
+                Y = rng.Next(h),
+                Phase = (float)(rng.NextDouble() * MathF.Tau),
+                Speed = 0.4f + (float)rng.NextDouble() * 1.2f,
+                Radius = 1f + (float)rng.NextDouble() * 1.8f,
+                Color = palette[rng.Next(palette.Length)],
+            };
+        }
+    }
+
+    public void Update(float dt)
+    {
+        for (int i = 0; i < _stars.Length; i++)
+            _stars[i].Phase += dt * _stars[i].Speed;
+    }
+
+    public void Draw(Renderer r)
+    {
+        for (int i = 0; i < _stars.Length; i++)
+        {
+            ref readonly var s = ref _stars[i];
+            float a01 = 0.3f + 0.7f * (0.5f + 0.5f * MathF.Sin(s.Phase));
+            int alpha = (int)(a01 * 120);
+            if (alpha < 6) continue;
+            r.DrawCircle(s.Color, ((int)s.X, (int)s.Y), (int)s.Radius, alpha: alpha);
+        }
+    }
+
+    public static Starfield ForTheme(string theme, int w, int h) => theme switch
+    {
+        "blackjack" or "texas_holdem" => new Starfield(50, w, h, new[] { (255, 215, 0), (255, 255, 200), (200, 200, 255) }),
+        "catan" => new Starfield(35, w, h, new[] { (255, 220, 150), (200, 180, 120), (255, 255, 200) }),
+        "cluedo" => new Starfield(40, w, h, new[] { (180, 160, 255), (255, 200, 200), (200, 255, 220) }),
+        "monopoly" => new Starfield(45, w, h, new[] { (200, 255, 200), (255, 255, 200), (200, 220, 255) }),
+        "risk" => new Starfield(55, w, h, new[] { (255, 180, 180), (200, 200, 255), (255, 255, 200) }),
+        "dnd" => new Starfield(65, w, h, new[] { (180, 130, 255), (255, 200, 100), (100, 200, 255) }),
+        "exploding_kittens" => new Starfield(40, w, h, new[] { (255, 160, 80), (255, 255, 150), (255, 200, 200) }),
+        "unstable_unicorns" => new Starfield(55, w, h, new[] { (220, 180, 255), (255, 180, 220), (180, 220, 255) }),
+        "uno" => new Starfield(45, w, h, new[] { (255, 80, 80), (80, 180, 255), (80, 255, 80), (255, 255, 80) }),
+        _ => new Starfield(40, w, h),
+    };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FloatingIconSystem — themed text/emoji icons that float upward
+// ═══════════════════════════════════════════════════════════════
+
+public class FloatingIconSystem
+{
+    private struct Icon
+    {
+        public float X, Y, VY, Life, MaxLife, Phase;
+        public int FontSize;
+        public string Text;
+        public (int R, int G, int B) Color;
+    }
+
+    private readonly List<Icon> _icons = new();
+    private float _emitTimer;
+    private readonly Random _rng = new();
+
+    public float EmitInterval = 2.5f;
+    public int MaxIcons = 12;
+    public string[] Symbols = { "✦" };
+    public (int R, int G, int B)[] Palette = { (255, 255, 255) };
+    public float LifeMin = 6f, LifeMax = 10f;
+    public float SpeedMin = 12f, SpeedMax = 25f;
+    public int FontMin = 10, FontMax = 18;
+    public float Drift = 8f;
+
+    public void Update(float dt, int w, int h)
+    {
+        _emitTimer += dt;
+        while (_emitTimer >= EmitInterval && _icons.Count < MaxIcons)
+        {
+            _emitTimer -= EmitInterval;
+            float life = LifeMin + (float)_rng.NextDouble() * (LifeMax - LifeMin);
+            _icons.Add(new Icon
+            {
+                X = _rng.Next(40, w - 40),
+                Y = h + 10,
+                VY = -(SpeedMin + (float)_rng.NextDouble() * (SpeedMax - SpeedMin)),
+                Life = life,
+                MaxLife = life,
+                Phase = (float)(_rng.NextDouble() * MathF.Tau),
+                FontSize = _rng.Next(FontMin, FontMax + 1),
+                Text = Symbols[_rng.Next(Symbols.Length)],
+                Color = Palette[_rng.Next(Palette.Length)],
+            });
+        }
+
+        for (int i = _icons.Count - 1; i >= 0; i--)
+        {
+            var ic = _icons[i];
+            ic.Y += ic.VY * dt;
+            ic.X += MathF.Sin(ic.Phase + ic.Life * 0.7f) * Drift * dt;
+            ic.Life -= dt;
+            ic.Phase += dt;
+            _icons[i] = ic;
+            if (ic.Life <= 0) _icons.RemoveAt(i);
+        }
+    }
+
+    public void Draw(Renderer r)
+    {
+        foreach (var ic in _icons)
+        {
+            float t = ic.Life / ic.MaxLife;
+            float fade = t < 0.15f ? t / 0.15f : t > 0.8f ? (1f - t) / 0.2f : 1f;
+            int alpha = (int)(fade * 100);
+            if (alpha < 4) continue;
+            r.DrawText(ic.Text, (int)ic.X, (int)ic.Y, ic.FontSize, ic.Color, alpha: alpha, anchorX: "center", anchorY: "center");
+        }
+    }
+
+    public static FloatingIconSystem ForTheme(string theme) => theme switch
+    {
+        "blackjack" or "texas_holdem" => new FloatingIconSystem
+        {
+            Symbols = new[] { "♠", "♥", "♦", "♣", "🂡" },
+            Palette = new[] { (255, 215, 0), (220, 50, 50), (255, 255, 255) },
+            EmitInterval = 3f, MaxIcons = 8, Drift = 6f,
+        },
+        "catan" => new FloatingIconSystem
+        {
+            Symbols = new[] { "🌾", "🪵", "🧱", "🐑", "⛏" },
+            Palette = new[] { (210, 180, 100), (160, 120, 60), (200, 200, 200) },
+            EmitInterval = 3.5f, MaxIcons = 8,
+        },
+        "cluedo" => new FloatingIconSystem
+        {
+            Symbols = new[] { "🔍", "🕵", "❓", "🗡", "💀" },
+            Palette = new[] { (180, 160, 255), (255, 200, 200), (200, 255, 220) },
+            EmitInterval = 3.5f, MaxIcons = 7,
+        },
+        "monopoly" => new FloatingIconSystem
+        {
+            Symbols = new[] { "💰", "🏠", "🎩", "💵", "🏢" },
+            Palette = new[] { (100, 200, 100), (255, 215, 0), (200, 200, 255) },
+            EmitInterval = 3f, MaxIcons = 8,
+        },
+        "risk" => new FloatingIconSystem
+        {
+            Symbols = new[] { "⚔", "🛡", "🏴", "🌍", "⭐" },
+            Palette = new[] { (255, 120, 120), (120, 160, 255), (255, 220, 100) },
+            EmitInterval = 2.5f, MaxIcons = 10,
+        },
+        "dnd" => new FloatingIconSystem
+        {
+            Symbols = new[] { "⚔", "🐉", "✨", "🏰", "🧙", "💎" },
+            Palette = new[] { (180, 130, 255), (255, 200, 100), (100, 200, 255) },
+            EmitInterval = 2f, MaxIcons = 12, Drift = 10f,
+        },
+        "exploding_kittens" => new FloatingIconSystem
+        {
+            Symbols = new[] { "🐱", "💣", "🙀", "😼", "🔥" },
+            Palette = new[] { (255, 160, 80), (255, 80, 60), (255, 255, 150) },
+            EmitInterval = 2.5f, MaxIcons = 9,
+        },
+        "unstable_unicorns" => new FloatingIconSystem
+        {
+            Symbols = new[] { "🦄", "✨", "🌈", "⭐", "🔮" },
+            Palette = new[] { (220, 180, 255), (255, 180, 220), (180, 220, 255) },
+            EmitInterval = 2f, MaxIcons = 10, Drift = 12f,
+        },
+        "uno" => new FloatingIconSystem
+        {
+            Symbols = new[] { "🔴", "🔵", "🟢", "🟡", "⊘" },
+            Palette = new[] { (255, 80, 80), (80, 180, 255), (80, 255, 80), (255, 255, 80) },
+            EmitInterval = 2.5f, MaxIcons = 9,
+        },
+        _ => new FloatingIconSystem(),
+    };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// WaveBand — flowing horizontal colour-wave bands at the bottom
+// ═══════════════════════════════════════════════════════════════
+
+public class WaveBand
+{
+    private float _phase;
+    public float Speed = 0.35f;
+    public int BandCount = 3;
+    public int BandHeight = 6;
+    public float Wavelength = 120f;
+    public float Amplitude = 8f;
+    public int Alpha = 35;
+    public (int R, int G, int B)[] Colors = { (100, 150, 255), (80, 200, 180), (150, 120, 255) };
+
+    public void Update(float dt) => _phase += dt * Speed;
+
+    public void Draw(Renderer r, int w, int h)
+    {
+        int baseY = h - 30;
+        for (int band = 0; band < BandCount && band < Colors.Length; band++)
+        {
+            var c = Colors[band];
+            float bandPhase = _phase + band * 1.3f;
+            int segW = 4;
+            for (int x = 0; x < w; x += segW)
+            {
+                float wave = MathF.Sin(bandPhase + x / Wavelength * MathF.Tau) * Amplitude;
+                int y = baseY - band * (BandHeight + 4) + (int)wave;
+                r.DrawRect(c, (x, y, segW, BandHeight), alpha: Alpha);
+            }
+        }
+    }
+
+    public static WaveBand ForTheme(string theme) => theme switch
+    {
+        "blackjack" or "texas_holdem" => new WaveBand
+        {
+            Colors = new[] { (0, 80, 0), (0, 100, 20), (0, 60, 0) },
+            Alpha = 25, Speed = 0.25f,
+        },
+        "catan" => new WaveBand
+        {
+            Colors = new[] { (60, 120, 200), (80, 160, 220), (40, 100, 180) },
+            Alpha = 30, Speed = 0.3f, BandCount = 3, Amplitude = 10f,
+        },
+        "cluedo" => new WaveBand
+        {
+            Colors = new[] { (100, 60, 120), (80, 50, 100), (120, 80, 140) },
+            Alpha = 20, Speed = 0.2f,
+        },
+        "monopoly" => new WaveBand
+        {
+            Colors = new[] { (40, 120, 60), (60, 140, 80), (30, 100, 50) },
+            Alpha = 25, Speed = 0.3f,
+        },
+        "risk" => new WaveBand
+        {
+            Colors = new[] { (140, 60, 60), (100, 80, 160), (160, 140, 60) },
+            Alpha = 22, Speed = 0.35f,
+        },
+        "dnd" => new WaveBand
+        {
+            Colors = new[] { (100, 60, 180), (60, 40, 140), (140, 80, 200) },
+            Alpha = 30, Speed = 0.25f, Amplitude = 12f,
+        },
+        "exploding_kittens" => new WaveBand
+        {
+            Colors = new[] { (200, 100, 40), (180, 60, 30), (220, 140, 60) },
+            Alpha = 28, Speed = 0.45f, Amplitude = 10f,
+        },
+        "unstable_unicorns" => new WaveBand
+        {
+            Colors = new[] { (160, 100, 220), (220, 120, 180), (100, 160, 220) },
+            Alpha = 25, Speed = 0.3f, Amplitude = 10f,
+        },
+        "uno" => new WaveBand
+        {
+            Colors = new[] { (200, 40, 40), (40, 100, 200), (40, 200, 40) },
+            Alpha = 22, Speed = 0.4f,
+        },
+        _ => new WaveBand(),
+    };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// HeatShimmer — subtle rising heat distortion lines
+// ═══════════════════════════════════════════════════════════════
+
+public class HeatShimmer
+{
+    private float _phase;
+    public float Speed = 0.5f;
+    public int LineCount = 5;
+    public int Alpha = 18;
+    public (int R, int G, int B) Color = (255, 255, 255);
+    public float Wavelength = 200f;
+    public float RiseSpeed = 15f;
+    private readonly float[] _offsets;
+
+    public HeatShimmer(int lines = 5)
+    {
+        LineCount = lines;
+        _offsets = new float[lines];
+        var rng = new Random(7);
+        for (int i = 0; i < lines; i++)
+            _offsets[i] = (float)(rng.NextDouble() * MathF.Tau);
+    }
+
+    public void Update(float dt)
+    {
+        _phase += dt * Speed;
+        for (int i = 0; i < _offsets.Length; i++)
+            _offsets[i] += dt * RiseSpeed * 0.02f;
+    }
+
+    public void Draw(Renderer r, int w, int h)
+    {
+        int spacing = h / (LineCount + 1);
+        for (int i = 0; i < LineCount; i++)
+        {
+            int baseY = spacing * (i + 1) + (int)(MathF.Sin(_offsets[i] * 3f) * 20);
+            float linePhase = _phase + _offsets[i];
+            int segLen = 6;
+            for (int x = 0; x < w; x += segLen)
+            {
+                float wave = MathF.Sin(linePhase + x / Wavelength * MathF.Tau) * 3f;
+                int y1 = baseY + (int)wave;
+                int y2 = baseY + (int)(MathF.Sin(linePhase + (x + segLen) / Wavelength * MathF.Tau) * 3f);
+                r.DrawLine(Color, (x, y1), (x + segLen, y2), alpha: Alpha);
+            }
+        }
+    }
+
+    public static HeatShimmer ForTheme(string theme) => theme switch
+    {
+        "blackjack" or "texas_holdem" => new HeatShimmer(4) { Color = (0, 60, 0), Alpha = 14, Speed = 0.3f },
+        "catan" => new HeatShimmer(5) { Color = (200, 160, 80), Alpha = 12, Speed = 0.35f },
+        "cluedo" => new HeatShimmer(3) { Color = (100, 80, 130), Alpha = 12, Speed = 0.25f },
+        "monopoly" => new HeatShimmer(4) { Color = (60, 120, 80), Alpha = 12 },
+        "risk" => new HeatShimmer(5) { Color = (160, 120, 80), Alpha = 14, Speed = 0.4f },
+        "dnd" => new HeatShimmer(6) { Color = (120, 80, 200), Alpha = 16, Speed = 0.35f },
+        "exploding_kittens" => new HeatShimmer(5) { Color = (220, 120, 40), Alpha = 18, Speed = 0.6f },
+        "unstable_unicorns" => new HeatShimmer(4) { Color = (180, 140, 255), Alpha = 14, Speed = 0.3f },
+        "uno" => new HeatShimmer(4) { Color = (200, 200, 200), Alpha = 12, Speed = 0.4f },
+        _ => new HeatShimmer(),
+    };
+}

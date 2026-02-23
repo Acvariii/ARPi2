@@ -254,6 +254,233 @@ public static class CardRendering
         }
     }
 
+    // ───── Draw an Exploding Kittens card with detailed art ─────
+    public static void DrawEKCard(Renderer r,
+        (int x, int y, int w, int h) rect,
+        string cardKind)
+    {
+        int x2 = rect.x, y2 = rect.y, w2 = rect.w, h2 = rect.h;
+        int cx = x2 + w2 / 2, cy = y2 + h2 / 2;
+
+        // Per-kind config
+        var (emoji, title, accent, bgTint) = cardKind.ToUpperInvariant() switch
+        {
+            "EK"   => ("\ud83d\udca3\ud83d\ude3c", "EXPLODING",  (220, 80, 80),   (40, 8, 8)),
+            "DEF"  => ("\ud83e\uddef",              "DEFUSE",     (80, 200, 130),  (8, 30, 15)),
+            "ATK"  => ("\u2694\ufe0f",             "ATTACK",     (230, 60, 60),   (35, 5, 5)),
+            "SKIP" => ("\u23ed\ufe0f",              "SKIP",       (255, 200, 50),  (35, 30, 5)),
+            "SHUF" => ("\ud83d\udd00",              "SHUFFLE",    (100, 180, 255), (8, 18, 38)),
+            "FUT"  => ("\ud83d\udd2e",              "SEE FUTURE", (150, 100, 255), (18, 8, 38)),
+            "FAV"  => ("\ud83c\udf81",              "FAVOR",      (255, 130, 200), (35, 12, 28)),
+            "NOPE" => ("\ud83d\udeab",              "NOPE",       (140, 140, 140), (18, 18, 18)),
+            _      => ("\ud83d\ude3a",              cardKind,     (90, 160, 235),  (8, 15, 30)),
+        };
+
+        // Shadow
+        r.DrawRect((0, 0, 0), (x2 + 4, y2 + 4, w2, h2), alpha: 90);
+
+        // Card base — dark tinted background
+        r.DrawRect(bgTint, (x2, y2, w2, h2));
+
+        // Gradient fill: lighter at top
+        int bandH = Math.Max(1, h2 / 6);
+        for (int b = 0; b < 6; b++)
+        {
+            int alpha = 35 - b * 5;
+            if (alpha > 0)
+                r.DrawRect(accent, (x2, y2 + b * bandH, w2, bandH), alpha: alpha);
+        }
+
+        // Per-kind decorative pattern
+        if (cardKind is "EK")
+        {
+            // Flame bursts at corners
+            r.DrawCircle((255, 100, 0), (x2 + 8, y2 + h2 - 8), Math.Max(6, w2 / 6), alpha: 50);
+            r.DrawCircle((255, 180, 0), (x2 + w2 - 8, y2 + h2 - 8), Math.Max(6, w2 / 6), alpha: 45);
+            r.DrawCircle((255, 60, 0), (cx, y2 + 8), Math.Max(4, w2 / 8), alpha: 35);
+        }
+        else if (cardKind is "DEF")
+        {
+            // Shield shape hint
+            r.DrawCircle((120, 255, 180), (cx, cy + h2 / 6), Math.Max(8, w2 / 4), alpha: 25);
+            r.DrawRect((80, 200, 130), (cx - w2 / 6, y2 + h2 * 60 / 100, w2 / 3, h2 / 5), alpha: 20);
+        }
+        else if (cardKind is "ATK")
+        {
+            // Crossed slash marks
+            r.DrawLine((255, 60, 60), (x2 + w2 / 5, y2 + h2 / 4), (x2 + w2 * 4 / 5, y2 + h2 * 3 / 4), width: 2, alpha: 40);
+            r.DrawLine((255, 60, 60), (x2 + w2 * 4 / 5, y2 + h2 / 4), (x2 + w2 / 5, y2 + h2 * 3 / 4), width: 2, alpha: 40);
+        }
+        else if (cardKind is "FUT")
+        {
+            // Mystic rings
+            r.DrawCircle((150, 100, 255), (cx, cy), Math.Max(8, w2 / 3), width: 1, alpha: 35);
+            r.DrawCircle((180, 130, 255), (cx, cy), Math.Max(4, w2 / 5), width: 1, alpha: 25);
+        }
+        else if (cardKind is "NOPE")
+        {
+            // X pattern
+            r.DrawLine((180, 60, 60), (x2 + 10, y2 + 10), (x2 + w2 - 10, y2 + h2 - 10), width: 2, alpha: 30);
+            r.DrawLine((180, 60, 60), (x2 + w2 - 10, y2 + 10), (x2 + 10, y2 + h2 - 10), width: 2, alpha: 30);
+        }
+
+        // Inner inset frame
+        int inset = Math.Max(3, w2 / 14);
+        r.DrawRect(accent, (x2 + inset, y2 + inset, w2 - 2 * inset, h2 - 2 * inset), width: 1, alpha: 60);
+
+        // Outer border — double border with accent
+        r.DrawRect(accent, (x2, y2, w2, h2), width: 3, alpha: 230);
+        r.DrawRect((255, 255, 255), (x2 + 2, y2 + 2, w2 - 4, h2 - 4), width: 1, alpha: 40);
+
+        // Corner labels
+        int cornerFs = Math.Max(8, h2 * 8 / 100);
+        r.DrawText(cardKind, x2 + 7, y2 + 6, cornerFs, accent, bold: true, anchorX: "left", anchorY: "top");
+        r.DrawText(cardKind, x2 + w2 - 7, y2 + h2 - 6, cornerFs, accent, bold: true, anchorX: "right", anchorY: "bottom");
+
+        // Large emoji in centre — scale down for multi-emoji strings
+        int nEmojiEk = 0;
+        foreach (char ch in emoji ?? "")
+            if (ch > 0x2000 && ch != 0xFE0F && ch != 0x200D) nEmojiEk++;
+        nEmojiEk = Math.Max(1, nEmojiEk);
+        int baseEkFs = Math.Max(18, h2 * 34 / 100);
+        int emojiFs = Math.Min(baseEkFs, Math.Max(14, w2 * 70 / 100 / nEmojiEk));
+        r.DrawText(emoji, cx + 1, cy - h2 / 10 + 1, emojiFs, (0, 0, 0), alpha: 70, anchorX: "center", anchorY: "center");
+        r.DrawText(emoji, cx, cy - h2 / 10, emojiFs, (255, 255, 255), anchorX: "center", anchorY: "center");
+
+        // Title at bottom
+        int titleFs = Math.Max(8, Math.Min(14, h2 * 11 / 100));
+        string displayTitle = title.Length > 14 ? title[..14] : title;
+        // Pill bg
+        int pillW = displayTitle.Length * (titleFs * 55 / 100) + 10;
+        int pillH = titleFs + 4;
+        int pillX = cx - pillW / 2;
+        int pillY = y2 + h2 * 82 / 100 - pillH / 2;
+        r.DrawRect(accent, (pillX, pillY, pillW, pillH), alpha: 40);
+        r.DrawText(displayTitle, cx + 1, y2 + h2 * 82 / 100 + 1, titleFs, (0, 0, 0), bold: true, anchorX: "center", anchorY: "center", alpha: 80);
+        r.DrawText(displayTitle, cx, y2 + h2 * 82 / 100, titleFs, (240, 240, 240), bold: true, anchorX: "center", anchorY: "center");
+    }
+
+    // ───── Draw an Unstable Unicorns card with kind-specific styling ─────
+    public static void DrawUUCard(Renderer r,
+        (int x, int y, int w, int h) rect,
+        string emoji, string name, string kind,
+        (int R, int G, int B) accentRgb,
+        string? desc = null)
+    {
+        int x2 = rect.x, y2 = rect.y, w2 = rect.w, h2 = rect.h;
+        int cx = x2 + w2 / 2, cy = y2 + h2 / 2;
+
+        // Kind-specific background tint
+        var baseBg = kind switch
+        {
+            "baby_unicorn" => (38, 18, 38),
+            "unicorn"      => (18, 20, 42),
+            "upgrade"      => (10, 32, 14),
+            "downgrade"    => (35, 10, 10),
+            "magic"        => (10, 18, 42),
+            "instant"      => (35, 28, 8),
+            _              => (20, 20, 28),
+        };
+
+        // Shadow
+        r.DrawRect((0, 0, 0), (x2 + 4, y2 + 4, w2, h2), alpha: 90);
+
+        // Card base
+        r.DrawRect(baseBg, (x2, y2, w2, h2));
+
+        // Header band — top portion with accent
+        int headerH = h2 * 25 / 100;
+        r.DrawRect(accentRgb, (x2, y2, w2, headerH), alpha: 45);
+
+        // Kind-specific decorative elements
+        if (kind is "unicorn" or "baby_unicorn")
+        {
+            // Sparkle dots
+            r.DrawCircle(accentRgb, (x2 + w2 * 15 / 100, y2 + h2 * 15 / 100), Math.Max(2, w2 / 18), alpha: 40);
+            r.DrawCircle(accentRgb, (x2 + w2 * 85 / 100, y2 + h2 * 20 / 100), Math.Max(2, w2 / 22), alpha: 35);
+            r.DrawCircle(accentRgb, (x2 + w2 * 80 / 100, y2 + h2 * 75 / 100), Math.Max(2, w2 / 20), alpha: 30);
+        }
+        else if (kind == "upgrade")
+        {
+            // Upward chevron pattern
+            int chevY = y2 + h2 - h2 / 5;
+            r.DrawLine(accentRgb, (x2 + w2 / 4, chevY), (cx, chevY - h2 / 8), width: 1, alpha: 35);
+            r.DrawLine(accentRgb, (cx, chevY - h2 / 8), (x2 + w2 * 3 / 4, chevY), width: 1, alpha: 35);
+        }
+        else if (kind == "downgrade")
+        {
+            // Downward chevron pattern
+            int chevY = y2 + h2 * 65 / 100;
+            r.DrawLine(accentRgb, (x2 + w2 / 4, chevY), (cx, chevY + h2 / 8), width: 1, alpha: 35);
+            r.DrawLine(accentRgb, (cx, chevY + h2 / 8), (x2 + w2 * 3 / 4, chevY), width: 1, alpha: 35);
+        }
+        else if (kind == "magic")
+        {
+            // Small sparkle circle
+            r.DrawCircle(accentRgb, (cx, cy + h2 / 6), Math.Max(4, w2 / 5), width: 1, alpha: 25);
+        }
+        else if (kind == "instant")
+        {
+            // Lightning bolt accent
+            r.DrawLine(accentRgb, (cx - 4, y2 + headerH + 4), (cx + 4, y2 + headerH + h2 / 5), width: 2, alpha: 30);
+        }
+
+        // Subtle tint on body
+        r.DrawRect(accentRgb, (x2, y2 + headerH, w2, h2 - headerH), alpha: 8);
+
+        // Inner inset frame
+        int inset = Math.Max(3, w2 / 14);
+        r.DrawRect(accentRgb, (x2 + inset, y2 + inset, w2 - 2 * inset, h2 - 2 * inset), width: 1, alpha: 50);
+
+        // Outer border — accent colored
+        r.DrawRect(accentRgb, (x2, y2, w2, h2), width: 3, alpha: 230);
+
+        // Kind label badge at top-left
+        string kindLabel = kind switch
+        {
+            "baby_unicorn" => "BABY",
+            "unicorn" => "UNI",
+            "upgrade" => "UP",
+            "downgrade" => "DOWN",
+            "magic" => "MAG",
+            "instant" => "INST",
+            "neigh" => "NEI",
+            "super_neigh" => "S.NEI",
+            _ => kind.Length > 4 ? kind[..4].ToUpperInvariant() : kind.ToUpperInvariant(),
+        };
+        int badgeFs = Math.Max(7, h2 * 7 / 100);
+        r.DrawText(kindLabel, x2 + 6, y2 + 5, badgeFs, accentRgb, bold: true, anchorX: "left", anchorY: "top");
+
+        // Large emoji — scale down for multi-emoji strings
+        int emojiY = cy - h2 * 8 / 100;
+        int nEmoji = 0;
+        foreach (char ch in emoji ?? "")
+            if (ch > 0x2000 && ch != 0xFE0F && ch != 0x200D) nEmoji++;
+        nEmoji = Math.Max(1, nEmoji);
+        int baseEmojiFs = Math.Max(16, h2 * 32 / 100);
+        int emojiFs = Math.Min(baseEmojiFs, Math.Max(14, w2 * 70 / 100 / nEmoji));
+        r.DrawText(emoji ?? "", cx + 1, emojiY + 1, emojiFs, (0, 0, 0), alpha: 60, anchorX: "center", anchorY: "center");
+        r.DrawText(emoji ?? "", cx, emojiY, emojiFs, (255, 255, 255), anchorX: "center", anchorY: "center");
+
+        // Card name (small, below emoji)
+        string displayName = (name ?? "").Trim();
+        if (displayName.Length > 0)
+        {
+            int nameFs = Math.Max(7, Math.Min(11, h2 * 9 / 100));
+            string dn = displayName.Length > 16 ? displayName[..16] : displayName;
+            r.DrawText(dn, cx, y2 + h2 * 76 / 100, nameFs, (220, 220, 220), bold: true, anchorX: "center", anchorY: "center");
+        }
+
+        // Description text (tiny, at bottom)
+        string descText = (desc ?? "").Trim();
+        if (descText.Length > 0 && h2 > 80)
+        {
+            int descFs = Math.Max(6, Math.Min(9, h2 * 6 / 100));
+            string dd = descText.Length > 28 ? descText[..28] : descText;
+            r.DrawText(dd, cx, y2 + h2 * 90 / 100, descFs, (160, 160, 170), anchorX: "center", anchorY: "center");
+        }
+    }
+
     // ───── Background dispatch ─────
     public static void DrawGameBackground(Renderer r, int w, int h, string theme)
     {

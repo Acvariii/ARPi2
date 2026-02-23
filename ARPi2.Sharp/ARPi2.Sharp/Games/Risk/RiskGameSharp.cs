@@ -98,6 +98,13 @@ public class RiskGameSharp : BaseGame
     private readonly List<ScreenFlash> _flashes = new();
     private readonly DiceRollAnimation _attackDice = new(dieSize: 48, gap: 10, rollDuration: 1.0f, showDuration: 2.5f);
     private readonly DiceRollAnimation _defendDice = new(dieSize: 48, gap: 10, rollDuration: 1.0f, showDuration: 2.5f);
+    private readonly AmbientSystem _ambient;
+    private readonly LightBeamSystem _lightBeams = LightBeamSystem.ForTheme("risk");
+    private readonly VignettePulse _vignette = new();
+    private readonly Starfield _starfield;
+    private readonly FloatingIconSystem _floatingIcons = FloatingIconSystem.ForTheme("risk");
+    private readonly WaveBand _waveBand = WaveBand.ForTheme("risk");
+    private readonly HeatShimmer _heatShimmer = HeatShimmer.ForTheme("risk");
     private int? _animPrevWinner;
     private double _animFwTimer;
     private double _totalElapsed;
@@ -115,6 +122,8 @@ public class RiskGameSharp : BaseGame
     // ── Constructor ────────────────────────────────────────────
     public RiskGameSharp(int w, int h, Renderer renderer) : base(w, h, renderer)
     {
+        _ambient = AmbientSystem.ForTheme("risk", w, h);
+        _starfield = Starfield.ForTheme("risk", w, h);
         EnsureMap();
     }
 
@@ -1484,6 +1493,13 @@ public class RiskGameSharp : BaseGame
         for (int i = _flashes.Count - 1; i >= 0; i--) { _flashes[i].Update(d); if (_flashes[i].Done) _flashes.RemoveAt(i); }
         _attackDice.Update((float)_totalElapsed);
         _defendDice.Update((float)_totalElapsed);
+        _ambient.Update(d, ScreenW, ScreenH);
+        _lightBeams.Update(d, ScreenW, ScreenH);
+        _vignette.Update(d);
+        _starfield.Update(d);
+        _floatingIcons.Update(d, ScreenW, ScreenH);
+        _waveBand.Update(d);
+        _heatShimmer.Update(d);
 
         // Winner fireworks
         if (_winner is int w && w != (_animPrevWinner ?? -1))
@@ -1517,6 +1533,10 @@ public class RiskGameSharp : BaseGame
         }
 
         CardRendering.DrawGameBackground(r, width, height, "risk");
+        _ambient.Draw(r);
+        _lightBeams.Draw(r, width, height);
+        _starfield.Draw(r);
+        _floatingIcons.Draw(r);
         RainbowTitle.Draw(r, "RISK", width);
 
         int cx = width / 2;
@@ -1591,6 +1611,9 @@ public class RiskGameSharp : BaseGame
         foreach (var pr in _pulseRings) pr.Draw(r);
         foreach (var fl in _flashes) fl.Draw(r, width, height);
         foreach (var tp in _textPops) tp.Draw(r);
+        _waveBand.Draw(r, width, height);
+        _heatShimmer.Draw(r, width, height);
+        _vignette.Draw(r, width, height);
 
         // Attack dice
         if (_attackDice.Visible)
