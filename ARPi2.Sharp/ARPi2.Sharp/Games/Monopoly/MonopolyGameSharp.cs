@@ -2723,7 +2723,6 @@ public sealed class MonopolyGameSharp : BaseGame
     private void DrawWinnerScreen(Renderer r, int w, int h)
     {
         r.DrawRect((10, 10, 18), (0, 0, w, h), alpha: 230);
-        // Rainbow title would go here (simplified)
         r.DrawText("MONOPOLY", w / 2, 50, 48, (255, 220, 80), bold: true, anchorX: "center", anchorY: "center");
 
         if (_winnerIdx is not int wi) return;
@@ -2732,16 +2731,22 @@ public sealed class MonopolyGameSharp : BaseGame
         int bx = cx - bw2 / 2, by = cy - bh2 / 2;
         var wc = GameConfig.PlayerColors[wi];
 
+        // Shadow + bg
         r.DrawRect((0, 0, 0), (bx + 6, by + 6, bw2, bh2), alpha: 100);
         r.DrawRect(wc, (bx, by, bw2, bh2));
+        // Accent header band
+        r.DrawRect((255, 215, 0), (bx, by, bw2, 5), alpha: 200);
         r.DrawRect((0, 0, 0), (bx + 8, by + 8, bw2 - 16, bh2 - 16), alpha: 100);
-        r.DrawRect((255, 215, 0), (bx, by, bw2, bh2), width: 5);
+        r.DrawRect((255, 215, 0), (bx, by, bw2, bh2), width: 4);
+        // Inset frame
+        int ins = 12;
+        r.DrawRect((255, 215, 0), (bx + ins, by + ins, bw2 - 2 * ins, bh2 - 2 * ins), width: 1, alpha: 25);
         r.DrawCircle(wc, (cx, cy), (int)(Math.Min(bw2, bh2) * 0.28), alpha: 25);
 
         r.DrawText($"{SeatLabel(wi)} WINS!", cx + 3, cy - 47, 56, (0, 0, 0), bold: true, anchorX: "center", anchorY: "center", alpha: 120);
         r.DrawText($"{SeatLabel(wi)} WINS!", cx, cy - 50, 56, (255, 255, 255), bold: true, anchorX: "center", anchorY: "center");
-        r.DrawText("MONOPOLY CHAMPION", cx, cy + 20, 36, (255, 255, 200), bold: true, anchorX: "center", anchorY: "center");
-        r.DrawText($"Final Balance: ${_players[wi].Money}", cx, cy + 80, 26, (255, 255, 255), anchorX: "center", anchorY: "center");
+        r.DrawText("🏆 MONOPOLY CHAMPION 🏆", cx, cy + 20, 36, (255, 255, 200), bold: true, anchorX: "center", anchorY: "center");
+        r.DrawText($"💰 Final Balance: ${_players[wi].Money}", cx, cy + 80, 26, (255, 255, 255), anchorX: "center", anchorY: "center");
 
         DrawAnimations(r, w, h);
     }

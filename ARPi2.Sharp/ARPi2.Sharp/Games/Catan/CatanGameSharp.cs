@@ -943,10 +943,18 @@ public class CatanGameSharp : BaseGame
         _floatingIcons.Draw(r);
         RainbowTitle.Draw(r, "CATAN", width);
 
+        // ── Subtitle status bar ──
         string subtitle = State == "playing"
-            ? $"Expansion: {_expansionMode}  |  Players: {ActivePlayers.Count}"
+            ? $"🌾 Expansion: {_expansionMode}  |  Players: {ActivePlayers.Count}"
             : "Select players in Web UI";
-        r.DrawText(subtitle, 16, 50, 14, (200, 200, 200), anchorX: "left", anchorY: "top");
+        {
+            int sw = width - 32, sh = 28, sx = 16, sy = 48;
+            r.DrawRect((0, 0, 0), (sx + 2, sy + 2, sw, sh), alpha: 50);
+            r.DrawRect((18, 22, 16), (sx, sy, sw, sh), alpha: 200);
+            r.DrawRect((120, 160, 60), (sx, sy, sw, 3), alpha: 80);
+            r.DrawRect((90, 130, 50), (sx, sy, sw, sh), width: 1, alpha: 150);
+            r.DrawText(subtitle, sx + 12, sy + sh / 2, 13, (210, 220, 190), anchorX: "left", anchorY: "center");
+        }
 
         if (State != "playing") return;
 
@@ -1110,26 +1118,34 @@ public class CatanGameSharp : BaseGame
             _diceAnim.Draw(r, width - 100, 80, _lastRoll is int lr2 ? $"= {lr2}" : "");
         }
 
-        // Event line
+        // ── Event line ──
         if (!string.IsNullOrEmpty(_lastEvent))
         {
-            int ew = Math.Max(200, _lastEvent.Length * 8);
-            r.DrawRect((0, 0, 0), (12, 68, ew, 24), alpha: 130);
-            r.DrawText(_lastEvent, 20, 80, 12, (200, 210, 220), anchorX: "left", anchorY: "center");
+            int ew = Math.Max(240, _lastEvent.Length * 8 + 32);
+            int esh = 28;
+            r.DrawRect((0, 0, 0), (14, 84, ew, esh), alpha: 50);
+            r.DrawRect((16, 20, 14), (12, 82, ew, esh), alpha: 190);
+            r.DrawRect((100, 160, 80), (12, 82, ew, 3), alpha: 70);
+            r.DrawRect((80, 130, 60), (12, 82, ew, esh), width: 1, alpha: 130);
+            r.DrawText($"📢 {_lastEvent}", 22, 82 + esh / 2, 11, (200, 215, 200), anchorX: "left", anchorY: "center");
         }
 
         // Seat info
         DrawSeatInfo(r, width, height);
 
-        // Winner overlay
+        // ── Winner overlay ──
         if (_winner is int wi)
         {
             r.DrawRect((0, 0, 0), (0, 0, width, height), alpha: 150);
             int bw = Math.Min(600, width * 55 / 100), bh = 160;
             int bxc = width / 2 - bw / 2, byc = height / 2 - bh / 2;
-            r.DrawRect((10, 10, 18), (bxc, byc, bw, bh), alpha: 220);
-            r.DrawRect((255, 215, 0), (bxc, byc, bw, bh), width: 4, alpha: 200);
-            r.DrawText($"Winner: {SeatLabel(wi)}", width / 2, height / 2, 36, (255, 240, 180), anchorX: "center", anchorY: "center");
+            r.DrawRect((0, 0, 0), (bxc + 3, byc + 3, bw, bh), alpha: 60);
+            r.DrawRect((10, 10, 18), (bxc, byc, bw, bh), alpha: 230);
+            r.DrawRect((255, 215, 0), (bxc, byc, bw, 4), alpha: 200);
+            r.DrawRect((255, 215, 0), (bxc, byc, bw, bh), width: 3, alpha: 200);
+            int ins = 6;
+            r.DrawRect((255, 215, 0), (bxc + ins, byc + ins, bw - 2 * ins, bh - 2 * ins), width: 1, alpha: 25);
+            r.DrawText($"🏆 Winner: {SeatLabel(wi)}", width / 2, height / 2, 36, (255, 240, 180), anchorX: "center", anchorY: "center", bold: true);
         }
 
         // Footer
@@ -1148,22 +1164,42 @@ public class CatanGameSharp : BaseGame
 
     private void DrawSeatInfo(Renderer r, int w, int h)
     {
-        int y = 100;
+        int panelW = 150, panelH = 48;
+        int y = 120;
         foreach (var seat in ActivePlayers)
         {
             var pcol = GameConfig.PlayerColors[seat % GameConfig.PlayerColors.Length];
             bool isTurn = _currentTurnSeat == seat;
             var nameCol = isTurn ? (255, 240, 100) : pcol;
             int vp = VpFor(seat);
-            string info = $"{PlayerName(seat)} VP:{vp}";
+            var border = isTurn ? pcol : (100, 100, 110);
+
+            // Turn glow
+            if (isTurn)
+                r.DrawRect(border, (10, y - 4, panelW + 8, panelH + 8), width: 2, alpha: 45);
+
+            // Panel bg
+            r.DrawRect((0, 0, 0), (16, y + 2, panelW, panelH), alpha: 50);
+            r.DrawRect((16, 18, 24), (14, y, panelW, panelH), alpha: 195);
+            r.DrawRect(pcol, (14, y, panelW, 3), alpha: 80);
+            r.DrawRect(border, (14, y, panelW, panelH), width: isTurn ? 2 : 1, alpha: 170);
+            int ins = 3;
+            r.DrawRect(border, (14 + ins, y + ins, panelW - 2 * ins, panelH - 2 * ins), width: 1, alpha: 16);
+
+            // Color dot + name
+            r.DrawCircle(pcol, (24, y + 14), 4, alpha: 200);
+            r.DrawText(PlayerName(seat), 34, y + 8, 11, nameCol, anchorX: "left", anchorY: "top", bold: isTurn);
+
+            // VP badge + resource count
+            string info = $"🏆 VP:{vp}";
             if (_res.TryGetValue(seat, out var res))
             {
                 int total = res.Values.Sum();
-                info += $" R:{total}";
+                info += $"  🃏 {total}";
             }
-            r.DrawCircle(pcol, (16, y + 6), 5, alpha: 200);
-            r.DrawText(info, 28, y, 11, nameCol, anchorX: "left", anchorY: "top");
-            y += 16;
+            r.DrawText(info, 24, y + 28, 10, (180, 190, 170), anchorX: "left", anchorY: "top");
+
+            y += panelH + 6;
         }
     }
 

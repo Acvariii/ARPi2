@@ -17,6 +17,7 @@ using ARPi2.Sharp.Games.Monopoly;
 using ARPi2.Sharp.Games.Risk;
 using ARPi2.Sharp.Games.TexasHoldem;
 using ARPi2.Sharp.Games.UnstableUnicorns;
+using ARPi2.Sharp.Games.TicketToRide;
 using ARPi2.Sharp.Games.Uno;
 using ARPi2.Sharp.Server;
 
@@ -116,6 +117,7 @@ public class ARPi2Game : Game
         RegisterGame("cluedo",            new CluedoGameSharp(w, h, _renderer));
         RegisterGame("risk",              new RiskGameSharp(w, h, _renderer));
         RegisterGame("catan",             new CatanGameSharp(w, h, _renderer));
+        RegisterGame("ticket_to_ride",    new TicketToRideGameSharp(w, h, _renderer));
         RegisterGame("dnd_creation",      new DnDGameSharp(w, h, _renderer));
 
         // ─── Start networking ─────────────────────────────────

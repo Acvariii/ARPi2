@@ -69,6 +69,12 @@ export const GAME_THEMES: Record<string, GameTheme> = {
     tagline: 'Dungeons & Dragons',
     accentColor: '#9b59b6',
   },
+  ticket_to_ride: {
+    gradient: 'linear-gradient(135deg, #001828 0%, #002040 60%, #003058 100%)',
+    emoji: '🚂',
+    tagline: 'Claim Routes · Complete Tickets · Connect Cities',
+    accentColor: '#42a5f5',
+  },
 };
 
 export function normalizeGameKey(game: string): string {

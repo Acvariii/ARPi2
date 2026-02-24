@@ -1067,26 +1067,43 @@ public class ExplodingKittensGameSharp : BaseGame
         var (ax, ay) = SeatAnchor(seat, w, h);
         int count = _hands.GetValueOrDefault(seat)?.Count ?? 0;
         bool isTurn = CurrentTurnSeat == seat;
+        bool alive = !_eliminatedPlayers.Contains(seat);
         var pcol = GameConfig.PlayerColors[seat % GameConfig.PlayerColors.Length];
 
         // Card placeholder
         var (rx, ry, rw, rh) = SeatCardTargetRect(seat, w, h);
-        r.DrawRect((0, 0, 0), (rx + 3, ry - 3, rw, rh), alpha: 70);
+
+        // Turn glow
+        if (isTurn)
+            r.DrawRect((250, 200, 70), (rx - 5, ry - 5, rw + 10, rh + 10), width: 3, alpha: 50);
+
+        // Dead player dim
+        int alphaOverall = alive ? 230 : 120;
+
+        // Panel
+        r.DrawRect((0, 0, 0), (rx + 3, ry + 3, rw, rh), alpha: 70);
         var bg = isTurn ? (28, 16, 36) : (18, 18, 24);
-        r.DrawRect(bg, (rx, ry, rw, rh), alpha: 190);
-        var outline = isTurn ? (250, 200, 70) : (140, 120, 160);
-        if (isTurn) r.DrawRect(outline, (rx - 2, ry - 2, rw + 4, rh + 4), width: 2, alpha: 50);
-        r.DrawRect(outline, (rx, ry, rw, rh), width: isTurn ? 2 : 1, alpha: 200);
-        r.DrawText(count.ToString(), rx + rw / 2, ry + rh / 2 - 4, 16, (240, 240, 240),
-            bold: true, anchorX: "center", anchorY: "center");
+        r.DrawRect(bg, (rx, ry, rw, rh), alpha: alphaOverall);
+        r.DrawRect(pcol, (rx, ry, rw, 3), alpha: alive ? 90 : 30);              // accent header band
+        var outline = isTurn ? (250, 200, 70) : (alive ? (140, 120, 160) : (80, 70, 90));
+        r.DrawRect(outline, (rx, ry, rw, rh), width: isTurn ? 2 : 1, alpha: alphaOverall);
+        // Inset frame
+        int ins = Math.Max(2, rw / 14);
+        r.DrawRect(outline, (rx + ins, ry + ins, rw - 2 * ins, rh - 2 * ins), width: 1, alpha: 20);
+
+        // Card count badge
+        string countBadge = alive ? $"🃏 {count}" : "💀";
+        int bdgFs = Math.Max(10, rh * 18 / 100);
+        r.DrawText(countBadge, rx + rw / 2, ry + rh / 2 - 2, bdgFs, (240, 240, 240),
+            bold: true, anchorX: "center", anchorY: "center", alpha: alphaOverall);
 
         // Player name with color dot
-        var nameCol = isTurn ? (250, 220, 100) : pcol;
+        var nameCol = isTurn ? (250, 220, 100) : (alive ? pcol : (110, 100, 120));
         int nameY = seat is 3 or 4 or 5 ? ay + 42 : ay - 42;
-        r.DrawCircle(pcol, (ax - 40, nameY), 4, alpha: 180);
-        string marker = isTurn ? "  \u2605" : "";
+        r.DrawCircle(pcol, (ax - 40, nameY), 4, alpha: alive ? 200 : 80);
+        string marker = isTurn ? "  ★" : "";
         r.DrawText($"{PlayerName(seat)}{marker}", ax, nameY, 12, nameCol,
-            anchorX: "center", anchorY: "center");
+            anchorX: "center", anchorY: "center", bold: isTurn);
     }
 
     private (int x, int y) SeatAnchor(int seat, int w, int h) => seat switch

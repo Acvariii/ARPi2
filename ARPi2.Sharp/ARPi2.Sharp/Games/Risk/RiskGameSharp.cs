@@ -1542,68 +1542,96 @@ public class RiskGameSharp : BaseGame
         int cx = width / 2;
         int pad = 10;
 
-        // Status text
-        if (_phase == "initial_deploy")
+        // ── Status bar ──
         {
-            int poolSum = _initialDeployPools.Values.Sum();
-            r.DrawText($"Initial Deploy: all players  ·  Unassigned total: {poolSum}",
-                pad, 48, 14, (200, 200, 200), anchorX: "left", anchorY: "top");
-        }
-        else
-        {
-            string turn = SeatLabel(_currentTurnSeat);
-            r.DrawText($"Turn: {turn}  ·  Phase: {_phase}  ·  Reinforcements: {_reinforcementsLeft}",
-                pad, 48, 14, (200, 200, 200), anchorX: "left", anchorY: "top");
+            int sw = width - 2 * pad - 12, sh = 28, sx = pad + 6, sy = 46;
+            r.DrawRect((0, 0, 0), (sx + 2, sy + 2, sw, sh), alpha: 50);
+            r.DrawRect((18, 16, 24), (sx, sy, sw, sh), alpha: 200);
+            r.DrawRect((160, 80, 60), (sx, sy, sw, 3), alpha: 80);
+            r.DrawRect((120, 70, 50), (sx, sy, sw, sh), width: 1, alpha: 150);
+
+            string statusText;
+            if (_phase == "initial_deploy")
+            {
+                int poolSum = _initialDeployPools.Values.Sum();
+                statusText = $"🪖 Initial Deploy: all players  ·  Unassigned: {poolSum}";
+            }
+            else
+            {
+                string turn = SeatLabel(_currentTurnSeat);
+                statusText = $"⚔️ Turn: {turn}  ·  Phase: {_phase}  ·  Reinforcements: {_reinforcementsLeft}";
+            }
+            r.DrawText(statusText, sx + 12, sy + sh / 2, 13, (210, 200, 180), anchorX: "left", anchorY: "center");
         }
 
         // Selected territory info
         if (_phase != "initial_deploy" && _selectedFrom is int sf)
         {
-            r.DrawText($"Selected: {TidName(sf)}", pad, 68, 12, (210, 210, 210), anchorX: "left", anchorY: "top");
+            int ix = pad + 6, iy = 80, iw = 220, ih = 22;
+            r.DrawRect((15, 14, 20), (ix, iy, iw, ih), alpha: 180);
+            r.DrawRect((100, 90, 70), (ix, iy, iw, ih), width: 1, alpha: 100);
+            r.DrawText($"📍 Selected: {TidName(sf)}", ix + 8, iy + ih / 2, 11, (200, 210, 200), anchorX: "left", anchorY: "center");
         }
 
         // Draw simplified territory map as a text-based grid
         DrawTerritoryMap(r, width, height);
 
-        // Last attack roll display
+        // ── Last attack roll ──
         if (_lastAttackRoll is var (aRoll, dRoll, aL, dL))
         {
-            string rollText = $"Last Roll: {FormatRoll(aRoll)} vs {FormatRoll(dRoll)} (A-{aL}, D-{dL})";
-            r.DrawText(rollText, cx, height - 60, 14, (255, 220, 140), anchorX: "center", anchorY: "center");
+            string rollText = $"⚔️ Last Roll: {FormatRoll(aRoll)} vs {FormatRoll(dRoll)} (A-{aL}, D-{dL})";
+            int rw = Math.Max(280, rollText.Length * 9 + 40), rh = 30;
+            int rx = cx - rw / 2, ry = height - 76;
+            r.DrawRect((0, 0, 0), (rx + 2, ry + 2, rw, rh), alpha: 50);
+            r.DrawRect((20, 16, 14), (rx, ry, rw, rh), alpha: 195);
+            r.DrawRect((200, 160, 60), (rx, ry, rw, 3), alpha: 75);
+            r.DrawRect((180, 140, 50), (rx, ry, rw, rh), width: 1, alpha: 140);
+            r.DrawText(rollText, cx, ry + rh / 2, 13, (255, 225, 150), anchorX: "center", anchorY: "center", bold: true);
         }
 
-        // Winner overlay
+        // ── Winner overlay ──
         if (_winner is int w)
         {
             r.DrawRect((0, 0, 0), (0, 0, width, height), alpha: 150);
             int bw2 = Math.Min(600, width * 55 / 100), bh2 = 180;
             int bx2 = cx - bw2 / 2, by2 = height / 2 - bh2 / 2;
-            r.DrawRect((10, 10, 18), (bx2, by2, bw2, bh2), alpha: 220);
-            r.DrawRect((255, 215, 0), (bx2, by2, bw2, bh2), width: 4, alpha: 200);
+            r.DrawRect((0, 0, 0), (bx2 + 3, by2 + 3, bw2, bh2), alpha: 60);
+            r.DrawRect((10, 10, 18), (bx2, by2, bw2, bh2), alpha: 230);
+            r.DrawRect((255, 215, 0), (bx2, by2, bw2, 4), alpha: 200);
+            r.DrawRect((255, 215, 0), (bx2, by2, bw2, bh2), width: 3, alpha: 200);
+            int ins = 6;
+            r.DrawRect((255, 215, 0), (bx2 + ins, by2 + ins, bw2 - 2 * ins, bh2 - 2 * ins), width: 1, alpha: 22);
             var wCol = GameConfig.PlayerColors[w % GameConfig.PlayerColors.Length];
             r.DrawText("🏆", cx, height / 2 + 30, 50, (255, 215, 0), anchorX: "center", anchorY: "center");
-            r.DrawText($"{SeatLabel(w)} WINS!", cx, height / 2 - 24, 40, wCol, anchorX: "center", anchorY: "center");
+            r.DrawText($"{SeatLabel(w)} WINS!", cx, height / 2 - 24, 40, wCol, anchorX: "center", anchorY: "center", bold: true);
             r.DrawText("Mission Complete", cx, height / 2 + 6, 18, wCol, anchorX: "center", anchorY: "center");
         }
 
-        // Defend-choose banner
+        // ── Defend-choose banner ──
         if (_phase == "defend_choose" && _defendPendingSeat is int defSeat)
         {
             var dcol = GameConfig.PlayerColors[defSeat % GameConfig.PlayerColors.Length];
-            int ow = 360, oh = 56;
+            int ow = 380, oh = 60;
             int ox = (width - ow) / 2, oy = height / 2 - oh / 2;
-            r.DrawRect((10, 10, 18), (ox, oy, ow, oh), alpha: 225);
-            r.DrawRect(dcol, (ox, oy, ow, oh), width: 3, alpha: 180);
+            r.DrawRect((0, 0, 0), (ox + 3, oy + 3, ow, oh), alpha: 55);
+            r.DrawRect((10, 10, 18), (ox, oy, ow, oh), alpha: 230);
+            r.DrawRect(dcol, (ox, oy, ow, 3), alpha: 90);
+            r.DrawRect(dcol, (ox, oy, ow, oh), width: 2, alpha: 180);
+            int dins = 4;
+            r.DrawRect(dcol, (ox + dins, oy + dins, ow - 2 * dins, oh - 2 * dins), width: 1, alpha: 18);
             r.DrawText($"⚔️  {SeatLabel(defSeat)}: Choose Defense Dice",
-                ox + ow / 2, oy + oh / 2, 16, dcol, anchorX: "center", anchorY: "center");
+                ox + ow / 2, oy + oh / 2, 16, dcol, anchorX: "center", anchorY: "center", bold: true);
         }
 
-        // Last event
+        // ── Last event ──
         if (!string.IsNullOrEmpty(_lastEvent) && _lastEventAge < 6.0)
         {
-            int ew = Math.Max(200, _lastEvent.Length * 8);
-            r.DrawRect((0, 0, 0), (pad, height - 32, ew, 24), alpha: 140);
-            r.DrawText(_lastEvent, pad + 8, height - 20, 12, (200, 200, 210), anchorX: "left", anchorY: "center");
+            int ew = Math.Max(240, _lastEvent.Length * 8 + 32), eh = 26;
+            r.DrawRect((0, 0, 0), (pad + 2, height - 34, ew, eh), alpha: 50);
+            r.DrawRect((14, 12, 18), (pad, height - 36, ew, eh), alpha: 185);
+            r.DrawRect((140, 100, 60), (pad, height - 36, ew, 3), alpha: 65);
+            r.DrawRect((100, 80, 50), (pad, height - 36, ew, eh), width: 1, alpha: 120);
+            r.DrawText($"📢 {_lastEvent}", pad + 10, height - 36 + eh / 2, 11, (200, 205, 210), anchorX: "left", anchorY: "center");
         }
 
         // Animations

@@ -1801,68 +1801,142 @@ public class DnDGameSharp : BaseGame
         _floatingIcons.Draw(r);
         RainbowTitle.Draw(r, "D&D", width);
 
+        // ── Subtitle status bar ──
         string subtitle = _phase switch
         {
-            "char_creation" => "Character Creation — use Web UI to create characters",
-            "gameplay" => $"Adventure Mode — {_characters.Count} heroes" + (_dmSeat.HasValue ? $" — DM: {PlayerName(_dmSeat.Value)}" : ""),
-            "combat" => $"Combat! Round {_combatManager.RoundNumber} — {_enemies.Count} enemies",
+            "char_creation" => "📜 Character Creation — use Web UI to create characters",
+            "gameplay" => $"⚔️ Adventure Mode — {_characters.Count} heroes" + (_dmSeat.HasValue ? $" — DM: {PlayerName(_dmSeat.Value)}" : ""),
+            "combat" => $"🗡️ Combat! Round {_combatManager.RoundNumber} — {_enemies.Count} enemies",
             _ => "Select players in Web UI",
         };
-        r.DrawText(subtitle, 16, 50, 14, (200, 200, 200), anchorX: "left", anchorY: "top");
+        {
+            int sw = width - 32, sh = 28, sx = 16, sy = 48;
+            r.DrawRect((0, 0, 0), (sx + 2, sy + 2, sw, sh), alpha: 50);
+            r.DrawRect((20, 18, 30), (sx, sy, sw, sh), alpha: 200);
+            r.DrawRect((140, 90, 40), (sx, sy, sw, 3), alpha: 80);
+            r.DrawRect((100, 80, 60), (sx, sy, sw, sh), width: 1, alpha: 160);
+            r.DrawText(subtitle, sx + 12, sy + sh / 2, 13, (220, 200, 170), anchorX: "left", anchorY: "center");
+        }
 
-        // Draw combat log on screen
+        // ── Combat log panel ──
         if (_combatLog.Count > 0)
         {
-            int logX = 16, logY = 80;
+            int logX = 16, logY = 86;
             int maxLines = Math.Min(8, _combatLog.Count);
+            int lw = 340, lh = maxLines * 20 + 16;
+            r.DrawRect((0, 0, 0), (logX + 2, logY + 2, lw, lh), alpha: 50);
+            r.DrawRect((15, 13, 22), (logX, logY, lw, lh), alpha: 190);
+            r.DrawRect((100, 80, 60), (logX, logY, lw, 3), alpha: 70);
+            r.DrawRect((80, 70, 50), (logX, logY, lw, lh), width: 1, alpha: 120);
+            int ins = 3;
+            r.DrawRect((80, 70, 50), (logX + ins, logY + ins, lw - 2 * ins, lh - 2 * ins), width: 1, alpha: 18);
+
             for (int i = 0; i < maxLines; i++)
             {
                 int idx = _combatLog.Count - maxLines + i;
                 float alpha = (float)(i + 1) / maxLines;
-                var color = ((int)(200 * alpha), (int)(200 * alpha), (int)(200 * alpha));
-                r.DrawText(_combatLog[idx], logX, logY + i * 20, 11, color, anchorX: "left", anchorY: "top");
+                var color = ((int)(210 * alpha), (int)(200 * alpha), (int)(170 * alpha));
+                r.DrawText(_combatLog[idx], logX + 10, logY + 10 + i * 20, 11, color, anchorX: "left", anchorY: "top");
             }
         }
 
-        // Draw enemies in center area
+        // ── Enemy cards ──
         if (_enemies.Count > 0)
         {
-            int ex = width / 2, ey = height / 2;
+            int ey = height / 2;
+            int cardW = 110, cardH = 80;
+            int totalW = _enemies.Count * (cardW + 10) - 10;
+            int startX = (width - totalW) / 2;
+
             for (int i = 0; i < _enemies.Count; i++)
             {
                 var enemy = _enemies[i];
-                int exi = ex + (i - _enemies.Count / 2) * 120;
+                int cx = startX + i * (cardW + 10);
+                int cy = ey - cardH / 2;
                 float hpPct = enemy.MaxHp > 0 ? (float)enemy.CurrentHp / enemy.MaxHp : 0;
+                bool critical = hpPct < 0.25f && hpPct > 0;
+
+                // Critical glow for low HP enemies
+                if (critical)
+                    r.DrawRect((255, 60, 40), (cx - 4, cy - 4, cardW + 8, cardH + 8), width: 2, alpha: 50);
+
+                // Panel
+                r.DrawRect((0, 0, 0), (cx + 2, cy + 2, cardW, cardH), alpha: 60);
+                r.DrawRect((35, 15, 18), (cx, cy, cardW, cardH), alpha: 210);
+                r.DrawRect((200, 60, 60), (cx, cy, cardW, 3), alpha: 90);
+                r.DrawRect((160, 60, 50), (cx, cy, cardW, cardH), width: 1, alpha: 180);
+                int ins = 3;
+                r.DrawRect((160, 60, 50), (cx + ins, cy + ins, cardW - 2 * ins, cardH - 2 * ins), width: 1, alpha: 18);
 
                 // Name
-                r.DrawText(enemy.Name, exi, ey - 30, 14, (255, 100, 100), anchorX: "center", anchorY: "center");
-                // HP bar
-                int barW = 80, barH = 8;
-                r.DrawRect((60, 20, 20), (exi - barW / 2, ey - 10, barW, barH));
-                r.DrawRect((200, 50, 50), (exi - barW / 2, ey - 10, (int)(barW * hpPct), barH));
+                r.DrawText(enemy.Name, cx + cardW / 2, cy + 16, 12, (255, 120, 100), anchorX: "center", anchorY: "center", bold: true);
+
+                // HP bar (wider, rounded feel)
+                int barW = cardW - 20, barH = 10;
+                int barX = cx + 10, barY = cy + 36;
+                r.DrawRect((50, 16, 16), (barX, barY, barW, barH), alpha: 200);
+                var hpBarCol = hpPct > 0.5 ? (200, 50, 50) : hpPct > 0.25 ? (200, 140, 40) : (220, 40, 40);
+                r.DrawRect(hpBarCol, (barX, barY, (int)(barW * hpPct), barH), alpha: 220);
+                r.DrawRect((200, 80, 60), (barX, barY, barW, barH), width: 1, alpha: 80);
+
                 // HP text
-                r.DrawText($"{enemy.CurrentHp}/{enemy.MaxHp}", exi, ey + 5, 10, (200, 200, 200), anchorX: "center", anchorY: "center");
+                r.DrawText($"❤️ {enemy.CurrentHp}/{enemy.MaxHp}", cx + cardW / 2, cy + 60, 10, (220, 180, 170), anchorX: "center", anchorY: "center");
             }
         }
 
-        // Draw characters summary
-        int charY = height - 120;
+        // ── Character summary panels ──
+        int charY = height - 140;
+        int charCardW = 150, charCardH = 90;
+        int charCount = _characters.Count;
+        int charTotalW = charCount * (charCardW + 10) - 10;
+        int charStartX = Math.Max(16, (width - charTotalW) / 2);
+
+        int ci = 0;
         foreach (var kv in _characters)
         {
             int seat = kv.Key;
             var ch = kv.Value;
             var pc = GameConfig.PlayerColors[seat % GameConfig.PlayerColors.Length];
-            int charX = 200 + ActivePlayers.IndexOf(seat) * 180;
-            if (charX < 0) charX = 200;
-
-            r.DrawText(ch.Name, charX, charY, 12, pc, anchorX: "center", anchorY: "center");
-            r.DrawText($"{ch.Race} {ch.CharClass} Lv{ch.Level}", charX, charY + 16, 10, (180, 180, 180), anchorX: "center", anchorY: "center");
+            int cx = charStartX + ci * (charCardW + 10);
+            int cy = charY;
 
             float hpp = ch.MaxHp > 0 ? (float)ch.CurrentHp / ch.MaxHp : 0;
             var hpColor = hpp > 0.5 ? (50, 200, 50) : hpp > 0.25 ? (200, 200, 50) : (200, 50, 50);
-            r.DrawRect((40, 20, 20), (charX - 40, charY + 30, 80, 6));
-            r.DrawRect(hpColor, (charX - 40, charY + 30, (int)(80 * hpp), 6));
-            r.DrawText($"{ch.CurrentHp}/{ch.MaxHp}", charX, charY + 44, 9, (200, 200, 200), anchorX: "center", anchorY: "center");
+            bool lowHp = hpp <= 0.25f && hpp > 0;
+
+            // Low HP glow
+            if (lowHp)
+                r.DrawRect((255, 60, 40), (cx - 4, cy - 4, charCardW + 8, charCardH + 8), width: 2, alpha: 45);
+
+            // Panel
+            r.DrawRect((0, 0, 0), (cx + 2, cy + 2, charCardW, charCardH), alpha: 55);
+            r.DrawRect((18, 16, 26), (cx, cy, charCardW, charCardH), alpha: 200);
+            r.DrawRect(pc, (cx, cy, charCardW, 3), alpha: 85);
+            r.DrawRect(pc, (cx, cy, charCardW, charCardH), width: 1, alpha: 170);
+            int ins = 3;
+            r.DrawRect(pc, (cx + ins, cy + ins, charCardW - 2 * ins, charCardH - 2 * ins), width: 1, alpha: 16);
+
+            // Color dot + name
+            r.DrawCircle(pc, (cx + 12, cy + 16), 4, alpha: 200);
+            r.DrawText(ch.Name, cx + 22, cy + 10, 12, pc, anchorX: "left", anchorY: "top", bold: true);
+
+            // Race/class/level
+            r.DrawText($"{ch.Race} {ch.CharClass} Lv{ch.Level}", cx + charCardW / 2, cy + 32, 9, (170, 165, 160), anchorX: "center", anchorY: "center");
+
+            // HP bar
+            int barW = charCardW - 20, barH = 8;
+            int barX = cx + 10, barY = cy + 48;
+            r.DrawRect((35, 18, 18), (barX, barY, barW, barH), alpha: 200);
+            r.DrawRect(hpColor, (barX, barY, (int)(barW * hpp), barH), alpha: 220);
+            r.DrawRect(hpColor, (barX, barY, barW, barH), width: 1, alpha: 60);
+
+            // HP text
+            r.DrawText($"❤️ {ch.CurrentHp}/{ch.MaxHp}", cx + charCardW / 2, cy + 68, 10, (200, 200, 200), anchorX: "center", anchorY: "center");
+
+            // AC badge
+            r.DrawText($"🛡️ AC {ch.ArmorClass}", cx + charCardW - 8, cy + 80, 9, (160, 180, 200), anchorX: "right", anchorY: "center");
+
+            ci++;
         }
 
         // Draw animations

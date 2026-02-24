@@ -133,6 +133,9 @@ public class PlayerPanel
                    Math.Min(255, (int)(Color.G * 1.1)),
                    Math.Min(255, (int)(Color.B * 1.1)));
 
+        // Shadow
+        r.DrawRect((0, 0, 0), (rx + 3, ry + 3, rw, rh), alpha: 55);
+
         int layers = 40;
         if (Orientation is 0 or 180)
         {
@@ -163,9 +166,24 @@ public class PlayerPanel
             }
         }
 
+        // Accent header band (orientation-aware)
+        var accentCol = isCurrent ? (255, 215, 0) : (255, 255, 255);
+        int accentAlpha = isCurrent ? 100 : 40;
+        switch (Orientation)
+        {
+            case 0:   r.DrawRect(accentCol, (rx, ry, rw, 3), alpha: accentAlpha); break;
+            case 180: r.DrawRect(accentCol, (rx, ry + rh - 3, rw, 3), alpha: accentAlpha); break;
+            case 90:  r.DrawRect(accentCol, (rx, ry, 3, rh), alpha: accentAlpha); break;
+            case 270: r.DrawRect(accentCol, (rx + rw - 3, ry, 3, rh), alpha: accentAlpha); break;
+        }
+
         var border = isCurrent ? (255, 215, 0) : (180, 190, 200);
-        int bw = isCurrent ? 4 : 2;
+        int bw = isCurrent ? 3 : 2;
         r.DrawRect(border, (rx, ry, rw, rh), width: bw);
+
+        // Inner inset frame
+        int ins = 4;
+        r.DrawRect(border, (rx + ins, ry + ins, rw - 2 * ins, rh - 2 * ins), width: 1, alpha: 22);
     }
 
     public void DrawTextOriented(Renderer r, string text, float xOff, float yOff,

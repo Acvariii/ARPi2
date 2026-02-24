@@ -31,6 +31,7 @@ import UnstableUnicornsPanel from './features/unstable_unicorns/UnstableUnicorns
 import CluedoPanel from './features/cluedo/CluedoPanel';
 import RiskPanel from './features/risk/RiskPanel';
 import CatanPanel from './features/catan/CatanPanel';
+import TicketToRidePanel from './features/ticket_to_ride/TicketToRidePanel';
 import GameBanner, { getGameTheme } from './components/GameBanner';
 
 type ConnStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
@@ -605,6 +606,7 @@ export default function App(): React.ReactElement {
             <RiskPanel snapshot={snapshot} seatLabel={seatLabel} send={send} playerColors={playerColors} />
 
             <CatanPanel snapshot={snapshot} seatLabel={seatLabel} send={send} />
+            <TicketToRidePanel snapshot={snapshot} seatLabel={seatLabel} send={send} />
 
             {snapshot.server_state === 'menu' && (
               <>

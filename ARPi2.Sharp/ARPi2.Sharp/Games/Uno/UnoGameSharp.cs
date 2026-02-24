@@ -857,21 +857,41 @@ public class UnoGameSharp : BaseGame
         bool isTurn = CurrentTurnSeat == seat;
         var pcol = GameConfig.PlayerColors[seat % GameConfig.PlayerColors.Length];
 
-        int bw = 116, bh = 46;
+        int bw = 130, bh = 52;
         int bx = ax - bw / 2;
         int offsetY = seat is 3 or 4 or 5 ? 30 : -30;
         int by = ay + offsetY - bh / 2;
         var border = isTurn ? pcol : (140, 140, 150);
 
-        r.DrawRect((0, 0, 0), (bx + 2, by + 2, bw, bh), alpha: 60);
-        r.DrawRect((18, 18, 28), (bx, by, bw, bh), alpha: 190);
-        if (isTurn) r.DrawRect(border, (bx - 3, by - 3, bw + 6, bh + 6), width: 2, alpha: 55);
-        r.DrawRect(border, (bx, by, bw, bh), width: isTurn ? 2 : 1, alpha: 200);
-        r.DrawCircle(pcol, (bx + 10, by + 12), 4, alpha: 180);
+        // Near-win glow (2 or fewer cards)
+        if (count <= 2 && count > 0)
+        {
+            var glowCol = count == 1 ? (255, 80, 50) : (255, 200, 50);
+            r.DrawRect(glowCol, (bx - 5, by - 5, bw + 10, bh + 10), width: 3, alpha: 55);
+        }
 
+        // Turn glow
+        if (isTurn)
+            r.DrawRect(border, (bx - 4, by - 4, bw + 8, bh + 8), width: 2, alpha: 45);
+
+        // Panel background
+        r.DrawRect((0, 0, 0), (bx + 2, by + 2, bw, bh), alpha: 60);
+        r.DrawRect((18, 18, 28), (bx, by, bw, bh), alpha: 200);
+        r.DrawRect(pcol, (bx, by, bw, 3), alpha: 85);                           // accent header band
+        r.DrawRect(border, (bx, by, bw, bh), width: isTurn ? 2 : 1, alpha: 200);
+        // Inset frame
+        int ins = Math.Max(2, bw / 18);
+        r.DrawRect(border, (bx + ins, by + ins, bw - 2 * ins, bh - 2 * ins), width: 1, alpha: 20);
+
+        r.DrawCircle(pcol, (bx + 10, by + 12), 4, alpha: 180);
         var nameCol = isTurn ? (255, 240, 100) : pcol;
-        r.DrawText(PlayerName(seat), bx + 20, by + 6, 11, nameCol, anchorX: "left", anchorY: "top");
-        r.DrawText($"🃏 {count}", bx + 10, by + bh - 8, 10, (200, 200, 200), anchorX: "left", anchorY: "bottom");
+        r.DrawText(PlayerName(seat), bx + 22, by + 6, 11, nameCol, anchorX: "left", anchorY: "top", bold: isTurn);
+
+        // Card count badge
+        string badge = count == 1 ? "🃏 UNO!" : $"🃏 {count}";
+        var badgeCol = count == 1 ? (255, 100, 60) : (200, 200, 200);
+        r.DrawText(badge, bx + 10, by + bh - 8, 10, badgeCol, anchorX: "left", anchorY: "bottom",
+            bold: count <= 2);
     }
 
     private void ShuffleList<T>(List<T> list)

@@ -1199,15 +1199,19 @@ public class TexasHoldemGameSharp : BaseGame
             CardRendering.DrawPlayingCard(r, (x, y, cardW, cardH), label, face);
         }
 
-        // Pot
-        string potTxt = $"Pot: {_pot}";
-        int pw = Math.Max(100, potTxt.Length * 11);
-        int ph = 28;
+        // Pot — framed badge
+        string potTxt = $"💰 Pot: {_pot}";
+        int pw = Math.Max(120, potTxt.Length * 11 + 20);
+        int ph = 32;
         int px = cx - pw / 2;
         int py = cy + cardH / 2 + 14;
-        r.DrawRect((0, 0, 0), (px, py, pw, ph), alpha: 130);
-        r.DrawRect((255, 215, 0), (px, py, pw, ph), width: 1, alpha: 80);
-        r.DrawText(potTxt, cx, py + ph / 2, 16, (255, 230, 140), anchorX: "center", anchorY: "center");
+        r.DrawRect((0, 0, 0), (px + 3, py + 3, pw, ph), alpha: 80);
+        r.DrawRect((12, 12, 20), (px, py, pw, ph), alpha: 220);
+        r.DrawRect((255, 215, 0), (px, py, pw, 3), alpha: 100);
+        r.DrawRect((255, 215, 0), (px, py, pw, ph), width: 2, alpha: 100);
+        int pIns = Math.Max(2, pw / 16);
+        r.DrawRect((255, 215, 0), (px + pIns, py + pIns, pw - 2 * pIns, ph - 2 * pIns), width: 1, alpha: 25);
+        r.DrawText(potTxt, cx, py + ph / 2, 15, (255, 240, 160), anchorX: "center", anchorY: "center", bold: true);
 
         // Showdown winners
         if (_lastShowdown is { } sd && sd.TryGetValue("winners", out var wObj2)
@@ -1339,29 +1343,63 @@ public class TexasHoldemGameSharp : BaseGame
             int stack = _stacks.GetValueOrDefault(s, 0);
             int bet = _betInRound.GetValueOrDefault(s, 0);
 
-            int bw = 120, bh = 54;
+            int bw = 140, bh = 62;
             int bx = ax - bw / 2, by = ay - bh / 2;
 
+            var pcol = GameConfig.PlayerColors[s % GameConfig.PlayerColors.Length];
             var bg = isTurn ? (16, 70, 42) : (14, 22, 32);
             var border = isTurn ? (100, 220, 110) : (alive ? (170, 170, 170) : (80, 80, 80));
 
-            r.DrawRect((0, 0, 0), (bx + 3, by - 3, bw, bh), alpha: 70);
-            r.DrawRect(bg, (bx, by, bw, bh), alpha: 210);
+            // Active turn outer glow
             if (isTurn)
-                r.DrawRect(border, (bx - 2, by - 2, bw + 4, bh + 4), width: 2, alpha: 50);
+                r.DrawRect(border, (bx - 5, by - 5, bw + 10, bh + 10), width: 3, alpha: 45);
+
+            // All-in critical glow
+            if (alive && stack == 0)
+                r.DrawRect((255, 100, 50), (bx - 4, by - 4, bw + 8, bh + 8), width: 2, alpha: 55);
+
+            // Panel
+            r.DrawRect((0, 0, 0), (bx + 3, by + 3, bw, bh), alpha: 70);
+            r.DrawRect(bg, (bx, by, bw, bh), alpha: 215);
+            r.DrawRect(pcol, (bx, by, bw, 3), alpha: 90);                        // accent header band
             r.DrawRect(border, (bx, by, bw, bh), width: isTurn ? 2 : 1, alpha: 220);
+            // Inset frame
+            int ins = Math.Max(2, bw / 20);
+            r.DrawRect(border, (bx + ins, by + ins, bw - 2 * ins, bh - 2 * ins), width: 1, alpha: 20);
 
-            var pcol = GameConfig.PlayerColors[s % GameConfig.PlayerColors.Length];
-            r.DrawCircle(pcol, (bx + 10, by + bh / 2), 4, alpha: 180);
-
+            r.DrawCircle(pcol, (bx + 10, by + 12), 4, alpha: 200);
             var nameCol = isTurn ? (100, 255, 100) : (alive ? pcol : (110, 110, 110));
-            r.DrawText(PlayerName(s), ax, by + 9, 12, nameCol, anchorX: "center", anchorY: "top");
+            r.DrawText(PlayerName(s), bx + 22, by + 6, 12, nameCol, anchorX: "left", anchorY: "top", bold: true);
 
-            string statusTxt;
-            if (!alive && State == "playing") statusTxt = "FOLD";
-            else if (stack == 0 && alive) statusTxt = "ALL-IN";
-            else statusTxt = $"\U0001f4b0${stack}" + (bet > 0 ? $"  \U0001f3b2{bet}" : "");
-            r.DrawText(statusTxt, ax, by + bh - 9, 11, (210, 210, 210), anchorX: "center", anchorY: "bottom");
+            // Stack & bet badges
+            string stackTxt = $"💰${stack}";
+            int spW = stackTxt.Length * 6 + 8, spH = 14;
+            int spX = bx + 6, spY = by + bh - spH - 6;
+            r.DrawRect(pcol, (spX, spY, spW, spH), alpha: 20);
+            r.DrawText(stackTxt, spX + spW / 2, spY + spH / 2, 10, (210, 210, 210),
+                anchorX: "center", anchorY: "center");
+
+            if (!alive && State == "playing")
+            {
+                r.DrawRect((200, 50, 50), (bx + bw - 48, by + 6, 42, 16), alpha: 35);
+                r.DrawText("FOLD", bx + bw - 27, by + 14, 10, (255, 100, 100),
+                    anchorX: "center", anchorY: "center", bold: true);
+            }
+            else if (stack == 0 && alive)
+            {
+                r.DrawRect((220, 140, 0), (bx + bw - 56, by + 6, 50, 16), alpha: 35);
+                r.DrawText("ALL-IN", bx + bw - 31, by + 14, 10, (255, 200, 60),
+                    anchorX: "center", anchorY: "center", bold: true);
+            }
+
+            if (bet > 0)
+            {
+                string betTxt = $"🎲{bet}";
+                int bpW = betTxt.Length * 6 + 8;
+                r.DrawRect((255, 215, 0), (spX + spW + 6, spY, bpW, spH), alpha: 20);
+                r.DrawText(betTxt, spX + spW + 6 + bpW / 2, spY + spH / 2, 10, (255, 230, 140),
+                    anchorX: "center", anchorY: "center");
+            }
         }
     }
 }

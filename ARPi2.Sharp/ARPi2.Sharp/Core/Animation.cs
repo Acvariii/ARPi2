@@ -571,14 +571,31 @@ public static class RainbowTitle
     public static void Draw(Renderer r, string title, int w, int y = 12,
                             int fontSize = 22, int charWidth = 16)
     {
-        int tx = w / 2 - title.Length * charWidth / 2;
+        // Calculate proportional widths for each character
+        int totalWidth = 0;
+        for (int i = 0; i < title.Length; i++)
+            totalWidth += ProportionalWidth(title[i], charWidth);
+
+        int tx = w / 2 - totalWidth / 2;
+        int cx = tx;
         for (int i = 0; i < title.Length; i++)
         {
+            int cw = ProportionalWidth(title[i], charWidth);
             var col = AnimPalette.TitleRainbow[i % AnimPalette.TitleRainbow.Length];
-            r.DrawText(title[i].ToString(), tx + i * charWidth, y, fontSize: fontSize,
-                       color: col, bold: true, anchorX: "left", anchorY: "top");
+            r.DrawText(title[i].ToString(), cx + cw / 2, y, fontSize: fontSize,
+                       color: col, bold: true, anchorX: "center", anchorY: "top");
+            cx += cw;
         }
     }
+
+    private static int ProportionalWidth(char c, int baseWidth) => c switch
+    {
+        'I' or 'i' or 'l' or '!' or '|' or ':' or ';' or '.' or ',' or '\'' => baseWidth * 5 / 10,
+        '1' => baseWidth * 6 / 10,
+        'M' or 'W' or 'm' or 'w' => baseWidth * 12 / 10,
+        ' ' => baseWidth * 6 / 10,
+        _ => baseWidth,
+    };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

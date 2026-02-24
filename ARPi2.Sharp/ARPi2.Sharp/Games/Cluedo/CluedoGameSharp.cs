@@ -1530,9 +1530,11 @@ public class CluedoGameSharp : BaseGame
         int footerY = height - footerPad + 8;
         var fpRect = (margin, footerY, width - 2 * margin, footerPad - 16);
         r.DrawRect((0, 0, 0), (fpRect.Item1 + 3, fpRect.Item2 + 3, fpRect.Item3, fpRect.Item4), alpha: 70);
-        r.DrawRect((12, 12, 18), fpRect, alpha: 190);
-        r.DrawRect((30, 20, 40), (fpRect.Item1 + 3, fpRect.Item2 + 3, fpRect.Item3 - 6, fpRect.Item4 - 6), alpha: 40);
-        r.DrawRect((180, 150, 80), fpRect, width: 2, alpha: 120);
+        r.DrawRect((12, 12, 18), fpRect, alpha: 200);
+        r.DrawRect((180, 140, 60), (fpRect.Item1, fpRect.Item2, fpRect.Item3, 3), alpha: 80);  // accent header band
+        r.DrawRect((180, 150, 80), fpRect, width: 2, alpha: 140);
+        int fpIns = 4;
+        r.DrawRect((180, 150, 80), (fpRect.Item1 + fpIns, fpRect.Item2 + fpIns, fpRect.Item3 - 2 * fpIns, fpRect.Item4 - 2 * fpIns), width: 1, alpha: 18);
 
         // Dice in footer
         bool showDice = _diceRolling || (_lastRoll != null && _elapsedTime < _diceShowUntil);

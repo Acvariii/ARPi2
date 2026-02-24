@@ -80,6 +80,7 @@ public class GameServer
         new() { ["key"] = "cluedo",            ["label"] = "Cluedo" },
         new() { ["key"] = "risk",              ["label"] = "Risk" },
         new() { ["key"] = "catan",             ["label"] = "Catan" },
+        new() { ["key"] = "ticket_to_ride",    ["label"] = "Ticket to Ride" },
         new() { ["key"] = "d&d",               ["label"] = "D&D" },
     };
 

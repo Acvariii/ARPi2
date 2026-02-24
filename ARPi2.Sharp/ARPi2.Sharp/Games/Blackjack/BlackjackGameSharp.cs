@@ -867,7 +867,7 @@ public class BlackjackGameSharp : BaseGame
         // Title
         RainbowTitle.Draw(r, "BLACKJACK", width, y: 12, fontSize: 22, charWidth: 16);
 
-        // Status
+        // Status bar
         string status = State switch
         {
             "betting" => $"Place your bets! ({ActivePlayers.Count(i => _players[i].IsReady)}/{ActivePlayers.Count} ready)",
@@ -877,38 +877,106 @@ public class BlackjackGameSharp : BaseGame
             "game_over" => _gameOverMessage,
             _ => State,
         };
-        r.DrawText(status, cx, 50, 18, (200, 200, 200), anchorX: "center", anchorY: "center");
+        {
+            int sw = Math.Max(260, status.Length * 10 + 40);
+            int sh = 30;
+            int sx = cx - sw / 2, sy = 38;
+            r.DrawRect((0, 0, 0), (sx + 3, sy + 3, sw, sh), alpha: 60);
+            r.DrawRect((14, 22, 32), (sx, sy, sw, sh), alpha: 210);
+            r.DrawRect((120, 170, 200), (sx, sy, sw, sh), width: 1, alpha: 60);
+            r.DrawText(status, cx, sy + sh / 2, 14, (200, 220, 240), anchorX: "center", anchorY: "center");
+        }
 
-        // Dealer area
+        // Dealer panel
         int dY = height * 18 / 100;
-        r.DrawText("Dealer", cx, dY - 20, 16, (200, 200, 200), anchorX: "center");
-        DrawHand(r, _dealerHand, cx, dY, !_dealerReveal);
-        if (_dealerReveal)
-            r.DrawText($"Value: {_dealerHand.Value()}", cx, dY + 140, 14, (255, 255, 255), anchorX: "center");
+        {
+            int dpW = Math.Min(500, width * 60 / 100), dpH = 160;
+            int dpX = cx - dpW / 2, dpY = dY - 30;
+            r.DrawRect((0, 0, 0), (dpX + 3, dpY + 3, dpW, dpH), alpha: 60);
+            r.DrawRect((12, 12, 20), (dpX, dpY, dpW, dpH), alpha: 200);
+            r.DrawRect((180, 140, 80), (dpX, dpY, dpW, 4), alpha: 80);           // accent header band
+            r.DrawRect((180, 140, 80), (dpX, dpY, dpW, dpH), width: 2, alpha: 120);
+            // Inset frame
+            int ins = Math.Max(3, dpW * 4 / 100);
+            r.DrawRect((180, 140, 80), (dpX + ins, dpY + ins, dpW - 2 * ins, dpH - 2 * ins), width: 1, alpha: 35);
 
-        // Player hands
+            r.DrawText("🃏 Dealer", cx, dpY + 16, 16, (220, 200, 140), anchorX: "center", anchorY: "top", bold: true);
+            DrawHand(r, _dealerHand, cx, dpY + 42, !_dealerReveal);
+            if (_dealerReveal)
+            {
+                int val = _dealerHand.Value();
+                var valCol = val > 21 ? (255, 80, 80) : val == 21 ? (80, 255, 120) : (255, 255, 255);
+                r.DrawText($"Value: {val}", cx, dpY + dpH - 14, 14, valCol, anchorX: "center", anchorY: "bottom", bold: true);
+            }
+        }
+
+        // Player hand panels
         int playerCount = ActivePlayers.Count;
         for (int i = 0; i < playerCount; i++)
         {
             int pidx = ActivePlayers[i];
             var p = _players[pidx];
             int px = width * (i + 1) / (playerCount + 1);
-            int py = height * 60 / 100;
+            int py = height * 58 / 100;
 
             var col = GameConfig.PlayerColors[pidx % GameConfig.PlayerColors.Length];
-            r.DrawText(PlayerName(pidx), px, py - 30, 14, col, anchorX: "center");
-            r.DrawText($"${p.Chips}", px, py - 14, 12, (200, 200, 200), anchorX: "center");
+            bool isActive = State == "playing" && _currentPlayerIdx >= 0
+                && _currentPlayerIdx < ActivePlayers.Count && ActivePlayers[_currentPlayerIdx] == pidx;
+
+            // Panel dimensions
+            int pw = Math.Min(200, width / (playerCount + 1) - 10), ph = 190;
+            int pxL = px - pw / 2, pyT = py - 36;
+
+            // Near-bust glow (value 17-20)
+            if (p.Hands.Count > 0)
+            {
+                int val = p.Hands[0].Value();
+                if (val >= 17 && val <= 20)
+                    r.DrawRect((255, 200, 0), (pxL - 4, pyT - 4, pw + 8, ph + 8), width: 2, alpha: 50);
+                else if (val > 21)
+                    r.DrawRect((255, 50, 50), (pxL - 4, pyT - 4, pw + 8, ph + 8), width: 2, alpha: 70);
+            }
+
+            // Active turn glow
+            if (isActive)
+                r.DrawRect(col, (pxL - 5, pyT - 5, pw + 10, ph + 10), width: 3, alpha: 60);
+
+            // Panel background
+            r.DrawRect((0, 0, 0), (pxL + 3, pyT + 3, pw, ph), alpha: 60);
+            r.DrawRect((14, 14, 22), (pxL, pyT, pw, ph), alpha: 210);
+            r.DrawRect(col, (pxL, pyT, pw, 4), alpha: 100);                      // accent header band
+            r.DrawRect(col, (pxL, pyT, pw, ph), width: isActive ? 2 : 1, alpha: isActive ? 200 : 100);
+            int ins = Math.Max(3, pw * 5 / 100);
+            r.DrawRect(col, (pxL + ins, pyT + ins, pw - 2 * ins, ph - 2 * ins), width: 1, alpha: 25);
+
+            // Player name + chips badge
+            r.DrawCircle(col, (pxL + 12, pyT + 16), 4, alpha: 200);
+            r.DrawText(PlayerName(pidx), pxL + 22, pyT + 10, 12, isActive ? (255, 240, 100) : col,
+                anchorX: "left", anchorY: "top", bold: true);
+            // Chips pill
+            string chipTxt = $"💰 ${p.Chips}";
+            int cpW = chipTxt.Length * 7 + 10, cpH = 16;
+            int cpX = pxL + pw - cpW - 6, cpY = pyT + 8;
+            r.DrawRect(col, (cpX, cpY, cpW, cpH), alpha: 25);
+            r.DrawText(chipTxt, cpX + cpW / 2, cpY + cpH / 2, 10, (220, 220, 220),
+                anchorX: "center", anchorY: "center");
 
             if (State == "betting")
             {
-                r.DrawText($"Bet: ${p.CurrentBet}", px, py + 6, 14, (255, 215, 0), anchorX: "center");
+                r.DrawText($"Bet: ${p.CurrentBet}", px, pyT + 50, 14, (255, 215, 0), anchorX: "center", bold: true);
                 if (p.IsReady)
-                    r.DrawText("READY", px, py + 24, 12, (0, 255, 0), anchorX: "center");
+                {
+                    int rw = 60, rh = 20;
+                    r.DrawRect((0, 180, 0), (px - rw / 2, pyT + 72, rw, rh), alpha: 30);
+                    r.DrawText("READY ✓", px, pyT + 82, 12, (80, 255, 80), anchorX: "center", anchorY: "center");
+                }
             }
             else if (p.Hands.Count > 0)
             {
-                DrawHand(r, p.Hands[0], px, py + 10, false);
-                r.DrawText($"Value: {p.Hands[0].Value()}", px, py + 150, 12, (255, 255, 255), anchorX: "center");
+                DrawHand(r, p.Hands[0], px, pyT + 46, false);
+                int val = p.Hands[0].Value();
+                var valCol = val > 21 ? (255, 80, 80) : val == 21 ? (80, 255, 120) : (255, 255, 255);
+                r.DrawText($"Value: {val}", px, pyT + ph - 10, 12, valCol, anchorX: "center", anchorY: "bottom", bold: true);
             }
         }
 
