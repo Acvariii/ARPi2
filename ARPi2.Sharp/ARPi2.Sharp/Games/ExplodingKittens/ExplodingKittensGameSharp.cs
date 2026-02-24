@@ -11,10 +11,23 @@ namespace ARPi2.Sharp.Games.ExplodingKittens;
 // ════════════════════════════════════════════════════════════════
 public class EKCard
 {
+    private static int _nextId;
+
     /// <summary>Card kind: EK, DEF, ATK, SKIP, SHUF, FUT, FAV, NOPE</summary>
     public string Kind { get; }
 
-    public EKCard(string kind) => Kind = kind;
+    /// <summary>Unique card instance ID — used to select illustration variant.</summary>
+    public int Id { get; }
+
+    /// <summary>Stable illustration variant (0-3) assigned at creation.</summary>
+    public int Variant { get; }
+
+    public EKCard(string kind)
+    {
+        Kind = kind;
+        Id = _nextId++;
+        Variant = Math.Abs(Id * 2654435761.GetHashCode() ^ kind.GetHashCode()) % 4;
+    }
 
     public string Short() => Kind;
 }
@@ -514,6 +527,8 @@ public class ExplodingKittensGameSharp : BaseGame
     // ─── Internals: drawing & turns ────────────────────────────
     private void DoDraw(int seat)
     {
+        if (_awaitingFavorTarget) return; // Can't draw while selecting favor target
+        if (_nopeActive) return;          // Can't draw during nope window
         if (_pendingDraws <= 0) return;
 
         var c = DrawCardRaw();
@@ -596,7 +611,7 @@ public class ExplodingKittensGameSharp : BaseGame
             int cx = ScreenW / 2, cy = ScreenH / 2;
             _flashes.Add(new ScreenFlash((255, 80, 30), 80, 0.5f));
             _flashes.Add(new ScreenFlash((255, 255, 200), 130, 0.15f)); // bright initial flash
-            _textPops.Add(new TextPopAnim($"\U0001f4a5 KABOOM! {PlayerName(seat)}", cx, cy - 50, (255, 90, 40), fontSize: 36));
+            _textPops.Add(new TextPopAnim($"\U0001f4a5 KABOOM! {PlayerName(seat)}", cx, cy - 200, (255, 90, 40), fontSize: 36));
             _pulseRings.Add(new PulseRing(cx, cy, (255, 120, 0), maxRadius: Math.Min(ScreenW, ScreenH) / 3, duration: 0.9f));
             _pulseRings.Add(new PulseRing(cx, cy, (255, 60, 0), maxRadius: Math.Min(ScreenW, ScreenH) / 4, duration: 0.6f));
             // Screen shake
@@ -637,6 +652,9 @@ public class ExplodingKittensGameSharp : BaseGame
     {
         if (_winner != null) return;
         if (_pendingDraws > 0) return;
+        // Clear any lingering favor state before advancing turn
+        _awaitingFavorTarget = false;
+        _favorActor = null;
         AdvanceIndex(1);
         _pendingDraws = 1;
     }
@@ -800,7 +818,8 @@ public class ExplodingKittensGameSharp : BaseGame
         }
 
         bool isTurn = seat == CurrentTurnSeat;
-        btns["ek_draw"] = ("Draw", isTurn && _pendingDraws > 0);
+        bool canDraw = isTurn && _pendingDraws > 0 && !_nopeActive && !_awaitingFavorTarget;
+        btns["ek_draw"] = ("Draw", canDraw);
         return btns;
     }
 
@@ -1485,7 +1504,7 @@ public class ExplodingKittensGameSharp : BaseGame
             return;
         }
         var top = _discardPile[^1];
-        DrawCardFace(r, rect, top.Short(), ColorRgb(top.Kind));
+        DrawCardFace(r, rect, top.Short(), ColorRgb(top.Kind), variant: top.Variant);
     }
 
     private void DrawSeatZone(Renderer r, int seat, int w, int h)
@@ -1662,7 +1681,7 @@ public class ExplodingKittensGameSharp : BaseGame
     {
         var (_, discR) = PilesRects(ScreenW, ScreenH);
         var fromR = SeatCardTargetRect(seat, ScreenW, ScreenH);
-        int stableVariant = Math.Abs((discR.x * 7919 + discR.w * 31) ^ card.Kind.GetHashCode()) % 4;
+        int stableVariant = card.Variant;
 
         // Phase 1: fly from seat to center screen and enlarge (showcase)
         int showW = Math.Min(ScreenW * 18 / 100, 180);

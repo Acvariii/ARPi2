@@ -2,6 +2,8 @@
     "chat.tools.terminal.autoApprove": {
         "dotnet build": true,
         "npx tsc": true,
-        "dotnet add": true
+        "dotnet add": true,
+        "ForEach-Object": true,
+        "Group-Object": true
     }
 }
