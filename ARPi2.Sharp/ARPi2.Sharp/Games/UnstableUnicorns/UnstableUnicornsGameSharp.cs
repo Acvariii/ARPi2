@@ -107,6 +107,17 @@ public class UnstableUnicornsGameSharp : BaseGame
     private int? _animPrevWinner;
     private double _animFwTimer;
 
+    // Premium visual systems (EK-quality)
+    private readonly SpotlightCone _spotlight = new();
+    private readonly FireEdge _fireEdge = new();
+    private readonly CardBreathEffect _cardBreath = new();
+    private readonly List<ExplosionBurst> _explosions = new();
+    private float _screenShakeX, _screenShakeY;
+    private float _screenShakeTimer;
+    private float _sparkleTimer;
+    private string _lastEvent = "";
+    private double _lastEventAge = 999.0;
+
     private static readonly (int R, int G, int B)[] SeatColors =
     {
         (255, 80,  80),
@@ -992,6 +1003,8 @@ public class UnstableUnicornsGameSharp : BaseGame
                     _flashes.Add(new ScreenFlash((220, 30, 30), 110, 0.38f));
                     _textPops.Add(new TextPopAnim("NEIGH! \ud83d\udeab", cx, cy - 20,
                         (255, 80, 60), fontSize: 52, duration: 1.6f));
+                    _screenShakeTimer = 0.3f;
+                    NoteEvent($"{PlayerName(seat)} played Neigh!");
 
                     // A Neigh/Super Neigh immediately ends the reaction window
                     _reactionPending.Clear();
@@ -1059,6 +1072,7 @@ public class UnstableUnicornsGameSharp : BaseGame
             DrawToHand(seat, 1);
             _actionTaken = true;
             _turnPhase = (_hands.GetValueOrDefault(seat)?.Count ?? 0) > HandLimit(seat) ? "discard" : "action";
+            NoteEvent($"{PlayerName(seat)} drew a card");
 
             var ctr = _zoneCenters.GetValueOrDefault(seat, (ScreenW / 2, ScreenH / 2));
             var col = SeatColors[seat % SeatColors.Length];
@@ -1096,6 +1110,8 @@ public class UnstableUnicornsGameSharp : BaseGame
             // Capture card info before PlayFromHand removes it
             var hand = _hands.GetValueOrDefault(seat);
             string? cardEmoji = null, cardKind = null;
+            string cardName = "a card";
+            string? cardDesc = null;
             (int, int, int) cardRgb = (160, 80, 200);
             if (hand != null && idx >= 0 && idx < hand.Count)
             {
@@ -1105,6 +1121,8 @@ public class UnstableUnicornsGameSharp : BaseGame
                 {
                     cardEmoji = cd.Emoji;
                     cardKind = cd.Kind;
+                    cardName = cd.Name;
+                    cardDesc = cd.Desc;
                     cardRgb = HexToRgb(cd.Color, (160, 80, 200));
                 }
             }
@@ -1115,6 +1133,7 @@ public class UnstableUnicornsGameSharp : BaseGame
             var dst = (ScreenW / 2, ScreenH / 3);
             var col = SeatColors[seat % SeatColors.Length];
             _cardFlips.Add(new CardFlyAnim(src, dst, color: col));
+            NoteEvent($"{PlayerName(seat)} played {cardName}");
 
             // Showcase the card face-up at center with sparkles
             if (cardEmoji != null)
@@ -1125,7 +1144,8 @@ public class UnstableUnicornsGameSharp : BaseGame
                 _showcases.Add(new CardShowcaseAnim(
                     ScreenW / 2, ScreenH / 2,
                     cardEmoji, "", accentColor: cardRgb, corner: corner,
-                    src: (src.Item1, src.Item2)));
+                    src: (src.Item1, src.Item2),
+                    kind: cardKind, cardName: cardName, desc: cardDesc));
             }
 
             _particles.EmitSparkle(dst.Item1, dst.Item2, col, 20);
@@ -2156,6 +2176,12 @@ public class UnstableUnicornsGameSharp : BaseGame
         _flashes.Add(new ScreenFlash((220, 50, 50), 60, 0.3f));
         _particles.EmitSparkle(pos.Item1, pos.Item2, (255, 80, 60), 20);
         _textPops.Add(new TextPopAnim("💥 DESTROYED!", ScreenW / 2, ScreenH / 2 - 30, (255, 100, 80), fontSize: 26));
+        _screenShakeTimer = 0.2f;
+        var eb = new ExplosionBurst(pos.Item1, pos.Item2, 140, 0.9f);
+        eb.CoreColor = (255, 200, 60);
+        eb.RingColor = (255, 80, 60);
+        _explosions.Add(eb);
+        NoteEvent($"Card destroyed in {PlayerName(targetSeat)}'s stable!");
     }
 
     private void EmitStealFx(int thief, int victim)
@@ -2167,6 +2193,8 @@ public class UnstableUnicornsGameSharp : BaseGame
         _particles.EmitSparkle(to.Item1, to.Item2, (180, 255, 180), 12);
         _textPops.Add(new TextPopAnim("🦄 STOLEN!", ScreenW / 2, ScreenH / 2 - 30, (220, 180, 255), fontSize: 26));
         _cardFlips.Add(new CardFlyAnim((from.Item1, from.Item2), (to.Item1, to.Item2), color: SeatColors[thief % SeatColors.Length]));
+        _screenShakeTimer = 0.15f;
+        NoteEvent($"{PlayerName(thief)} stole from {PlayerName(victim)}!");
     }
 
     // ─── Card summary for snapshot ─────────────────────────────
@@ -2289,6 +2317,7 @@ public class UnstableUnicornsGameSharp : BaseGame
             ["revealed_hands"] = revealedHands,
             ["reaction"] = reaction,
             ["prompt"] = promptSnap,
+            ["last_event"] = !string.IsNullOrEmpty(_lastEvent) && _lastEventAge < 6.0 ? _lastEvent : null,
         };
 
         return new Dictionary<string, object?> { ["unstable_unicorns"] = snap };
@@ -2444,6 +2473,14 @@ public class UnstableUnicornsGameSharp : BaseGame
         }
     }
 
+    // ─── Event tracking ──────────────────────────────────────
+
+    private void NoteEvent(string msg)
+    {
+        _lastEvent = msg;
+        _lastEventAge = 0;
+    }
+
     // ─── Update / Draw ─────────────────────────────────────────
 
     public override void Update(double dt)
@@ -2456,6 +2493,7 @@ public class UnstableUnicornsGameSharp : BaseGame
         for (int i = _textPops.Count - 1; i >= 0; i--) { _textPops[i].Update(d); if (_textPops[i].Done) _textPops.RemoveAt(i); }
         for (int i = _pulseRings.Count - 1; i >= 0; i--) { _pulseRings[i].Update(d); if (_pulseRings[i].Done) _pulseRings.RemoveAt(i); }
         for (int i = _flashes.Count - 1; i >= 0; i--) { _flashes[i].Update(d); if (_flashes[i].Done) _flashes.RemoveAt(i); }
+        for (int i = _explosions.Count - 1; i >= 0; i--) { _explosions[i].Update(d); if (_explosions[i].Done) _explosions.RemoveAt(i); }
 
         _ambient.Update(d, ScreenW, ScreenH);
         _lightBeams.Update(d, ScreenW, ScreenH);
@@ -2464,6 +2502,50 @@ public class UnstableUnicornsGameSharp : BaseGame
         _floatingIcons.Update(d, ScreenW, ScreenH);
         _waveBand.Update(d);
         _heatShimmer.Update(d);
+
+        // Premium systems
+        _spotlight.Update(d);
+        _fireEdge.Update(d);
+        _cardBreath.Update(d);
+
+        // Last event age
+        _lastEventAge += d;
+
+        // Screen shake decay
+        if (_screenShakeTimer > 0)
+        {
+            _screenShakeTimer -= d;
+            float intensity = Math.Clamp(_screenShakeTimer * 18f, 0f, 14f);
+            _screenShakeX = (float)(Rng.NextDouble() * 2 - 1) * intensity;
+            _screenShakeY = (float)(Rng.NextDouble() * 2 - 1) * intensity;
+        }
+        else
+        {
+            _screenShakeX = 0; _screenShakeY = 0;
+        }
+
+        // Ambient sparkle particles — from edges
+        if (State == "playing" && _winner == null)
+        {
+            _sparkleTimer -= d;
+            if (_sparkleTimer <= 0f)
+            {
+                _sparkleTimer = 0.12f;
+                // Floating sparkles from bottom edge
+                float sx = (float)(Rng.NextDouble() * ScreenW);
+                _particles.Emit(sx, ScreenH + 5, (200, 140, 255), count: 1,
+                    speed: 18f, gravity: -25f, life: 3.5f, radius: 1.2f);
+                // Occasional side sparkle
+                if (Rng.NextDouble() < 0.15)
+                {
+                    bool leftSide = Rng.NextDouble() < 0.5;
+                    float sparkX = leftSide ? -5 : ScreenW + 5;
+                    float sparkY = (float)(Rng.NextDouble() * ScreenH);
+                    _particles.Emit(sparkX, sparkY, (180, 120, 255), count: 1,
+                        speed: 12f, gravity: -18f, life: 3f, radius: 1.5f);
+                }
+            }
+        }
 
         // Detect turn change
         var currTurn = CurrentTurnSeat;
@@ -2474,6 +2556,7 @@ public class UnstableUnicornsGameSharp : BaseGame
             _pulseRings.Add(new PulseRing(center.Item1, center.Item2, col,
                 maxRadius: Math.Min(ScreenW, ScreenH) / 5, duration: 0.8f));
             _particles.EmitSparkle(center.Item1, center.Item2, col, 18);
+            _flashes.Add(new ScreenFlash(col, 35, 0.25f));
         }
         _animPrevTurn = currTurn;
 
@@ -2484,6 +2567,7 @@ public class UnstableUnicornsGameSharp : BaseGame
             _flashes.Add(new ScreenFlash((220, 30, 30), 90, 0.4f));
             _textPops.Add(new TextPopAnim("NEIGH? \ud83d\udeab", cx, cy + 55,
                 (255, 90, 80), fontSize: 44, duration: 1.8f));
+            _screenShakeTimer = 0.25f;
         }
         _animPrevReaction = _reactionActive;
 
@@ -2491,16 +2575,11 @@ public class UnstableUnicornsGameSharp : BaseGame
         if (_winner != null && _animPrevWinner == null)
         {
             int cx = ScreenW / 2, cy = ScreenH / 2;
-            string name = PlayerName(_winner.Value);
-            _textPops.Add(new TextPopAnim($"\ud83e\udd84 {name} WINS! \ud83e\udd84", cx, cy,
-                (255, 220, 50), fontSize: 50, duration: 5.0f));
             _flashes.Add(new ScreenFlash((255, 255, 180), 140, 0.65f));
-
-            var fwPositions = new[] { (0.25f, 0.30f), (0.50f, 0.20f), (0.75f, 0.30f),
-                                      (0.38f, 0.55f), (0.62f, 0.55f), (0.50f, 0.70f) };
-            foreach (var (fx, fy) in fwPositions)
-                _particles.EmitFirework((int)(ScreenW * fx), (int)(ScreenH * fy), AnimPalette.Rainbow, 70);
-            _animFwTimer = 0.85;
+            for (int i = 0; i < 10; i++)
+                _particles.EmitFirework(Rng.Next(ScreenW * 10 / 100, ScreenW * 90 / 100),
+                    Rng.Next(ScreenH * 10 / 100, ScreenH * 90 / 100), AnimPalette.Rainbow);
+            _animFwTimer = 6.0;
         }
         _animPrevWinner = _winner;
 
@@ -2508,12 +2587,11 @@ public class UnstableUnicornsGameSharp : BaseGame
         if (_winner != null)
         {
             _animFwTimer -= d;
-            if (_animFwTimer <= 0.0)
+            if (_animFwTimer > 0 && (int)(_animFwTimer * 3) % 2 == 0)
             {
-                float fx = (float)(Rng.NextDouble() * 0.76 + 0.12);
-                float fy = (float)(Rng.NextDouble() * 0.55 + 0.15);
-                _particles.EmitFirework((int)(ScreenW * fx), (int)(ScreenH * fy), AnimPalette.Rainbow, 55);
-                _animFwTimer = Rng.NextDouble() * 0.50 + 0.70;
+                _particles.EmitFirework(
+                    Rng.Next(ScreenW * 5 / 100, ScreenW * 95 / 100),
+                    Rng.Next(ScreenH * 5 / 100, ScreenH * 95 / 100), AnimPalette.Rainbow);
             }
         }
     }
@@ -2522,9 +2600,45 @@ public class UnstableUnicornsGameSharp : BaseGame
     {
         if (State == "player_select")
         {
-            base.Draw(r, width, height, dt);
+            // ═══════════════════════════════════════════════════════════
+            //  LOBBY — premium themed lobby with QR code
+            // ═══════════════════════════════════════════════════════════
+            CardRendering.DrawGameBackground(r, width, height, "unstable_unicorns");
+            _ambient.Draw(r);
+            _lightBeams.Draw(r, width, height);
+            _starfield.Draw(r);
+            _floatingIcons.Draw(r);
+
+            // Title
+            RainbowTitle.Draw(r, "UNSTABLE UNICORNS", width);
+
+            // Subtitle
+            r.DrawText("SELECT PLAYERS & SCAN TO JOIN", width / 2, 52, 13,
+                (200, 140, 255), anchorX: "center", anchorY: "center", bold: true);
+
+            // Player selection circles
+            SelectionUI.Draw(r);
+
+            // QR Code panel
+            int qrSize = Math.Clamp(Math.Min(width, height) * 18 / 100, 100, 200);
+            int qrX = width - qrSize / 2 - 60;
+            int qrY = height / 2;
+            QRCodeRenderer.DrawQRPanel(r, qrX, qrY, qrSize,
+                title: "📱 SCAN TO JOIN",
+                accentColor: (180, 80, 255));
+
+            // Ambient particles for lobby
+            _particles.Draw(r);
+            _waveBand.Draw(r, width, height);
+            _vignette.Draw(r, width, height);
             return;
         }
+
+        // ═══════════════════════════════════════════════════════════════
+        //  IN-GAME — EK-quality production renderer
+        // ═══════════════════════════════════════════════════════════════
+
+        int shX = (int)_screenShakeX, shY = (int)_screenShakeY;
 
         CardRendering.DrawGameBackground(r, width, height, "unstable_unicorns");
         _ambient.Draw(r);
@@ -2532,18 +2646,179 @@ public class UnstableUnicornsGameSharp : BaseGame
         _starfield.Draw(r);
         _floatingIcons.Draw(r);
 
-        // Title
-        string title = _winner is int w ? $"WINNER: {PlayerName(w)}" : "UNSTABLE UNICORNS";
-        RainbowTitle.Draw(r, title, width);
+        // Sparkle/rainbow edge effect  
+        _fireEdge.Draw(r, width, height);
 
-        // Layout: grid of player stables
+        int cx = width / 2 + shX, cy = height / 2 + shY;
+
+        // ─── Title ─────────────────────────────────────────────
+        RainbowTitle.Draw(r, "UNSTABLE UNICORNS", width);
+
+        // ─── HUD Bar — premium frosted dark-glass panel ──────
+        var turn = CurrentTurnSeat;
+        int hudH = 40;
+        int hudY = 48;
+        int hudW = Math.Min(width - 40, 820);
+        int hudX = (width - hudW) / 2;
+
+        // HUD multi-layer shadow
+        r.DrawRect((0, 0, 0), (hudX + 5, hudY + 5, hudW, hudH), alpha: 60);
+        r.DrawRect((0, 0, 0), (hudX + 3, hudY + 3, hudW, hudH), alpha: 90);
+
+        // HUD background — dark glass
+        r.DrawRect((16, 10, 28), (hudX, hudY, hudW, hudH), alpha: 230);
+        r.DrawRect((24, 16, 36), (hudX + 2, hudY + 2, hudW - 4, hudH / 3), alpha: 30);
+
+        // Accent top and bottom lines — purple theme
+        r.DrawRect((180, 80, 255), (hudX, hudY, hudW, 3), alpha: 150);
+        r.DrawRect((200, 100, 255), (hudX, hudY + 3, hudW, 1), alpha: 40);
+        r.DrawRect((0, 0, 0), (hudX, hudY + hudH - 2, hudW, 2), alpha: 60);
+
+        // Border with highlights
+        r.DrawRect((80, 60, 120), (hudX, hudY, hudW, hudH), width: 1, alpha: 60);
+        r.DrawRect((255, 255, 255), (hudX + 1, hudY + 4, hudW - 2, 1), alpha: 8);
+
+        // HUD content
+        int hudCy = hudY + hudH / 2;
+        int seg = hudW / 4;
+
+        // Segment separators
+        for (int sep = 1; sep < 4; sep++)
+        {
+            int sx = hudX + sep * seg;
+            r.DrawLine((80, 60, 100), (sx, hudY + 6), (sx, hudY + hudH - 6), width: 1, alpha: 30);
+        }
+
+        // ── Deck count with icon ──
+        string deckIcon = _drawPile.Count <= 3 ? "⚡" : "🃏";
+        var deckCol = _drawPile.Count <= 3 ? (255, 80, 40) : _drawPile.Count <= 8 ? (255, 180, 40) : (200, 200, 210);
+        if (_drawPile.Count <= 3)
+            r.DrawCircle((255, 40, 0), (hudX + seg / 2 - 40, hudCy), 10, alpha: 12);
+        r.DrawText($"{deckIcon} Deck: {_drawPile.Count}", hudX + seg / 2 + 1, hudCy + 1, 13, (0, 0, 0),
+            anchorX: "center", anchorY: "center", bold: true, alpha: 60);
+        r.DrawText($"{deckIcon} Deck: {_drawPile.Count}", hudX + seg / 2, hudCy, 13, deckCol,
+            anchorX: "center", anchorY: "center", bold: true);
+
+        // ── Discard count ──
+        r.DrawText($"Discard: {_discardPile.Count}", hudX + seg + seg / 2 + 1, hudCy + 1, 13, (0, 0, 0),
+            anchorX: "center", anchorY: "center", alpha: 50);
+        r.DrawText($"Discard: {_discardPile.Count}", hudX + seg + seg / 2, hudCy, 13, (180, 170, 190),
+            anchorX: "center", anchorY: "center");
+
+        // ── Turn indicator with player color pip ──
+        if (turn is int tt)
+        {
+            var tcol = GameConfig.PlayerColors[tt % GameConfig.PlayerColors.Length];
+            r.DrawCircle(tcol, (hudX + 2 * seg + 12, hudCy), 6, alpha: 220);
+            r.DrawCircle(tcol, (hudX + 2 * seg + 12, hudCy), 10, alpha: 14);
+            r.DrawCircle((255, 255, 255), (hudX + 2 * seg + 11, hudCy - 1), 2, alpha: 30);
+            r.DrawText($"{PlayerName(tt)}'s Turn", hudX + 2 * seg + 22 + 1, hudCy + 1, 13, (0, 0, 0),
+                anchorX: "left", anchorY: "center", bold: true, alpha: 50);
+            r.DrawText($"{PlayerName(tt)}'s Turn", hudX + 2 * seg + 22, hudCy, 13, (255, 220, 100),
+                anchorX: "left", anchorY: "center", bold: true);
+        }
+        else
+        {
+            r.DrawText("Turn: —", hudX + 2 * seg + seg / 2, hudCy, 13, (140, 140, 150),
+                anchorX: "center", anchorY: "center");
+        }
+
+        // ── Phase / goal info ──
+        string phaseStr = _turnPhase switch
+        {
+            "begin" => "🌅 Begin",
+            "action" => _actionTaken ? "✅ Done" : "🎯 Action",
+            "discard" => "♻ Discard",
+            "reaction" => "🚫 Neigh!",
+            "prompt" => "🎯 Target",
+            _ => "",
+        };
+        r.DrawText($"🦄 Goal: {_goalUnicorns}  {phaseStr}", hudX + 3 * seg + seg / 2 + 1, hudCy + 1, 12, (0, 0, 0),
+            anchorX: "center", anchorY: "center", alpha: 50);
+        r.DrawText($"🦄 Goal: {_goalUnicorns}  {phaseStr}", hudX + 3 * seg + seg / 2, hudCy, 12, (200, 180, 230),
+            anchorX: "center", anchorY: "center");
+
+        // ─── Neigh window overlay — premium red banner ──────────
+        if (_reactionActive)
+        {
+            int nopeY = hudY + hudH + 8;
+            int nopeW = Math.Min(420, width * 32 / 100);
+            int nopeH = 38;
+            int nopeX = cx - nopeW / 2;
+
+            SoftShadow.Draw(r, nopeX + 3, nopeY + 4, nopeW, nopeH, layers: 4, maxAlpha: 90);
+            BeveledRect.Draw(r, nopeX, nopeY, nopeW, nopeH, (60, 6, 6), bevelSize: 3);
+
+            r.DrawRect((220, 40, 40), (nopeX, nopeY, nopeW, nopeH), width: 2, alpha: 220);
+            r.DrawRect((255, 80, 80), (nopeX, nopeY, nopeW, 3), alpha: 200);
+            r.DrawRect((255, 120, 80), (nopeX + 1, nopeY + 3, nopeW - 2, 1), alpha: 40);
+
+            // Pulsing side danger indicators
+            int pulseA = (int)(40 + 30 * Math.Sin(dt * 6));
+            r.DrawCircle((255, 40, 20), (nopeX + 10, nopeY + nopeH / 2), 4, alpha: pulseA);
+            r.DrawCircle((255, 40, 20), (nopeX + nopeW - 10, nopeY + nopeH / 2), 4, alpha: pulseA);
+
+            string neighLabel = _reactionStack.Count > 0
+                ? $"🚫 NEIGH WINDOW ({_reactionStack.Count} played)"
+                : "🚫 NEIGH WINDOW — react now!";
+            string waitNames = _reactionPending.Count > 0
+                ? string.Join(", ", _reactionPending.Select(s => PlayerName(s)))
+                : "...";
+            r.DrawText(neighLabel, cx + 1, nopeY + nopeH / 2 - 1, 12, (0, 0, 0),
+                anchorX: "center", anchorY: "center", bold: true, alpha: 60);
+            r.DrawText(neighLabel, cx, nopeY + nopeH / 2 - 2, 12, (255, 170, 160),
+                anchorX: "center", anchorY: "center", bold: true);
+        }
+
+        // ─── Table center glow — slow breathing radial ──────────
+        int minDim = Math.Min(width, height);
+        float breathPhase = _cardBreath.Scale;
+        float slowBreath = MathF.Sin(breathPhase * 4.2f);
+        float breathScale = 1f + slowBreath * 0.08f;
+
+        // Purple/pink circles
+        int pr1 = (int)(minDim * 28 / 100 * breathScale);
+        int pr2 = (int)(minDim * 22 / 100 * breathScale);
+        int pr3 = (int)(minDim * 16 / 100 * breathScale);
+        r.DrawCircle((50, 10, 80), (cx, cy), pr1, alpha: 7);
+        r.DrawCircle((70, 20, 100), (cx, cy), pr2, alpha: 12);
+        r.DrawCircle((100, 30, 140), (cx, cy), pr3, alpha: 14);
+        r.DrawCircle((130, 50, 170), (cx, cy), (int)(minDim * 10 / 100 * breathScale), alpha: 10);
+
+        // Warm inner circles — counter-phase
+        float warmBreath = 1f + MathF.Sin(breathPhase * 4.2f + 1.8f) * 0.06f;
+        int yr1 = (int)(minDim * 8 / 100 * warmBreath);
+        int yr2 = (int)(minDim * 4 / 100 * warmBreath);
+        r.DrawCircle((180, 80, 220), (cx, cy), yr1, alpha: 14);
+        r.DrawCircle((220, 120, 255), (cx, cy), yr2, alpha: 8);
+        r.DrawCircle((240, 160, 255), (cx, cy), (int)(minDim * 2 / 100 * warmBreath), alpha: 5);
+
+        // Corner accents
+        int cornerSize = Math.Min(60, minDim * 6 / 100);
+        int cornerA = 10;
+        r.DrawLine((160, 80, 200), (20, 20), (20 + cornerSize, 20), width: 1, alpha: cornerA);
+        r.DrawLine((160, 80, 200), (20, 20), (20, 20 + cornerSize), width: 1, alpha: cornerA);
+        r.DrawLine((160, 80, 200), (width - 20, 20), (width - 20 - cornerSize, 20), width: 1, alpha: cornerA);
+        r.DrawLine((160, 80, 200), (width - 20, 20), (width - 20, 20 + cornerSize), width: 1, alpha: cornerA);
+        r.DrawLine((160, 80, 200), (20, height - 20), (20 + cornerSize, height - 20), width: 1, alpha: cornerA);
+        r.DrawLine((160, 80, 200), (20, height - 20), (20, height - 20 - cornerSize), width: 1, alpha: cornerA);
+        r.DrawLine((160, 80, 200), (width - 20, height - 20), (width - 20 - cornerSize, height - 20), width: 1, alpha: cornerA);
+        r.DrawLine((160, 80, 200), (width - 20, height - 20), (width - 20, height - 20 - cornerSize), width: 1, alpha: cornerA);
+
+        // ─── Spotlight on active player ────────────────────────
+        if (turn is int spotSeat && _zoneCenters.TryGetValue(spotSeat, out var spotPos))
+        {
+            _spotlight.DrawAt(r, spotPos.X, spotPos.Y, width, height, Math.Max(40, minDim * 10 / 100));
+        }
+
+        // ─── Player stable zones — premium beveled panels ─────
         var seats = ActivePlayers.ToList();
         if (seats.Count == 0) return;
 
         int cols = seats.Count > 2 ? 2 : 1;
         int rows = (seats.Count + cols - 1) / cols;
         int pad = 18;
-        int top = 48;
+        int top = 100; // more space for HUD
         int zoneW = (width - pad * (cols + 1)) / cols;
         int zoneH = (height - top - pad * (rows + 1)) / Math.Max(1, rows);
 
@@ -2558,18 +2833,54 @@ public class UnstableUnicornsGameSharp : BaseGame
             int row = si / cols;
             int col = si % cols;
             int zx = pad + col * (zoneW + pad);
-            int zy = height - top - pad - (row + 1) * zoneH - row * pad;
+            int zy = top + pad + row * (zoneH + pad);
 
-            r.DrawRect((255, 255, 255), (zx, zy, zoneW, zoneH), alpha: 10);
-            r.DrawRect((255, 255, 255), (zx, zy, zoneW, zoneH), width: 2, alpha: 40);
-
-            // Near-win glow (6+ unicorns out of 7 needed)
+            bool isTurn = s == CurrentTurnSeat;
+            var pcol = GameConfig.PlayerColors[s % GameConfig.PlayerColors.Length];
             int uCount = UnicornCount(s);
+
+            // Turn glow aura
+            if (isTurn && _winner == null)
+            {
+                r.DrawRect((255, 180, 40), (zx - 10, zy - 10, zoneW + 20, zoneH + 20), width: 1, alpha: 12);
+                r.DrawRect((255, 200, 60), (zx - 6, zy - 6, zoneW + 12, zoneH + 12), width: 2, alpha: 28);
+                r.DrawRect((255, 220, 80), (zx - 3, zy - 3, zoneW + 6, zoneH + 6), width: 3, alpha: 50);
+                // Corner glow spots
+                r.DrawCircle((255, 200, 60), (zx - 4, zy - 4), 6, alpha: 20);
+                r.DrawCircle((255, 200, 60), (zx + zoneW + 4, zy - 4), 6, alpha: 20);
+                r.DrawCircle((255, 200, 60), (zx - 4, zy + zoneH + 4), 6, alpha: 20);
+                r.DrawCircle((255, 200, 60), (zx + zoneW + 4, zy + zoneH + 4), 6, alpha: 20);
+            }
+
+            // Panel shadow
+            SoftShadow.Draw(r, zx + 3, zy + 4, zoneW, zoneH, layers: 4, maxAlpha: 80);
+
+            // Panel body — dark glass beveled
+            var bg = isTurn ? (28, 18, 12) : (16, 12, 22);
+            BeveledRect.Draw(r, zx, zy, zoneW, zoneH, bg, bevelSize: 3);
+
+            // Subtle gradient inside
+            r.DrawRect(pcol, (zx + 2, zy + 2, zoneW - 4, zoneH / 6), alpha: 8);
+            r.DrawRect((0, 0, 0), (zx + 2, zy + zoneH - zoneH / 6, zoneW - 4, zoneH / 6), alpha: 12);
+
+            // Top accent band — player color gradient
+            r.DrawRect(pcol, (zx, zy, zoneW, 5), alpha: 160);
+            r.DrawRect(pcol, (zx + 2, zy + 5, zoneW - 4, 2), alpha: 50);
+            r.DrawRect(pcol, (zx + 4, zy + 7, zoneW - 8, 1), alpha: 20);
+
+            // Border — layered with 3D depth
+            var outline = isTurn ? (255, 180, 40) : (100, 80, 130);
+            r.DrawRect(outline, (zx, zy, zoneW, zoneH), width: isTurn ? 2 : 1, alpha: 200);
+            r.DrawRect((255, 255, 255), (zx + 1, zy + 1, zoneW - 2, 1), alpha: 15);
+            r.DrawRect((0, 0, 0), (zx + 1, zy + zoneH - 2, zoneW - 2, 2), alpha: 35);
+            r.DrawRect((0, 0, 0), (zx + zoneW - 2, zy + 1, 2, zoneH - 2), alpha: 25);
+
+            // Near-win glow
             if (uCount >= _goalUnicorns - 1 && _winner == null)
             {
                 int glowAlpha = uCount >= _goalUnicorns ? 45 : 25;
                 var glowCol = uCount >= _goalUnicorns ? (255, 215, 0) : (255, 180, 80);
-                r.DrawRect(glowCol, (zx, zy, zoneW, zoneH), alpha: glowAlpha);
+                r.DrawRect(glowCol, (zx + 2, zy + 2, zoneW - 4, zoneH - 4), alpha: glowAlpha);
                 r.DrawRect(glowCol, (zx, zy, zoneW, zoneH), width: 3, alpha: 120);
             }
 
@@ -2577,18 +2888,48 @@ public class UnstableUnicornsGameSharp : BaseGame
             if (_protectedTurns.GetValueOrDefault(s, 0) > 0)
             {
                 r.DrawRect((60, 180, 255), (zx, zy, zoneW, zoneH), width: 2, alpha: 80);
-                r.DrawText("🛡️", zx + zoneW - 20, zy + 8, 14, (120, 200, 255), anchorX: "center", anchorY: "top");
+                r.DrawText("🛡️", zx + zoneW - 20, zy + 10, 14, (120, 200, 255), anchorX: "center", anchorY: "top");
             }
 
-            // Player label
-            var pcol = GameConfig.PlayerColors[s % GameConfig.PlayerColors.Length];
-            bool isTurn = s == CurrentTurnSeat;
-            var nameCol = isTurn ? (255, 240, 100) : pcol;
-            r.DrawText(PlayerName(s), zx + 6, zy + 6, 13, nameCol, bold: isTurn, anchorX: "left", anchorY: "top");
+            // ── Player name pill — beveled and polished ──
+            var nameCol = isTurn ? (255, 220, 80) : pcol;
+            string pName = PlayerName(s);
+            int pillW = Math.Max(72, pName.Length * 8 + 32);
+            int pillH = 24;
+            int pillX2 = zx + 6;
+            int pillY2 = zy + 10;
 
-            // Unicorn count badge
+            r.DrawRect((0, 0, 0), (pillX2 + 2, pillY2 + 2, pillW, pillH), alpha: 80);
+            var namePillBg = isTurn ? (34, 24, 12) : (12, 10, 18);
+            BeveledRect.Draw(r, pillX2, pillY2, pillW, pillH, namePillBg, bevelSize: 2);
+            r.DrawRect(outline, (pillX2, pillY2, pillW, pillH), width: 1, alpha: 70);
+            r.DrawRect((255, 255, 255), (pillX2 + 2, pillY2 + 1, pillW - 4, 1), alpha: 12);
+
+            // Player color dot
+            r.DrawCircle(pcol, (pillX2 + 11, pillY2 + pillH / 2), 5, alpha: 220);
+            r.DrawCircle((255, 255, 255), (pillX2 + 10, pillY2 + pillH / 2 - 1), 2, alpha: 30);
+
+            // Name text — shadowed
+            string marker = isTurn ? " ★" : "";
+            r.DrawText($"{pName}{marker}", pillX2 + 20 + 1, pillY2 + pillH / 2 + 1, 11, (0, 0, 0),
+                anchorX: "left", anchorY: "center", bold: isTurn, alpha: 80);
+            r.DrawText($"{pName}{marker}", pillX2 + 20, pillY2 + pillH / 2, 11, nameCol,
+                anchorX: "left", anchorY: "center", bold: isTurn);
+
+            // ── Unicorn count badge — embossed ──
+            int badgeX = zx + zoneW - 55;
+            int badgeY = zy + 12;
+            int badgeW = 48;
+            int badgeH = 20;
+            r.DrawRect((0, 0, 0), (badgeX + 1, badgeY + 1, badgeW, badgeH), alpha: 60);
+            r.DrawRect((20, 12, 30), (badgeX, badgeY, badgeW, badgeH), alpha: 200);
+            r.DrawRect((140, 100, 180), (badgeX, badgeY, badgeW, badgeH), width: 1, alpha: 40);
             string countLabel = $"🦄 {uCount}/{_goalUnicorns}";
-            r.DrawText(countLabel, zx + zoneW - 40, zy + 6, 11, (200, 180, 220), anchorX: "center", anchorY: "top");
+            r.DrawText(countLabel, badgeX + badgeW / 2 + 1, badgeY + badgeH / 2 + 1, 10, (0, 0, 0),
+                anchorX: "center", anchorY: "center", bold: true, alpha: 60);
+            var cntCol = uCount >= _goalUnicorns - 1 ? (255, 220, 80) : (200, 180, 220);
+            r.DrawText(countLabel, badgeX + badgeW / 2, badgeY + badgeH / 2, 10, cntCol,
+                anchorX: "center", anchorY: "center", bold: true);
 
             // Zone center for animations
             _zoneCenters[s] = (zx + zoneW / 2, zy + zoneH / 2);
@@ -2596,7 +2937,7 @@ public class UnstableUnicornsGameSharp : BaseGame
             // Draw stable cards
             var stable = _stables.GetValueOrDefault(s, new List<string>());
             int cx2 = zx + 10;
-            int cy2 = zy + 28;
+            int cy2 = zy + 40;
             for (int ci = 0; ci < Math.Min(stable.Count, cardsPerRow * 2); ci++)
             {
                 int x = cx2 + (ci % cardsPerRow) * (cardW + gap);
@@ -2604,28 +2945,165 @@ public class UnstableUnicornsGameSharp : BaseGame
                 if (x + cardW > zx + zoneW - 6 || y + cardH > zy + zoneH - 6) break;
                 DrawCardFace(r, (x, y, cardW, cardH), stable[ci]);
             }
+
+            // Card fan hint at bottom (# in hand)
+            int handCount = _hands.GetValueOrDefault(s)?.Count ?? 0;
+            if (handCount > 0)
+            {
+                int fanCount = Math.Min(handCount, 8);
+                int fanTotalW = Math.Min(zoneW - 20, fanCount * 9);
+                int fanStartX = zx + zoneW / 2 - fanTotalW / 2;
+                for (int fi = 0; fi < fanCount; fi++)
+                {
+                    int fx = fanStartX + fi * (fanTotalW / Math.Max(1, fanCount));
+                    int fy = zy + zoneH - 16;
+                    r.DrawRect((0, 0, 0), (fx + 1, fy + 1, 7, 10), alpha: 30);
+                    r.DrawRect((180, 120, 220), (fx, fy, 7, 10), alpha: 40);
+                    r.DrawRect((200, 140, 240), (fx, fy, 7, 1), alpha: 20);
+                    r.DrawRect((140, 80, 180), (fx, fy, 7, 10), width: 1, alpha: 30);
+                }
+                r.DrawText($"{handCount} in hand", zx + zoneW / 2, zy + zoneH - 6, 8, (130, 120, 150),
+                    anchorX: "center", anchorY: "center");
+            }
         }
 
-        // Animation layers
+        // ─── Last event toast — premium notification ──────────
+        if (!string.IsNullOrEmpty(_lastEvent) && _lastEventAge < 4.5 && _winner == null)
+        {
+            float eventFade = (float)(_lastEventAge < 0.3 ? _lastEventAge / 0.3
+                : _lastEventAge > 3.5 ? 1.0 - (_lastEventAge - 3.5) / 1.0
+                : 1.0);
+            int eventAlpha = (int)(eventFade * 230);
+            int ew = Math.Min(width - 40, Math.Max(240, _lastEvent.Length * 9 + 50));
+            int eH = 30;
+            int ex = cx - ew / 2;
+            int ey = hudY + hudH + (_reactionActive ? 54 : 10);
+
+            // Toast shadow
+            r.DrawRect((0, 0, 0), (ex + 3, ey + 3, ew, eH), alpha: (int)(eventFade * 100));
+            r.DrawRect((0, 0, 0), (ex + 1, ey + 1, ew, eH), alpha: (int)(eventFade * 60));
+
+            // Toast background — dark glass with purple/amber accent
+            r.DrawRect((12, 8, 18), (ex, ey, ew, eH), alpha: (int)(eventFade * 220));
+            r.DrawRect((180, 120, 255), (ex, ey, ew, 2), alpha: (int)(eventFade * 160));
+            r.DrawRect((200, 140, 255), (ex + 1, ey + 2, ew - 2, 1), alpha: (int)(eventFade * 30));
+            r.DrawRect((60, 40, 80), (ex, ey, ew, eH), width: 1, alpha: (int)(eventFade * 50));
+
+            // Icon glow
+            r.DrawCircle((180, 120, 255), (ex + 16, ey + eH / 2), 8, alpha: (int)(eventFade * 12));
+
+            // Text with shadow
+            r.DrawText($"⚡ {_lastEvent}", cx + 1, ey + eH / 2 + 1, 11, (0, 0, 0),
+                anchorX: "center", anchorY: "center", alpha: (int)(eventFade * 80));
+            r.DrawText($"⚡ {_lastEvent}", cx, ey + eH / 2, 11, (230, 210, 240),
+                anchorX: "center", anchorY: "center", alpha: eventAlpha);
+        }
+
+        // ─── Winner overlay — cinematic celebration ───────────
+        if (_winner is int w)
+        {
+            // Full-screen dim with vignette
+            r.DrawRect((0, 0, 0), (0, 0, width, height), alpha: 180);
+            r.DrawRect((0, 0, 0), (0, 0, width, height / 6), alpha: 40);
+            r.DrawRect((0, 0, 0), (0, height - height / 6, width, height / 6), alpha: 40);
+            r.DrawRect((0, 0, 0), (0, 0, width / 6, height), alpha: 30);
+            r.DrawRect((0, 0, 0), (width - width / 6, 0, width / 6, height), alpha: 30);
+
+            // Purple/golden radial burst
+            for (int i = 0; i < 16; i++)
+            {
+                double ang = i * Math.PI / 8;
+                int rayLen = Math.Min(width, height) * 40 / 100;
+                int rx = cx + (int)(Math.Cos(ang) * rayLen);
+                int ry = cy + (int)(Math.Sin(ang) * rayLen);
+                r.DrawLine((200, 140, 255), (cx, cy), (rx, ry), width: 2, alpha: 12);
+            }
+            r.DrawCircle((200, 140, 255), (cx, cy), Math.Min(width, height) * 35 / 100, alpha: 6);
+            r.DrawCircle((220, 160, 255), (cx, cy), Math.Min(width, height) * 22 / 100, alpha: 8);
+
+            int bw2 = Math.Min(660, width * 55 / 100), bh2 = 240;
+            int bx2 = cx - bw2 / 2, by2 = cy - bh2 / 2;
+
+            // Panel shadow — deep multi-layer
+            r.DrawRect((0, 0, 0), (bx2 + 12, by2 + 12, bw2, bh2), alpha: 100);
+            r.DrawRect((0, 0, 0), (bx2 + 8, by2 + 8, bw2, bh2), alpha: 60);
+            r.DrawRect((0, 0, 0), (bx2 + 4, by2 + 4, bw2, bh2), alpha: 40);
+
+            // Panel background — dark beveled
+            BeveledRect.Draw(r, bx2, by2, bw2, bh2, (18, 10, 26), bevelSize: 4);
+
+            // Purple/gold accent double border
+            r.DrawRect((200, 140, 255), (bx2, by2, bw2, bh2), width: 3, alpha: 220);
+            r.DrawRect((180, 120, 240), (bx2 + 5, by2 + 5, bw2 - 10, bh2 - 10), width: 1, alpha: 80);
+            r.DrawRect((220, 180, 255), (bx2, by2, bw2, 4), alpha: 180);
+            r.DrawRect((200, 160, 240), (bx2 + 1, by2 + 4, bw2 - 2, 2), alpha: 60);
+
+            // Inner glow
+            r.DrawCircle((200, 140, 255), (cx, cy), Math.Min(bw2, bh2) * 40 / 100, alpha: 10);
+            r.DrawCircle((180, 120, 240), (cx, cy), Math.Min(bw2, bh2) * 25 / 100, alpha: 8);
+
+            // Trophy emoji with halo
+            r.DrawCircle((200, 140, 255), (cx, by2 + 55), 24, alpha: 14);
+            r.DrawText("🏆", cx + 2, by2 + 55 + 2, 52, (0, 0, 0),
+                anchorX: "center", anchorY: "center", alpha: 80);
+            r.DrawText("🏆", cx, by2 + 55, 52, (255, 220, 80),
+                anchorX: "center", anchorY: "center");
+
+            // Winner name — large, embossed
+            int nameFs = 38;
+            r.DrawText(PlayerName(w), cx + 2, by2 + 112 + 2, nameFs, (0, 0, 0),
+                anchorX: "center", anchorY: "center", bold: true, alpha: 140);
+            r.DrawText(PlayerName(w), cx - 1, by2 + 112 - 1, nameFs, (255, 255, 240),
+                anchorX: "center", anchorY: "center", bold: true, alpha: 80);
+            r.DrawText(PlayerName(w), cx, by2 + 112, nameFs, (255, 245, 200),
+                anchorX: "center", anchorY: "center", bold: true);
+
+            // Subtitle
+            r.DrawCircle((200, 140, 255), (cx, by2 + 152), 40, alpha: 6);
+            r.DrawText("🦄 UNICORN CHAMPION! 🦄", cx + 1, by2 + 155 + 1, 20, (0, 0, 0),
+                anchorX: "center", anchorY: "center", alpha: 80);
+            r.DrawText("🦄 UNICORN CHAMPION! 🦄", cx, by2 + 155, 20, (220, 160, 255),
+                anchorX: "center", anchorY: "center");
+
+            // Decorative separators
+            int lineW = bw2 * 60 / 100;
+            r.DrawLine((200, 140, 255), (cx - lineW / 2, by2 + 88), (cx + lineW / 2, by2 + 88), width: 1, alpha: 40);
+            r.DrawLine((200, 140, 255), (cx - lineW / 2, by2 + 175), (cx + lineW / 2, by2 + 175), width: 1, alpha: 35);
+
+            // Corner ornaments
+            for (int ci = 0; ci < 4; ci++)
+            {
+                int ccx = ci < 2 ? bx2 + 10 : bx2 + bw2 - 10;
+                int ccy = ci % 2 == 0 ? by2 + 10 : by2 + bh2 - 10;
+                r.DrawCircle((200, 140, 255), (ccx, ccy), 8, width: 1, alpha: 35);
+                r.DrawCircle((220, 160, 255), (ccx, ccy), 4, alpha: 25);
+            }
+
+            // Bottom unicorn emoji row
+            r.DrawText("🦄", cx - 40, by2 + bh2 - 22, 20, (220, 180, 255),
+                anchorX: "center", anchorY: "center");
+            r.DrawText("✨", cx, by2 + bh2 - 22, 20, (220, 180, 255),
+                anchorX: "center", anchorY: "center");
+            r.DrawText("🦄", cx + 40, by2 + bh2 - 22, 20, (220, 180, 255),
+                anchorX: "center", anchorY: "center");
+        }
+
+        // ─── Animation overlay layers ─────────────────────────
         _particles.Draw(r);
         foreach (var ring in _pulseRings) ring.Draw(r);
         foreach (var fly in _cardFlips) fly.Draw(r);
         foreach (var sc in _showcases) sc.Draw(r);
         foreach (var flash in _flashes) flash.Draw(r, width, height);
         foreach (var pop in _textPops) pop.Draw(r);
+        foreach (var expl in _explosions) expl.Draw(r);
         _waveBand.Draw(r, width, height);
         _heatShimmer.Draw(r, width, height);
         _vignette.Draw(r, width, height);
 
-        // Reaction overlay
+        // ─── Reaction full-screen dim ─────────────────────────
         if (_reactionActive)
         {
-            r.DrawRect((0, 0, 0), (0, 0, width, height), alpha: 120);
-            string names = _reactionPending.Count > 0
-                ? string.Join(", ", _reactionPending.Select(s => PlayerName(s)))
-                : "...";
-            string txt = $"Reaction: {names}";
-            r.DrawText(txt, width / 2, height / 2, 34, (245, 245, 245), anchorX: "center", anchorY: "center");
+            r.DrawRect((0, 0, 0), (0, 0, width, height), alpha: 80);
         }
     }
 

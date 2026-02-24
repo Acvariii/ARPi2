@@ -282,7 +282,7 @@ public static class CardRendering
 
         // Compute illustration variant — use fixed if provided, otherwise hash from card kind string
         int variant = fixedVariant >= 0 ? fixedVariant % 4
-            : Math.Abs(cardKind.GetHashCode() ^ (x2 * 7919 + w2 * 31)) % 4;
+            : (cardKind.GetHashCode() & 0x7FFFFFFF) % 4;
 
         // ── Multi-layer soft shadow — card floats above surface ──
         SoftShadow.Draw(r, x2 + 5, y2 + 7, w2, h2, layers: 6, maxAlpha: 110);
@@ -397,125 +397,178 @@ public static class CardRendering
         r.DrawRect((255, 255, 255), (x2 + illInset, bandY, w2 - illInset * 2, 1), alpha: 12);
     }
 
-    // ───── Draw an Unstable Unicorns card with kind-specific styling ─────
+    // ───── Draw an Unstable Unicorns card — EK-quality premium rendering ─────
     public static void DrawUUCard(Renderer r,
         (int x, int y, int w, int h) rect,
         string emoji, string name, string kind,
         (int R, int G, int B) accentRgb,
-        string? desc = null)
+        string? desc = null,
+        int fixedVariant = -1)
     {
         int x2 = rect.x, y2 = rect.y, w2 = rect.w, h2 = rect.h;
         int cx = x2 + w2 / 2, cy = y2 + h2 / 2;
+        string k = (kind ?? "").ToLowerInvariant();
 
-        // Kind-specific background tint
-        var baseBg = kind switch
+        // Per-kind palette
+        var (accent, bgTint, bgTint2) = k switch
         {
-            "baby_unicorn" => (38, 18, 38),
-            "unicorn"      => (18, 20, 42),
-            "upgrade"      => (10, 32, 14),
-            "downgrade"    => (35, 10, 10),
-            "magic"        => (10, 18, 42),
-            "instant"      => (35, 28, 8),
-            _              => (20, 20, 28),
+            "baby_unicorn" => ((220, 170, 255), (38, 12, 42),  (55, 22, 60)),
+            "unicorn"      => ((140, 120, 255), (12, 8, 42),   (22, 16, 60)),
+            "upgrade"      => ((80, 220, 130),  (6, 28, 14),   (12, 42, 22)),
+            "downgrade"    => ((240, 70, 70),   (38, 8, 8),    (55, 14, 12)),
+            "magic"        => ((100, 140, 255), (10, 10, 42),  (16, 18, 60)),
+            "instant"      => ((245, 200, 60),  (35, 25, 6),   (50, 40, 10)),
+            "neigh"        => ((180, 180, 180), (18, 18, 18),  (30, 30, 32)),
+            "super_neigh"  => ((200, 120, 255), (18, 8, 28),   (30, 14, 45)),
+            _              => ((150, 120, 255), (14, 10, 28),  (22, 16, 42)),
         };
 
-        // Shadow
-        r.DrawRect((0, 0, 0), (x2 + 4, y2 + 4, w2, h2), alpha: 90);
+        // Illustration variant from hash (must NOT depend on position/size — they change during animation)
+        int variant = fixedVariant >= 0 ? fixedVariant % 4
+            : ((k.GetHashCode() ^ (name ?? "").GetHashCode()) & 0x7FFFFFFF) % 4;
 
-        // Card base
-        r.DrawRect(baseBg, (x2, y2, w2, h2));
+        // ── Multi-layer soft shadow ──
+        SoftShadow.Draw(r, x2 + 5, y2 + 7, w2, h2, layers: 6, maxAlpha: 110);
 
-        // Header band — top portion with accent
-        int headerH = h2 * 25 / 100;
-        r.DrawRect(accentRgb, (x2, y2, w2, headerH), alpha: 45);
+        // ── Beveled card body ──
+        int bevel = Math.Max(3, w2 / 22);
+        BeveledRect.Draw(r, x2, y2, w2, h2, bgTint, bevelSize: bevel);
 
-        // Kind-specific decorative elements
-        if (kind is "unicorn" or "baby_unicorn")
+        // ── SkiaSharp smooth face gradient + noise texture ──
         {
-            // Sparkle dots
-            r.DrawCircle(accentRgb, (x2 + w2 * 15 / 100, y2 + h2 * 15 / 100), Math.Max(2, w2 / 18), alpha: 40);
-            r.DrawCircle(accentRgb, (x2 + w2 * 85 / 100, y2 + h2 * 20 / 100), Math.Max(2, w2 / 22), alpha: 35);
-            r.DrawCircle(accentRgb, (x2 + w2 * 80 / 100, y2 + h2 * 75 / 100), Math.Max(2, w2 / 20), alpha: 30);
-        }
-        else if (kind == "upgrade")
-        {
-            // Upward chevron pattern
-            int chevY = y2 + h2 - h2 / 5;
-            r.DrawLine(accentRgb, (x2 + w2 / 4, chevY), (cx, chevY - h2 / 8), width: 1, alpha: 35);
-            r.DrawLine(accentRgb, (cx, chevY - h2 / 8), (x2 + w2 * 3 / 4, chevY), width: 1, alpha: 35);
-        }
-        else if (kind == "downgrade")
-        {
-            // Downward chevron pattern
-            int chevY = y2 + h2 * 65 / 100;
-            r.DrawLine(accentRgb, (x2 + w2 / 4, chevY), (cx, chevY + h2 / 8), width: 1, alpha: 35);
-            r.DrawLine(accentRgb, (cx, chevY + h2 / 8), (x2 + w2 * 3 / 4, chevY), width: 1, alpha: 35);
-        }
-        else if (kind == "magic")
-        {
-            // Small sparkle circle
-            r.DrawCircle(accentRgb, (cx, cy + h2 / 6), Math.Max(4, w2 / 5), width: 1, alpha: 25);
-        }
-        else if (kind == "instant")
-        {
-            // Lightning bolt accent
-            r.DrawLine(accentRgb, (cx - 4, y2 + headerH + 4), (cx + 4, y2 + headerH + h2 / 5), width: 2, alpha: 30);
+            string faceKey = $"uuface_{k}_{w2}_{h2}";
+            var faceTex = r.GetOrCreateSkiaTexture(faceKey, w2, h2, (canvas, cw, ch) =>
+            {
+                using var bgPaint = new SKPaint { IsAntialias = true };
+                var accentSK = new SKColor((byte)accent.Item1, (byte)accent.Item2, (byte)accent.Item3);
+                var bgTintSK = new SKColor((byte)bgTint.Item1, (byte)bgTint.Item2, (byte)bgTint.Item3);
+                var bgTint2SK = new SKColor((byte)bgTint2.Item1, (byte)bgTint2.Item2, (byte)bgTint2.Item3);
+
+                // Top accent glow fading into card body
+                bgPaint.Shader = SKShader.CreateLinearGradient(
+                    new SKPoint(cw / 2f, 0), new SKPoint(cw / 2f, ch),
+                    new[] {
+                        accentSK.WithAlpha(50),
+                        bgTint2SK.WithAlpha(18),
+                        SKColors.Transparent,
+                        new SKColor(0, 0, 0, 40)
+                    },
+                    new float[] { 0f, 0.25f, 0.55f, 1f },
+                    SKShaderTileMode.Clamp);
+                canvas.DrawRect(3, 0, cw - 6, ch, bgPaint);
+
+                // Central radial glow
+                bgPaint.Shader = SKShader.CreateRadialGradient(
+                    new SKPoint(cw / 2f, ch * 0.4f), cw * 0.5f,
+                    new[] { accentSK.WithAlpha(12), SKColors.Transparent },
+                    SKShaderTileMode.Clamp);
+                canvas.DrawRect(0, 0, cw, ch, bgPaint);
+
+                // Subtle noise texture — matte card surface
+                using var noisePaint = new SKPaint { IsAntialias = false };
+                for (int tx = 4; tx < cw - 4; tx += 6)
+                    for (int ty = 4; ty < ch - 4; ty += 8)
+                    {
+                        int seed = (tx * 73 + ty * 137) & 0xFF;
+                        if (seed < 40)
+                        {
+                            noisePaint.Color = new SKColor(255, 255, 255, (byte)(3 + (seed & 3)));
+                            canvas.DrawPoint(tx, ty, noisePaint);
+                        }
+                    }
+            });
+            r.DrawTexture(faceTex, new Rectangle(x2, y2, w2, h2));
         }
 
-        // Subtle tint on body
-        r.DrawRect(accentRgb, (x2, y2 + headerH, w2, h2 - headerH), alpha: 8);
+        // ══ ILLUSTRATION ZONE ══════════════════════════════════
+        int illInset = Math.Max(6, w2 / 8);
+        int illTop = y2 + h2 * 15 / 100;
+        int illBot = y2 + h2 * 68 / 100;
+        int illArea_x = x2 + illInset;
+        int illArea_y = illTop;
+        int illArea_w = w2 - illInset * 2;
+        int illArea_h = illBot - illTop;
 
-        // Inner inset frame
-        int inset = Math.Max(3, w2 / 14);
-        r.DrawRect(accentRgb, (x2 + inset, y2 + inset, w2 - 2 * inset, h2 - 2 * inset), width: 1, alpha: 50);
+        // Dark inset panel for illustration
+        r.DrawRect((0, 0, 0), (illArea_x - 1, illArea_y - 1, illArea_w + 2, illArea_h + 2), alpha: 40);
+        r.DrawRect(bgTint, (illArea_x, illArea_y, illArea_w, illArea_h), alpha: 140);
+        // Vignette inside
+        r.DrawRect((0, 0, 0), (illArea_x, illArea_y, illArea_w, Math.Max(1, illArea_h / 8)), alpha: 16);
+        r.DrawRect((0, 0, 0), (illArea_x, illArea_y + illArea_h - Math.Max(1, illArea_h / 8), illArea_w, Math.Max(1, illArea_h / 8)), alpha: 22);
 
-        // Outer border — accent colored
-        r.DrawRect(accentRgb, (x2, y2, w2, h2), width: 3, alpha: 230);
+        // Rich procedural illustration (clipped to illustration area)
+        r.PushClip(new Rectangle(illArea_x, illArea_y, illArea_w, illArea_h));
+        UUCardArt.DrawIllustration(r, k, variant, (illArea_x, illArea_y, illArea_w, illArea_h), name);
+        r.PopClip();
 
-        // Kind label badge at top-left
-        string kindLabel = kind switch
+        // Illustration frame + corner ornaments
+        r.DrawRect(accent, (illArea_x, illArea_y, illArea_w, illArea_h), width: 1, alpha: 55);
+        int co = 3;
+        r.DrawRect(accent, (illArea_x - co, illArea_y - co, co * 2 + 1, co * 2 + 1), alpha: 40);
+        r.DrawRect(accent, (illArea_x + illArea_w - co, illArea_y - co, co * 2 + 1, co * 2 + 1), alpha: 40);
+        r.DrawRect(accent, (illArea_x - co, illArea_y + illArea_h - co, co * 2 + 1, co * 2 + 1), alpha: 40);
+        r.DrawRect(accent, (illArea_x + illArea_w - co, illArea_y + illArea_h - co, co * 2 + 1, co * 2 + 1), alpha: 40);
+
+        // ── Premium layered outer border ──
+        r.DrawRect(accent, (x2, y2, w2, h2), width: 3, alpha: 240);
+        r.DrawRect(accent, (x2 + 4, y2 + 4, w2 - 8, h2 - 8), width: 1, alpha: 45);
+        // 3D highlight edge (top/left)
+        r.DrawRect((255, 255, 255), (x2 + 1, y2 + 1, w2 - 2, 2), alpha: 60);
+        r.DrawRect((255, 255, 255), (x2 + 1, y2 + 1, 2, h2 - 2), alpha: 40);
+        // 3D shadow edge (bottom/right)
+        r.DrawRect((0, 0, 0), (x2 + 1, y2 + h2 - 3, w2 - 2, 3), alpha: 55);
+        r.DrawRect((0, 0, 0), (x2 + w2 - 3, y2 + 1, 3, h2 - 2), alpha: 45);
+
+        // ── Glossy reflection stripe ──
+        GlossyReflection.Draw(r, x2, y2, w2, h2, alpha: 18);
+
+        // ── Shadowed corner kind labels ──
+        string kindLabel = k switch
         {
             "baby_unicorn" => "BABY",
-            "unicorn" => "UNI",
-            "upgrade" => "UP",
-            "downgrade" => "DOWN",
-            "magic" => "MAG",
-            "instant" => "INST",
-            "neigh" => "NEI",
-            "super_neigh" => "S.NEI",
-            _ => kind.Length > 4 ? kind[..4].ToUpperInvariant() : kind.ToUpperInvariant(),
+            "unicorn"      => "UNI",
+            "upgrade"      => "UP",
+            "downgrade"    => "DOWN",
+            "magic"        => "MAG",
+            "instant"      => "INST",
+            "neigh"        => "NEI",
+            "super_neigh"  => "S.NEI",
+            _              => k.Length > 4 ? k[..4].ToUpperInvariant() : k.ToUpperInvariant(),
         };
-        int badgeFs = Math.Max(7, h2 * 7 / 100);
-        r.DrawText(kindLabel, x2 + 6, y2 + 5, badgeFs, accentRgb, bold: true, anchorX: "left", anchorY: "top");
+        int cornerFs = Math.Max(8, h2 * 9 / 100);
+        // Top-left (shadow then color)
+        r.DrawText(kindLabel, x2 + 10, y2 + 9, cornerFs, (0, 0, 0), bold: true, anchorX: "left", anchorY: "top", alpha: 90);
+        r.DrawText(kindLabel, x2 + 9, y2 + 8, cornerFs, accent, bold: true, anchorX: "left", anchorY: "top");
+        // Bottom-right
+        r.DrawText(kindLabel, x2 + w2 - 8, y2 + h2 - 7, cornerFs, (0, 0, 0), bold: true, anchorX: "right", anchorY: "bottom", alpha: 90);
+        r.DrawText(kindLabel, x2 + w2 - 9, y2 + h2 - 8, cornerFs, accent, bold: true, anchorX: "right", anchorY: "bottom");
 
-        // Large emoji — scale down for multi-emoji strings
-        int emojiY = cy - h2 * 8 / 100;
-        int nEmoji = 0;
-        foreach (char ch in emoji ?? "")
-            if (ch > 0x2000 && ch != 0xFE0F && ch != 0x200D) nEmoji++;
-        nEmoji = Math.Max(1, nEmoji);
-        int baseEmojiFs = Math.Max(16, h2 * 32 / 100);
-        int emojiFs = Math.Min(baseEmojiFs, Math.Max(14, w2 * 70 / 100 / nEmoji));
-        r.DrawText(emoji ?? "", cx + 1, emojiY + 1, emojiFs, (0, 0, 0), alpha: 60, anchorX: "center", anchorY: "center");
-        r.DrawText(emoji ?? "", cx, emojiY, emojiFs, (255, 255, 255), anchorX: "center", anchorY: "center");
-
-        // Card name (small, below emoji)
+        // ── Card name — below illustration ──
         string displayName = (name ?? "").Trim();
         if (displayName.Length > 0)
         {
-            int nameFs = Math.Max(7, Math.Min(11, h2 * 9 / 100));
-            string dn = displayName.Length > 16 ? displayName[..16] : displayName;
-            r.DrawText(dn, cx, y2 + h2 * 76 / 100, nameFs, (220, 220, 220), bold: true, anchorX: "center", anchorY: "center");
+            int nameFs = Math.Max(8, Math.Min(12, h2 * 10 / 100));
+            string dn = displayName.Length > 18 ? displayName[..18] : displayName;
+            int nameY = y2 + h2 * 74 / 100;
+            r.DrawText(dn, cx + 1, nameY + 1, nameFs, (0, 0, 0), bold: true, anchorX: "center", anchorY: "center", alpha: 80);
+            r.DrawText(dn, cx, nameY, nameFs, (230, 230, 240), bold: true, anchorX: "center", anchorY: "center");
         }
 
-        // Description text (tiny, at bottom)
+        // ── Description text ──
         string descText = (desc ?? "").Trim();
         if (descText.Length > 0 && h2 > 80)
         {
             int descFs = Math.Max(6, Math.Min(9, h2 * 6 / 100));
-            string dd = descText.Length > 28 ? descText[..28] : descText;
-            r.DrawText(dd, cx, y2 + h2 * 90 / 100, descFs, (160, 160, 170), anchorX: "center", anchorY: "center");
+            string dd = descText.Length > 32 ? descText[..32] : descText;
+            int descY = y2 + h2 * 84 / 100;
+            r.DrawText(dd, cx, descY, descFs, (160, 160, 175), anchorX: "center", anchorY: "center");
         }
+
+        // ── Bottom accent band ──
+        int bandY = y2 + h2 * 92 / 100;
+        int bandH2 = Math.Max(2, h2 / 30);
+        r.DrawRect(accent, (x2 + illInset, bandY, w2 - illInset * 2, bandH2), alpha: 50);
+        r.DrawRect((255, 255, 255), (x2 + illInset, bandY, w2 - illInset * 2, 1), alpha: 12);
     }
 
     // ───── Background dispatch ─────

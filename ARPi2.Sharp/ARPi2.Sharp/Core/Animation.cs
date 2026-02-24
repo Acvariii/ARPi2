@@ -208,6 +208,9 @@ public class CardShowcaseAnim
     public float T;
     public bool Done;
 
+    // Optional UU-card data for premium rendering
+    public string? Kind, CardName, Desc;
+
     // Sparkle timer
     private float _sparkleTimer;
     private const float SparkleInterval = 0.08f;
@@ -220,13 +223,15 @@ public class CardShowcaseAnim
         (int, int, int)? accentColor = null, string corner = "",
         int cardW = 140, int cardH = 195,
         float flyDuration = 0.35f, float holdDuration = 1.8f, float fadeDuration = 0.4f,
-        (int, int)? src = null)
+        (int, int)? src = null,
+        string? kind = null, string? cardName = null, string? desc = null)
     {
         X = x; Y = y; CardW = cardW; CardH = cardH;
         Emoji = emoji; Label = label; Corner = corner;
         AccentColor = accentColor ?? (160, 80, 200);
         FlyDuration = flyDuration; HoldDuration = holdDuration; FadeDuration = fadeDuration;
         Src = src ?? (x, y + 300);
+        Kind = kind; CardName = cardName; Desc = desc;
     }
 
     public float TotalDuration => FlyDuration + HoldDuration + FadeDuration;
@@ -319,9 +324,17 @@ public class CardShowcaseAnim
         // Shadow
         r.DrawRect((0, 0, 0), (dx + 6, dy + 6, w, h), alpha: (int)(60 * alpha));
 
-        // Draw the card using CardRendering
-        CardRendering.DrawEmojiCard(r, (dx, dy, w, h), Emoji, "",
-            accentRgb: AccentColor, corner: Corner, maxTitleFontSize: 14);
+        // Draw the card using premium renderer if game data is available
+        if (!string.IsNullOrEmpty(Kind))
+        {
+            CardRendering.DrawUUCard(r, (dx, dy, w, h), Emoji, CardName ?? "",
+                Kind, AccentColor, Desc);
+        }
+        else
+        {
+            CardRendering.DrawEmojiCard(r, (dx, dy, w, h), Emoji, "",
+                accentRgb: AccentColor, corner: Corner, maxTitleFontSize: 14);
+        }
 
         // Alpha overlay for fade-out
         if (alpha < 1f)

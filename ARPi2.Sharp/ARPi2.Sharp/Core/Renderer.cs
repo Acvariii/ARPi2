@@ -33,6 +33,10 @@ public sealed class Renderer : IDisposable
     // Begin/End state
     private bool _batchOpen;
 
+    // Scissor clipping stack
+    private readonly Stack<Rectangle> _clipStack = new();
+    private static readonly RasterizerState _scissorRaster = new() { ScissorTestEnable = true };
+
     public Renderer(GraphicsDevice gd, int width, int height)
     {
         _gd     = gd;
@@ -136,6 +140,44 @@ public sealed class Renderer : IDisposable
     {
         EndFrame();
         BeginFrame();
+    }
+
+    /// <summary>Enable scissor-rectangle clipping. All draws will be clipped to the rect.</summary>
+    public void PushClip(Rectangle clip)
+    {
+        // End the current non-scissor batch
+        if (_batchOpen) { _sb.End(); _batchOpen = false; }
+
+        _clipStack.Push(_gd.ScissorRectangle);
+        _gd.ScissorRectangle = clip;
+
+        // Restart batch with scissor test enabled
+        _sb.Begin(SpriteSortMode.Deferred, BlendState.NonPremultiplied,
+                  SamplerState.LinearClamp, null, _scissorRaster);
+        _batchOpen = true;
+    }
+
+    /// <summary>Restore previous scissor state (or disable scissor test).</summary>
+    public void PopClip()
+    {
+        if (_batchOpen) { _sb.End(); _batchOpen = false; }
+
+        if (_clipStack.Count > 0)
+            _gd.ScissorRectangle = _clipStack.Pop();
+
+        // Restart normal batch (no scissor if stack is empty, otherwise caller
+        // still has an outer clip active — but we always start a fresh batch here)
+        if (_clipStack.Count > 0)
+        {
+            _sb.Begin(SpriteSortMode.Deferred, BlendState.NonPremultiplied,
+                      SamplerState.LinearClamp, null, _scissorRaster);
+        }
+        else
+        {
+            _sb.Begin(SpriteSortMode.Deferred, BlendState.NonPremultiplied,
+                      SamplerState.LinearClamp, null, null);
+        }
+        _batchOpen = true;
     }
 
     // ─── Primitives ────────────────────────────────────────────────────
