@@ -67,6 +67,10 @@
               "target": "Package",
               "version": "[2.2.1, )"
             },
+            "QRCoder": {
+              "target": "Package",
+              "version": "[1.6.0, )"
+            },
             "SkiaSharp": {
               "target": "Package",
               "version": "[2.88.9, )"

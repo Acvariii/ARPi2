@@ -1,6 +1,6 @@
 import React from 'react';
-import { Box, Chip, Paper, Stack, Typography } from '@mui/material';
-import { useTheme } from '@mui/material/styles';
+import { Box, Chip, Paper, Stack, Typography, LinearProgress } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import type { Snapshot } from '../../types';
 import EmojiCardTile from '../../components/EmojiCardTile';
 import GameBanner from '../../components/GameBanner';
@@ -12,10 +12,20 @@ type Props = {
   playerColors: string[];
 };
 
+/* ──────────────────────────────────────────
+   Exploding Kittens 2 — Amazon Luna vibe
+   ────────────────────────────────────────── */
+
+const EK2_ORANGE = '#ff8c00';
+const EK2_RED = '#e53935';
+const EK2_DARK = '#0e0a14';
+const EK2_PANEL = '#1a1422';
+const EK2_ACCENT = '#ffab00';
+const EK2_GOLD = '#ffd740';
+
 export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playerColors }: Props): React.ReactElement {
   if (snapshot.server_state !== 'exploding_kittens' || !snapshot.exploding_kittens) return <></>;
 
-  const theme = useTheme();
   const ek = snapshot.exploding_kittens;
 
   const turnSeat = typeof ek.current_turn_seat === 'number' ? ek.current_turn_seat : null;
@@ -34,27 +44,21 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
     const t = String(text || '').trim();
     const u = t.toUpperCase();
 
-    // Control tiles (not actual hand cards)
-    if (u === 'DRAW') {
-      return { emoji: '🂠', title: 'Draw', corner: 'DRAW', accent: theme.palette.primary.main, isBack: true };
-    }
-    if (u === 'NOPE') {
-      return { emoji: '🚫', title: 'Nope', corner: 'NOPE', accent: theme.palette.grey[900] };
-    }
-    if (u.startsWith('FAVOR')) {
-      return { emoji: '🎁', title: t, corner: 'FAV', accent: theme.palette.primary.dark };
-    }
+    // Control tiles
+    if (u === 'DRAW') return { emoji: '🂠', title: 'Draw', corner: 'DRAW', accent: EK2_ORANGE, isBack: true };
+    if (u === 'NOPE') return { emoji: '🚫', title: 'Nope!', corner: 'NOPE', accent: EK2_RED };
+    if (u.startsWith('FAVOR')) return { emoji: '🎁', title: t, corner: 'FAV', accent: '#e040fb' };
 
-    // EK card kinds: EK, DEF, ATK, SKIP, SHUF, FUT, FAV, NOPE
-    if (u === 'EK') return { emoji: '💣😼', title: 'Explode', corner: 'EK', accent: theme.palette.error.main };
-    if (u === 'DEF') return { emoji: '🧯', title: 'Defuse', corner: 'DEF', accent: theme.palette.success.main };
-    if (u === 'ATK') return { emoji: '⚔️', title: 'Attack', corner: 'ATK', accent: theme.palette.warning.main };
-    if (u === 'SKIP') return { emoji: '⏭️', title: 'Skip', corner: 'SKIP', accent: theme.palette.info.main };
-    if (u === 'SHUF') return { emoji: '🔀', title: 'Shuffle', corner: 'SHUF', accent: theme.palette.secondary.main };
-    if (u === 'FUT') return { emoji: '🔮', title: 'Future', corner: 'FUT', accent: theme.palette.grey[700] };
-    if (u === 'FAV') return { emoji: '🎁', title: 'Favor', corner: 'FAV', accent: theme.palette.primary.main };
+    // EK card kinds
+    if (u === 'EK') return { emoji: '💣😼', title: 'EXPLODE!', corner: 'EK', accent: '#ff1744' };
+    if (u === 'DEF') return { emoji: '🧯', title: 'Defuse', corner: 'DEF', accent: '#00e676' };
+    if (u === 'ATK') return { emoji: '⚔️', title: 'Attack!', corner: 'ATK', accent: '#ff6e40' };
+    if (u === 'SKIP') return { emoji: '⏭️', title: 'Skip', corner: 'SKIP', accent: EK2_GOLD };
+    if (u === 'SHUF') return { emoji: '🔀', title: 'Shuffle', corner: 'SHUF', accent: '#448aff' };
+    if (u === 'FUT') return { emoji: '🔮', title: 'Future', corner: 'FUT', accent: '#b388ff' };
+    if (u === 'FAV') return { emoji: '🎁', title: 'Favor', corner: 'FAV', accent: '#ff80ab' };
 
-    return { emoji: '😺', title: t || '—', corner: u || '—', accent: theme.palette.divider };
+    return { emoji: '😺', title: t || '—', corner: u || '—', accent: EK2_ACCENT };
   };
 
   const renderCardTile = (opts: { key: string | number; text: string; onClick?: () => void; enabled?: boolean }) => {
@@ -72,7 +76,7 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
         isBack={!!face.isBack}
         enabled={clickable}
         onClick={opts.onClick}
-        width={74}
+        width={78}
       />
     );
   };
@@ -80,91 +84,202 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
   const eliminatedSet = new Set((ek.eliminated_players || []).map((n) => Number(n)));
   const iAmEliminated = mySeat !== null && eliminatedSet.has(mySeat);
 
+  const deckCount = typeof ek.deck_count === 'number' ? ek.deck_count : null;
+  const deckDanger = deckCount !== null && deckCount <= 5;
+  const deckWarn = deckCount !== null && deckCount <= 10;
+
   return (
     <>
       <GameBanner game="exploding_kittens" />
-      <Paper variant="outlined" sx={{ p: 1.5, mb: 2, animation: 'fadeInUp 0.4s ease-out' }}>
-        <Stack spacing={1}>
+
+      {/* ──── HUD BAR ──── */}
+      <Paper
+        variant="outlined"
+        sx={{
+          p: 1.5,
+          mb: 2,
+          bgcolor: EK2_PANEL,
+          borderColor: alpha(EK2_ORANGE, 0.3),
+          borderWidth: 2,
+          animation: 'fadeInUp 0.4s ease-out',
+          position: 'relative',
+          overflow: 'hidden',
+          '&::before': {
+            content: '""',
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 3,
+            background: `linear-gradient(90deg, ${EK2_RED}, ${EK2_ORANGE}, ${EK2_GOLD})`,
+          },
+        }}
+      >
+        <Stack spacing={1.5}>
+          {/* Status chips row */}
           <Stack direction="row" spacing={1} justifyContent="center" flexWrap="wrap" useFlexGap>
-            <Typography variant="caption" color="text.secondary">
-              Deck:
-            </Typography>
             <Chip
-              label={`🃍 ${ek.deck_count ?? '?'} left`}
+              label={`${deckDanger ? '🔥' : '🃏'} ${deckCount ?? '?'} left`}
               size="small"
               sx={{
-                bgcolor:
-                  typeof ek.deck_count === 'number' && ek.deck_count <= 5
-                    ? '#c62828'
-                    : typeof ek.deck_count === 'number' && ek.deck_count <= 10
-                      ? '#e65100'
-                      : '#37474f',
+                bgcolor: deckDanger ? EK2_RED : deckWarn ? '#e65100' : '#37474f',
                 color: '#fff',
-                fontWeight: 700,
-                height: 20,
-                fontSize: '0.7rem',
-                animation: typeof ek.deck_count === 'number' && ek.deck_count <= 5 ? 'blink 0.8s ease-in-out infinite' : undefined,
+                fontWeight: 900,
+                height: 24,
+                fontSize: '0.75rem',
+                letterSpacing: '0.05em',
+                animation: deckDanger ? 'blink 0.8s ease-in-out infinite' : undefined,
+                border: `1px solid ${deckDanger ? '#ff5252' : 'transparent'}`,
               }}
             />
             {(ek.pending_draws ?? 1) > 1 && (
               <Chip
-                label={`Draw ${ek.pending_draws}×`}
+                label={`⚠ Draw ${ek.pending_draws}×`}
                 size="small"
-                sx={{ bgcolor: '#c62828', color: '#fff', fontWeight: 900, height: 20, fontSize: '0.7rem' }}
+                sx={{
+                  bgcolor: EK2_RED,
+                  color: '#fff',
+                  fontWeight: 900,
+                  height: 24,
+                  fontSize: '0.75rem',
+                  animation: 'blink 1s ease-in-out infinite',
+                }}
               />
             )}
             {ek.discard_top && (
-              <Chip label={`Discard: ${ek.discard_top}`} size="small" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
+              <Chip
+                label={`Discard: ${ek.discard_top}`}
+                size="small"
+                variant="outlined"
+                sx={{
+                  height: 24,
+                  fontSize: '0.7rem',
+                  borderColor: alpha(EK2_ORANGE, 0.4),
+                  color: alpha('#fff', 0.7),
+                }}
+              />
             )}
           </Stack>
-          <Typography variant="body2" color="text.secondary" align="center">
-            Turn: {turnSeat !== null ? seatLabel(turnSeat) : '—'}
-          </Typography>
+
+          {/* Turn indicator */}
+          <Box sx={{ textAlign: 'center' }}>
+            {turnSeat !== null ? (
+              <Typography
+                variant="body2"
+                sx={{
+                  fontWeight: 800,
+                  color: EK2_GOLD,
+                  letterSpacing: '0.08em',
+                  textShadow: `0 0 12px ${alpha(EK2_ORANGE, 0.5)}`,
+                }}
+              >
+                🐱 {seatLabel(turnSeat)}&apos;s Turn
+              </Typography>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                Turn: —
+              </Typography>
+            )}
+          </Box>
+
+          {/* Winner */}
           {typeof ek.winner === 'number' && (
-            <Typography variant="body2" sx={{ fontWeight: 700, animation: 'winnerShimmer 2s linear infinite, glowText 1.5s ease-in-out infinite' }} align="center">
-              🏆 Winner: {seatLabel(ek.winner)}
-            </Typography>
+            <Box
+              sx={{
+                textAlign: 'center',
+                py: 1,
+                borderRadius: 1,
+                background: `linear-gradient(135deg, ${alpha(EK2_GOLD, 0.15)}, ${alpha(EK2_ORANGE, 0.1)})`,
+                border: `1px solid ${alpha(EK2_GOLD, 0.3)}`,
+              }}
+            >
+              <Typography
+                variant="h6"
+                sx={{
+                  fontWeight: 900,
+                  background: `linear-gradient(90deg, ${EK2_GOLD}, ${EK2_ORANGE})`,
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  animation: 'winnerShimmer 2s linear infinite',
+                }}
+              >
+                🏆 {seatLabel(ek.winner)} — SURVIVOR!
+              </Typography>
+            </Box>
           )}
-          {/* NOPE window — prominent alert */}
+
+          {/* NOPE window — dramatic red alert */}
           {!!ek.nope_active && (
             <Paper
               variant="outlined"
               sx={{
-                p: 1,
-                borderColor: '#ef5350',
+                p: 1.5,
+                borderColor: EK2_RED,
                 borderWidth: 2,
-                bgcolor: '#ef535018',
+                bgcolor: alpha(EK2_RED, 0.12),
                 textAlign: 'center',
                 animation: 'nopeFlash 0.7s ease-in-out infinite',
+                position: 'relative',
+                overflow: 'hidden',
               }}
             >
-              <Typography variant="body1" sx={{ fontWeight: 900, color: '#ef5350' }}>
-                🚫 NOPE WINDOW OPEN! ({ek.nope_count ?? 0} played)
+              <Typography variant="body1" sx={{ fontWeight: 900, color: '#ff5252', letterSpacing: '0.1em' }}>
+                🚫 NOPE WINDOW — REACT NOW!
               </Typography>
+              {(ek.nope_count ?? 0) > 0 && (
+                <Typography variant="caption" sx={{ color: '#ff8a80', fontWeight: 700 }}>
+                  {ek.nope_count} Nope{(ek.nope_count ?? 0) > 1 ? 's' : ''} played
+                </Typography>
+              )}
+              <LinearProgress
+                variant="determinate"
+                value={100}
+                sx={{
+                  mt: 0.5,
+                  height: 3,
+                  bgcolor: alpha(EK2_RED, 0.2),
+                  '& .MuiLinearProgress-bar': {
+                    bgcolor: EK2_RED,
+                    animation: 'nopeCountdown 3s linear',
+                  },
+                }}
+              />
             </Paper>
           )}
 
+          {/* Last event */}
           {!!ek.last_event && (
-            <Typography variant="body2" sx={{ fontWeight: 700, animation: 'slideInRight 0.4s ease-out' }} align="center">
-              {ek.last_event}
+            <Typography
+              variant="body2"
+              sx={{
+                fontWeight: 700,
+                color: alpha('#fff', 0.85),
+                textAlign: 'center',
+                animation: 'slideInRight 0.4s ease-out',
+                borderLeft: `3px solid ${EK2_ORANGE}`,
+                pl: 1,
+                py: 0.25,
+              }}
+            >
+              ⚡ {ek.last_event}
             </Typography>
           )}
 
-          {/* See the Future — private cards visible only to the player who played FUT */}
+          {/* See the Future — private reveal */}
           {Array.isArray(ek.future_cards) && ek.future_cards.length > 0 && (
             <Paper
               variant="outlined"
               sx={{
                 p: 1,
-                borderColor: '#7e57c2',
+                borderColor: '#7c4dff',
                 borderWidth: 2,
-                bgcolor: '#7e57c218',
+                bgcolor: alpha('#7c4dff', 0.08),
                 textAlign: 'center',
                 animation: 'fadeInUp 0.4s ease-out',
               }}
             >
-              <Typography variant="caption" sx={{ fontWeight: 800, color: '#b39ddb', mb: 0.5, display: 'block' }}>
-                🔮 Top of deck (only you can see)
+              <Typography variant="caption" sx={{ fontWeight: 800, color: '#b388ff', mb: 0.5, display: 'block', letterSpacing: '0.05em' }}>
+                🔮 TOP OF DECK (only you)
               </Typography>
               <Stack direction="row" spacing={1} justifyContent="center" flexWrap="wrap" useFlexGap>
                 {ek.future_cards.map((c: string, i: number) => renderCardTile({ key: `fut-${i}`, text: c }))}
@@ -173,15 +288,31 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
           )}
 
           {iAmEliminated && (
-            <Typography variant="body2" color="error" sx={{ fontWeight: 800 }} align="center">
-              You exploded. You&apos;re out.
-            </Typography>
+            <Box
+              sx={{
+                textAlign: 'center',
+                py: 0.5,
+                bgcolor: alpha(EK2_RED, 0.1),
+                borderRadius: 1,
+                border: `1px solid ${alpha(EK2_RED, 0.3)}`,
+              }}
+            >
+              <Typography variant="body2" sx={{ fontWeight: 800, color: '#ff5252' }}>
+                💀 You exploded. Game over for you.
+              </Typography>
+            </Box>
           )}
         </Stack>
       </Paper>
 
-      <Typography variant="subtitle1" gutterBottom align="center">
-        Your Hand
+      {/* ──── YOUR HAND ──── */}
+      <Typography
+        variant="subtitle1"
+        gutterBottom
+        align="center"
+        sx={{ fontWeight: 800, color: EK2_GOLD, letterSpacing: '0.1em', fontSize: '0.95rem' }}
+      >
+        YOUR HAND
       </Typography>
 
       {(ek.your_hand || []).length ? (
@@ -190,13 +321,15 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
           sx={{
             p: 1.25,
             mb: 2,
-            borderColor: typeof mySeat === 'number' && mySeat >= 0 ? playerColors[mySeat % playerColors.length] : undefined,
+            bgcolor: alpha(EK2_PANEL, 0.9),
+            borderColor: typeof mySeat === 'number' && mySeat >= 0 ? playerColors[mySeat % playerColors.length] : alpha(EK2_ORANGE, 0.3),
+            borderWidth: 2,
           }}
         >
           <Box
             sx={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(74px, 74px))',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(78px, 78px))',
               gap: 1,
               alignItems: 'start',
               justifyContent: 'center',
@@ -213,28 +346,36 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
           </Box>
         </Paper>
       ) : (
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }} align="center">
-          No cards (yet).
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2, fontStyle: 'italic' }} align="center">
+          No cards yet.
         </Typography>
       )}
 
+      {/* ──── ACTIONS ──── */}
       {(!snapshot.popup?.active && (!!ctrlFavorTargets.length || !!ctrlNope || !!ctrlDraw || !!ek.awaiting_favor_target)) && (
         <>
-          <Typography variant="subtitle1" gutterBottom align="center">
-            Actions
+          <Typography
+            variant="subtitle1"
+            gutterBottom
+            align="center"
+            sx={{ fontWeight: 800, color: EK2_ORANGE, letterSpacing: '0.1em', fontSize: '0.95rem' }}
+          >
+            ACTIONS
           </Typography>
           <Paper
             variant="outlined"
             sx={{
               p: 1.25,
               mb: 2,
-              borderColor: typeof mySeat === 'number' && mySeat >= 0 ? playerColors[mySeat % playerColors.length] : undefined,
+              bgcolor: alpha(EK2_PANEL, 0.9),
+              borderColor: alpha(EK2_ORANGE, 0.3),
+              borderWidth: 2,
             }}
           >
             <Box
               sx={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(74px, 74px))',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(78px, 78px))',
                 gap: 1,
                 alignItems: 'start',
                 justifyContent: 'center',
@@ -268,43 +409,108 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
             </Box>
 
             {!!ek.awaiting_favor_target && (
-              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block', textAlign: 'center' }}>
-                Choose a player to Favor.
+              <Typography
+                variant="caption"
+                sx={{
+                  mt: 1,
+                  display: 'block',
+                  textAlign: 'center',
+                  color: '#ff80ab',
+                  fontWeight: 700,
+                }}
+              >
+                🎁 Choose a player to Favor.
               </Typography>
             )}
           </Paper>
         </>
       )}
 
+      {/* ──── PLAYERS ──── */}
       {!!ek.active_players?.length && (
         <Box sx={{ mb: 2 }}>
-          <Typography variant="subtitle1" gutterBottom align="center">
-            Players
+          <Typography
+            variant="subtitle1"
+            gutterBottom
+            align="center"
+            sx={{ fontWeight: 800, color: alpha('#fff', 0.6), letterSpacing: '0.1em', fontSize: '0.85rem' }}
+          >
+            PLAYERS
           </Typography>
-          <Stack spacing={1} alignItems="center">
+          <Stack spacing={0.75} alignItems="center">
             {(ek.active_players || []).map((pidx) => {
               const eliminated = eliminatedSet.has(Number(pidx));
+              const isMyTurn = turnSeat === pidx;
+              const cardCount = ek.hand_counts?.[String(pidx)] ?? 0;
               return (
                 <Paper
                   key={pidx}
                   variant="outlined"
                   sx={{
-                    p: 1.25,
-                    borderColor: playerColors[pidx % playerColors.length],
+                    p: 1,
+                    borderColor: isMyTurn ? EK2_GOLD : playerColors[pidx % playerColors.length],
+                    borderWidth: isMyTurn ? 2 : 1,
                     width: '100%',
                     maxWidth: 440,
-                    textAlign: 'center',
-                    opacity: eliminated ? 0.55 : 1,
+                    bgcolor: isMyTurn ? alpha(EK2_GOLD, 0.06) : alpha(EK2_PANEL, 0.7),
+                    opacity: eliminated ? 0.45 : 1,
                     animation: `fadeInUp 0.3s ease-out ${pidx * 0.06}s both`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 1,
                   }}
                 >
-                  <Typography variant="body2" sx={{ fontWeight: 700 }} align="center">
-                    {seatLabel(pidx)}{eliminated ? ' (out)' : ''}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" align="center">
-                    Cards: {ek.hand_counts?.[String(pidx)] ?? 0}
-                    {turnSeat === pidx ? ' · (turn)' : ''}
-                  </Typography>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <Box
+                      sx={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: '50%',
+                        bgcolor: playerColors[pidx % playerColors.length],
+                        flexShrink: 0,
+                        boxShadow: isMyTurn ? `0 0 8px ${EK2_GOLD}` : undefined,
+                      }}
+                    />
+                    <Typography
+                      variant="body2"
+                      sx={{
+                        fontWeight: isMyTurn ? 900 : 600,
+                        color: eliminated ? '#777' : isMyTurn ? EK2_GOLD : '#fff',
+                      }}
+                    >
+                      {eliminated ? '💀 ' : ''}
+                      {seatLabel(pidx)}
+                      {eliminated ? ' (out)' : ''}
+                    </Typography>
+                  </Stack>
+                  <Stack direction="row" spacing={0.5} alignItems="center">
+                    <Chip
+                      label={`${cardCount} cards`}
+                      size="small"
+                      sx={{
+                        height: 20,
+                        fontSize: '0.65rem',
+                        fontWeight: 700,
+                        bgcolor: alpha('#fff', 0.08),
+                        color: alpha('#fff', 0.7),
+                      }}
+                    />
+                    {isMyTurn && (
+                      <Chip
+                        label="★ TURN"
+                        size="small"
+                        sx={{
+                          height: 20,
+                          fontSize: '0.6rem',
+                          fontWeight: 900,
+                          bgcolor: alpha(EK2_GOLD, 0.2),
+                          color: EK2_GOLD,
+                          letterSpacing: '0.05em',
+                        }}
+                      />
+                    )}
+                  </Stack>
                 </Paper>
               );
             })}

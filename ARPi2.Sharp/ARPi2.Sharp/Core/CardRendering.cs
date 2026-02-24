@@ -1,4 +1,7 @@
 using System;
+using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
+using SkiaSharp;
 
 namespace ARPi2.Sharp.Core;
 
@@ -257,107 +260,141 @@ public static class CardRendering
     // ───── Draw an Exploding Kittens card with detailed art ─────
     public static void DrawEKCard(Renderer r,
         (int x, int y, int w, int h) rect,
-        string cardKind)
+        string cardKind,
+        int fixedVariant = -1)
     {
         int x2 = rect.x, y2 = rect.y, w2 = rect.w, h2 = rect.h;
         int cx = x2 + w2 / 2, cy = y2 + h2 / 2;
 
-        // Per-kind config
-        var (emoji, title, accent, bgTint) = cardKind.ToUpperInvariant() switch
+        // Per-kind palette — EK2 / Luna premium style
+        var (emoji, title, accent, bgTint, bgTint2) = cardKind.ToUpperInvariant() switch
         {
-            "EK"   => ("\ud83d\udca3\ud83d\ude3c", "EXPLODING",  (220, 80, 80),   (40, 8, 8)),
-            "DEF"  => ("\ud83e\uddef",              "DEFUSE",     (80, 200, 130),  (8, 30, 15)),
-            "ATK"  => ("\u2694\ufe0f",             "ATTACK",     (230, 60, 60),   (35, 5, 5)),
-            "SKIP" => ("\u23ed\ufe0f",              "SKIP",       (255, 200, 50),  (35, 30, 5)),
-            "SHUF" => ("\ud83d\udd00",              "SHUFFLE",    (100, 180, 255), (8, 18, 38)),
-            "FUT"  => ("\ud83d\udd2e",              "SEE FUTURE", (150, 100, 255), (18, 8, 38)),
-            "FAV"  => ("\ud83c\udf81",              "FAVOR",      (255, 130, 200), (35, 12, 28)),
-            "NOPE" => ("\ud83d\udeab",              "NOPE",       (140, 140, 140), (18, 18, 18)),
-            _      => ("\ud83d\ude3a",              cardKind,     (90, 160, 235),  (8, 15, 30)),
+            "EK"   => ("\ud83d\udca3", "EXPLODE!",  (240, 60, 50),   (55, 8, 8),     (80, 20, 5)),
+            "DEF"  => ("\ud83e\uddef", "DEFUSE",    (60, 210, 120),  (6, 36, 16),    (10, 50, 25)),
+            "ATK"  => ("\u2694\ufe0f", "ATTACK!",   (240, 70, 50),   (42, 6, 6),     (60, 12, 8)),
+            "SKIP" => ("\u23ed\ufe0f", "SKIP",      (255, 210, 40),  (42, 36, 6),    (55, 48, 10)),
+            "SHUF" => ("\ud83d\udd00", "SHUFFLE",   (80, 170, 255),  (6, 18, 44),    (10, 28, 60)),
+            "FUT"  => ("\ud83d\udd2e", "FUTURE",    (160, 90, 255),  (24, 8, 48),    (35, 14, 65)),
+            "FAV"  => ("\ud83c\udf81", "FAVOR",     (255, 120, 190), (42, 12, 30),   (58, 18, 42)),
+            "NOPE" => ("\ud83d\udeab", "NOPE!",     (180, 40, 40),   (26, 12, 12),   (38, 16, 16)),
+            _      => ("\ud83d\ude3a", cardKind,     (90, 160, 235),  (10, 18, 34),   (16, 24, 44)),
         };
 
-        // Shadow
-        r.DrawRect((0, 0, 0), (x2 + 4, y2 + 4, w2, h2), alpha: 90);
+        // Compute illustration variant — use fixed if provided, otherwise hash from card kind string
+        int variant = fixedVariant >= 0 ? fixedVariant % 4
+            : Math.Abs(cardKind.GetHashCode() ^ (x2 * 7919 + w2 * 31)) % 4;
 
-        // Card base — dark tinted background
-        r.DrawRect(bgTint, (x2, y2, w2, h2));
+        // ── Multi-layer soft shadow — card floats above surface ──
+        SoftShadow.Draw(r, x2 + 5, y2 + 7, w2, h2, layers: 6, maxAlpha: 110);
 
-        // Gradient fill: lighter at top
-        int bandH = Math.Max(1, h2 / 6);
-        for (int b = 0; b < 6; b++)
+        // ── Card face — 3D beveled raised appearance ──
+        int bevel = Math.Max(3, w2 / 22);
+        BeveledRect.Draw(r, x2, y2, w2, h2, bgTint, bevelSize: bevel);
+
+        // ── SkiaSharp-rendered smooth card face gradient ──
         {
-            int alpha = 35 - b * 5;
-            if (alpha > 0)
-                r.DrawRect(accent, (x2, y2 + b * bandH, w2, bandH), alpha: alpha);
+            string faceKey = $"ekface_{cardKind}_{w2}_{h2}";
+            var faceTex = r.GetOrCreateSkiaTexture(faceKey, w2, h2, (canvas, cw, ch) =>
+            {
+                // Smooth top-to-bottom gradient with accent glow at top
+                using var bgPaint = new SKPaint { IsAntialias = true };
+                var accentSK = new SKColor((byte)accent.Item1, (byte)accent.Item2, (byte)accent.Item3);
+                var bgTintSK = new SKColor((byte)bgTint.Item1, (byte)bgTint.Item2, (byte)bgTint.Item3);
+                var bgTint2SK = new SKColor((byte)bgTint2.Item1, (byte)bgTint2.Item2, (byte)bgTint2.Item3);
+
+                // Top accent glow fading into card body
+                bgPaint.Shader = SKShader.CreateLinearGradient(
+                    new SKPoint(cw / 2f, 0), new SKPoint(cw / 2f, ch),
+                    new[] {
+                        accentSK.WithAlpha(50),
+                        bgTint2SK.WithAlpha(18),
+                        SKColors.Transparent,
+                        new SKColor(0, 0, 0, 40)
+                    },
+                    new float[] { 0f, 0.25f, 0.55f, 1f },
+                    SKShaderTileMode.Clamp);
+                canvas.DrawRect(3, 0, cw - 6, ch, bgPaint);
+
+                // Central radial glow
+                bgPaint.Shader = SKShader.CreateRadialGradient(
+                    new SKPoint(cw / 2f, ch * 0.4f), cw * 0.5f,
+                    new[] { accentSK.WithAlpha(10), SKColors.Transparent },
+                    SKShaderTileMode.Clamp);
+                canvas.DrawRect(0, 0, cw, ch, bgPaint);
+
+                // ── Subtle noise texture — matte card surface ──
+                using var noisePaint = new SKPaint { IsAntialias = false };
+                for (int tx = 4; tx < cw - 4; tx += 6)
+                    for (int ty = 4; ty < ch - 4; ty += 8)
+                    {
+                        int seed = (tx * 73 + ty * 137) & 0xFF;
+                        if (seed < 40)
+                        {
+                            noisePaint.Color = new SKColor(255, 255, 255, (byte)(3 + (seed & 3)));
+                            canvas.DrawPoint(tx, ty, noisePaint);
+                        }
+                    }
+            });
+            r.DrawTexture(faceTex, new Rectangle(x2, y2, w2, h2));
         }
 
-        // Per-kind decorative pattern
-        if (cardKind is "EK")
-        {
-            // Flame bursts at corners
-            r.DrawCircle((255, 100, 0), (x2 + 8, y2 + h2 - 8), Math.Max(6, w2 / 6), alpha: 50);
-            r.DrawCircle((255, 180, 0), (x2 + w2 - 8, y2 + h2 - 8), Math.Max(6, w2 / 6), alpha: 45);
-            r.DrawCircle((255, 60, 0), (cx, y2 + 8), Math.Max(4, w2 / 8), alpha: 35);
-        }
-        else if (cardKind is "DEF")
-        {
-            // Shield shape hint
-            r.DrawCircle((120, 255, 180), (cx, cy + h2 / 6), Math.Max(8, w2 / 4), alpha: 25);
-            r.DrawRect((80, 200, 130), (cx - w2 / 6, y2 + h2 * 60 / 100, w2 / 3, h2 / 5), alpha: 20);
-        }
-        else if (cardKind is "ATK")
-        {
-            // Crossed slash marks
-            r.DrawLine((255, 60, 60), (x2 + w2 / 5, y2 + h2 / 4), (x2 + w2 * 4 / 5, y2 + h2 * 3 / 4), width: 2, alpha: 40);
-            r.DrawLine((255, 60, 60), (x2 + w2 * 4 / 5, y2 + h2 / 4), (x2 + w2 / 5, y2 + h2 * 3 / 4), width: 2, alpha: 40);
-        }
-        else if (cardKind is "FUT")
-        {
-            // Mystic rings
-            r.DrawCircle((150, 100, 255), (cx, cy), Math.Max(8, w2 / 3), width: 1, alpha: 35);
-            r.DrawCircle((180, 130, 255), (cx, cy), Math.Max(4, w2 / 5), width: 1, alpha: 25);
-        }
-        else if (cardKind is "NOPE")
-        {
-            // X pattern
-            r.DrawLine((180, 60, 60), (x2 + 10, y2 + 10), (x2 + w2 - 10, y2 + h2 - 10), width: 2, alpha: 30);
-            r.DrawLine((180, 60, 60), (x2 + w2 - 10, y2 + 10), (x2 + 10, y2 + h2 - 10), width: 2, alpha: 30);
-        }
+        // ══ ILLUSTRATION ZONE ══════════════════════════════════
+        // Compute the illustration area (central region of card)
+        int illInset = Math.Max(6, w2 / 8);
+        int illTop = y2 + h2 * 15 / 100;
+        int illBot = y2 + h2 * 72 / 100;
+        int illArea_x = x2 + illInset;
+        int illArea_y = illTop;
+        int illArea_w = w2 - illInset * 2;
+        int illArea_h = illBot - illTop;
 
-        // Inner inset frame
-        int inset = Math.Max(3, w2 / 14);
-        r.DrawRect(accent, (x2 + inset, y2 + inset, w2 - 2 * inset, h2 - 2 * inset), width: 1, alpha: 60);
+        // Illustration panel — dark inset with soft border
+        r.DrawRect((0, 0, 0), (illArea_x - 1, illArea_y - 1, illArea_w + 2, illArea_h + 2), alpha: 40);
+        r.DrawRect(bgTint, (illArea_x, illArea_y, illArea_w, illArea_h), alpha: 140);
+        // Subtle vignette inside illustration panel
+        r.DrawRect((0, 0, 0), (illArea_x, illArea_y, illArea_w, Math.Max(1, illArea_h / 8)), alpha: 16);
+        r.DrawRect((0, 0, 0), (illArea_x, illArea_y + illArea_h - Math.Max(1, illArea_h / 8), illArea_w, Math.Max(1, illArea_h / 8)), alpha: 22);
 
-        // Outer border — double border with accent
-        r.DrawRect(accent, (x2, y2, w2, h2), width: 3, alpha: 230);
-        r.DrawRect((255, 255, 255), (x2 + 2, y2 + 2, w2 - 4, h2 - 4), width: 1, alpha: 40);
+        // Draw the rich procedural illustration
+        EKCardArt.DrawIllustration(r, cardKind, variant, (illArea_x, illArea_y, illArea_w, illArea_h));
 
-        // Corner labels
-        int cornerFs = Math.Max(8, h2 * 8 / 100);
-        r.DrawText(cardKind, x2 + 7, y2 + 6, cornerFs, accent, bold: true, anchorX: "left", anchorY: "top");
-        r.DrawText(cardKind, x2 + w2 - 7, y2 + h2 - 6, cornerFs, accent, bold: true, anchorX: "right", anchorY: "bottom");
+        // Illustration frame — thin accent border with corner dots
+        r.DrawRect(accent, (illArea_x, illArea_y, illArea_w, illArea_h), width: 1, alpha: 55);
+        // Corner ornaments
+        int co = 3;
+        r.DrawRect(accent, (illArea_x - co, illArea_y - co, co * 2 + 1, co * 2 + 1), alpha: 40);
+        r.DrawRect(accent, (illArea_x + illArea_w - co, illArea_y - co, co * 2 + 1, co * 2 + 1), alpha: 40);
+        r.DrawRect(accent, (illArea_x - co, illArea_y + illArea_h - co, co * 2 + 1, co * 2 + 1), alpha: 40);
+        r.DrawRect(accent, (illArea_x + illArea_w - co, illArea_y + illArea_h - co, co * 2 + 1, co * 2 + 1), alpha: 40);
 
-        // Large emoji in centre — scale down for multi-emoji strings
-        int nEmojiEk = 0;
-        foreach (char ch in emoji ?? "")
-            if (ch > 0x2000 && ch != 0xFE0F && ch != 0x200D) nEmojiEk++;
-        nEmojiEk = Math.Max(1, nEmojiEk);
-        int baseEkFs = Math.Max(18, h2 * 34 / 100);
-        int emojiFs = Math.Min(baseEkFs, Math.Max(14, w2 * 70 / 100 / nEmojiEk));
-        r.DrawText(emoji, cx + 1, cy - h2 / 10 + 1, emojiFs, (0, 0, 0), alpha: 70, anchorX: "center", anchorY: "center");
-        r.DrawText(emoji, cx, cy - h2 / 10, emojiFs, (255, 255, 255), anchorX: "center", anchorY: "center");
+        // ── Outer border — premium layered frame ──
+        r.DrawRect(accent, (x2, y2, w2, h2), width: 3, alpha: 240);
+        // Inner accent border
+        r.DrawRect(accent, (x2 + 4, y2 + 4, w2 - 8, h2 - 8), width: 1, alpha: 45);
+        // Top/left highlight — 3D raised edge
+        r.DrawRect((255, 255, 255), (x2 + 1, y2 + 1, w2 - 2, 2), alpha: 60);
+        r.DrawRect((255, 255, 255), (x2 + 1, y2 + 1, 2, h2 - 2), alpha: 40);
+        // Bottom/right shadow — 3D depth
+        r.DrawRect((0, 0, 0), (x2 + 1, y2 + h2 - 3, w2 - 2, 3), alpha: 55);
+        r.DrawRect((0, 0, 0), (x2 + w2 - 3, y2 + 1, 3, h2 - 2), alpha: 45);
 
-        // Title at bottom
-        int titleFs = Math.Max(8, Math.Min(14, h2 * 11 / 100));
-        string displayTitle = title.Length > 14 ? title[..14] : title;
-        // Pill bg
-        int pillW = displayTitle.Length * (titleFs * 55 / 100) + 10;
-        int pillH = titleFs + 4;
-        int pillX = cx - pillW / 2;
-        int pillY = y2 + h2 * 82 / 100 - pillH / 2;
-        r.DrawRect(accent, (pillX, pillY, pillW, pillH), alpha: 40);
-        r.DrawText(displayTitle, cx + 1, y2 + h2 * 82 / 100 + 1, titleFs, (0, 0, 0), bold: true, anchorX: "center", anchorY: "center", alpha: 80);
-        r.DrawText(displayTitle, cx, y2 + h2 * 82 / 100, titleFs, (240, 240, 240), bold: true, anchorX: "center", anchorY: "center");
+        // ── Glossy reflection stripe — glass-like 3D shine ──
+        GlossyReflection.Draw(r, x2, y2, w2, h2, alpha: 18);
+
+        // ── Corner type labels — shadowed, premium font ──
+        int cornerFs = Math.Max(8, h2 * 9 / 100);
+        // Top-left
+        r.DrawText(cardKind, x2 + 10, y2 + 9, cornerFs, (0, 0, 0), bold: true, anchorX: "left", anchorY: "top", alpha: 90);
+        r.DrawText(cardKind, x2 + 9, y2 + 8, cornerFs, accent, bold: true, anchorX: "left", anchorY: "top");
+        // Bottom-right
+        r.DrawText(cardKind, x2 + w2 - 8, y2 + h2 - 7, cornerFs, (0, 0, 0), bold: true, anchorX: "right", anchorY: "bottom", alpha: 90);
+        r.DrawText(cardKind, x2 + w2 - 9, y2 + h2 - 8, cornerFs, accent, bold: true, anchorX: "right", anchorY: "bottom");
+
+        // ── Bottom accent line — subtle card identity band ──
+        int bandY = y2 + h2 * 84 / 100;
+        int bandH2 = Math.Max(2, h2 / 30);
+        r.DrawRect(accent, (x2 + illInset, bandY, w2 - illInset * 2, bandH2), alpha: 50);
+        r.DrawRect((255, 255, 255), (x2 + illInset, bandY, w2 - illInset * 2, 1), alpha: 12);
     }
 
     // ───── Draw an Unstable Unicorns card with kind-specific styling ─────
@@ -589,24 +626,83 @@ public static class CardRendering
 
     private static void BgExplodingKittens(Renderer r, int w, int h)
     {
-        r.DrawRect((8, 4, 16), (0, 0, w, h));
-        // Hot orange edges
-        r.DrawRect((180, 60, 0), (0, 0, w, 4), alpha: 200);
-        r.DrawRect((180, 60, 0), (0, h - 4, w, 4), alpha: 200);
-        r.DrawRect((180, 60, 0), (0, 0, 4, h), alpha: 110);
-        r.DrawRect((180, 60, 0), (w - 4, 0, 4, h), alpha: 110);
-        // Explosion bursts in corners
+        // Deep charcoal base — Amazon Luna dark theme
+        r.DrawRect((10, 6, 16), (0, 0, w, h));
+
+        // Multi-layer radial vignette — cinematic depth
+        int cx = w / 2, cy = h / 2;
+        int minDim = Math.Min(w, h);
+        r.DrawCircle((16, 10, 24), (cx, cy), minDim * 50 / 100, alpha: 35);
+        r.DrawCircle((22, 14, 30), (cx, cy), minDim * 38 / 100, alpha: 30);
+        r.DrawCircle((28, 16, 35), (cx, cy), minDim * 26 / 100, alpha: 25);
+
+        // Subtle grid texture for tabletop feel
+        for (int gx = 0; gx < w; gx += 40)
+            r.DrawLine((30, 20, 40), (gx, 0), (gx, h), width: 1, alpha: 6);
+        for (int gy = 0; gy < h; gy += 40)
+            r.DrawLine((30, 20, 40), (0, gy), (w, gy), width: 1, alpha: 6);
+
+        // Hot orange edge rails — thicker, multi-layer fire trim
+        int railW = 6;
+        r.DrawRect((220, 80, 0), (0, 0, w, railW), alpha: 220);
+        r.DrawRect((220, 80, 0), (0, h - railW, w, railW), alpha: 220);
+        r.DrawRect((180, 60, 0), (0, 0, railW, h), alpha: 140);
+        r.DrawRect((180, 60, 0), (w - railW, 0, railW, h), alpha: 140);
+
+        // Inner fire glow along edges — multi-layer
+        r.DrawRect((255, 120, 0), (0, railW, w, 3), alpha: 50);
+        r.DrawRect((255, 80, 0), (0, railW + 3, w, 2), alpha: 30);
+        r.DrawRect((255, 120, 0), (0, h - railW - 3, w, 3), alpha: 50);
+        r.DrawRect((255, 80, 0), (0, h - railW - 5, w, 2), alpha: 30);
+        r.DrawRect((255, 100, 0), (railW, 0, 3, h), alpha: 35);
+        r.DrawRect((255, 100, 0), (w - railW - 3, 0, 3, h), alpha: 35);
+
+        // Corner explosion bursts — bigger, more dramatic with multiple rings
         (int bx, int by)[] corners = [
-            (w * 8 / 100, h * 12 / 100), (w * 92 / 100, h * 12 / 100),
-            (w * 8 / 100, h * 88 / 100), (w * 92 / 100, h * 88 / 100)
+            (w * 5 / 100, h * 6 / 100), (w * 95 / 100, h * 6 / 100),
+            (w * 5 / 100, h * 94 / 100), (w * 95 / 100, h * 94 / 100)
         ];
         foreach (var (bx, by) in corners)
         {
-            r.DrawCircle((200, 80, 0), (bx, by), Math.Min(w, h) * 12 / 100, alpha: 20);
-            r.DrawCircle((240, 140, 0), (bx, by), Math.Min(w, h) * 7 / 100, alpha: 28);
-            r.DrawCircle((255, 220, 0), (bx, by), Math.Min(w, h) * 3 / 100, alpha: 55);
+            r.DrawCircle((160, 40, 0), (bx, by), minDim * 20 / 100, alpha: 10);
+            r.DrawCircle((200, 60, 0), (bx, by), minDim * 16 / 100, alpha: 16);
+            r.DrawCircle((220, 90, 0), (bx, by), minDim * 11 / 100, alpha: 24);
+            r.DrawCircle((240, 140, 0), (bx, by), minDim * 7 / 100, alpha: 38);
+            r.DrawCircle((255, 200, 30), (bx, by), minDim * 3 / 100, alpha: 55);
+            r.DrawCircle((255, 240, 100), (bx, by), minDim * 1 / 100, alpha: 40);
         }
-        r.DrawCircle((12, 6, 20), (w / 2, h / 2), Math.Min(w, h) * 35 / 100, alpha: 90);
+
+        // Mid-edge fire accents
+        r.DrawCircle((220, 80, 0), (w / 2, railW), minDim * 6 / 100, alpha: 14);
+        r.DrawCircle((220, 80, 0), (w / 2, h - railW), minDim * 6 / 100, alpha: 14);
+        r.DrawCircle((200, 70, 0), (railW, h / 2), minDim * 5 / 100, alpha: 12);
+        r.DrawCircle((200, 70, 0), (w - railW, h / 2), minDim * 5 / 100, alpha: 12);
+
+        // Subtle hazard stripes along bottom — EK style
+        int stripeH = 7;
+        int stripeY = h - railW - stripeH - 2;
+        for (int x = 0; x < w; x += 20)
+        {
+            r.DrawRect((255, 180, 0), (x, stripeY, 10, stripeH), alpha: 14);
+            r.DrawRect((255, 220, 40), (x + 2, stripeY + 1, 6, stripeH - 2), alpha: 8);
+        }
+
+        // Hazard stripes along top too
+        for (int x = 0; x < w; x += 20)
+            r.DrawRect((255, 180, 0), (x + 10, railW + 2, 10, stripeH), alpha: 10);
+
+        // Cat paw prints at mid-edges (subtle)
+        r.DrawCircle((180, 80, 0), (w / 2, railW + 20), 7, alpha: 20);
+        r.DrawCircle((180, 80, 0), (w / 2 - 10, railW + 12), 4, alpha: 16);
+        r.DrawCircle((180, 80, 0), (w / 2 + 10, railW + 12), 4, alpha: 16);
+        r.DrawCircle((180, 80, 0), (w / 2, h - railW - 20), 7, alpha: 20);
+        r.DrawCircle((180, 80, 0), (w / 2 - 10, h - railW - 12), 4, alpha: 16);
+        r.DrawCircle((180, 80, 0), (w / 2 + 10, h - railW - 12), 4, alpha: 16);
+
+        // Center table felt glow — multi-layer
+        r.DrawCircle((14, 8, 22), (cx, cy), minDim * 42 / 100, alpha: 60);
+        r.DrawCircle((18, 12, 28), (cx, cy), minDim * 32 / 100, alpha: 50);
+        r.DrawCircle((22, 14, 32), (cx, cy), minDim * 22 / 100, alpha: 40);
     }
 
     private static void BgMonopoly(Renderer r, int w, int h)

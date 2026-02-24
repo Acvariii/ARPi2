@@ -1319,3 +1319,319 @@ public class HeatShimmer
         _ => new HeatShimmer(),
     };
 }
+
+// ═══════════════════════════════════════════════════════════════
+// ExplosionBurst — dramatic multi-ring explosion (EK card drawn)
+// ═══════════════════════════════════════════════════════════════
+
+public class ExplosionBurst
+{
+    public int X, Y;
+    public float Duration, T;
+    public bool Done;
+    public int MaxRadius;
+    public (int R, int G, int B) CoreColor, RingColor, SmokeColor;
+    private static readonly Random _rng = new();
+
+    public ExplosionBurst(int x, int y, int maxRadius = 200, float duration = 1.2f)
+    {
+        X = x; Y = y; MaxRadius = maxRadius; Duration = duration;
+        CoreColor = (255, 200, 40);
+        RingColor = (255, 80, 20);
+        SmokeColor = (60, 40, 30);
+    }
+
+    public void Update(float dt) { T = MathF.Min(T + dt, Duration); if (T >= Duration) Done = true; }
+
+    public void Draw(Renderer r)
+    {
+        if (Done) return;
+        float p = T / Duration;
+
+        // Phase 1: bright core flash (0-20%)
+        if (p < 0.2f)
+        {
+            float fp = p / 0.2f;
+            int coreR = (int)(MaxRadius * 0.6f * fp);
+            int coreA = (int)(200 * (1f - fp));
+            r.DrawCircle((255, 255, 200), (X, Y), coreR, alpha: coreA);
+            r.DrawCircle(CoreColor, (X, Y), coreR * 2 / 3, alpha: (int)(255 * (1f - fp)));
+        }
+
+        // Phase 2: expanding rings (10-80%)
+        if (p > 0.1f && p < 0.8f)
+        {
+            float rp = (p - 0.1f) / 0.7f;
+            for (int ring = 0; ring < 4; ring++)
+            {
+                float rOffset = ring * 0.12f;
+                float ringP = MathF.Max(0, rp - rOffset);
+                if (ringP <= 0 || ringP > 1) continue;
+                int rad = (int)(MaxRadius * ringP);
+                int ringA = (int)(120 * (1f - ringP) * (1f - ringP));
+                int thickness = Math.Max(2, (int)(8 * (1f - ringP)));
+                var col = ring % 2 == 0 ? RingColor : CoreColor;
+                r.DrawCircle(col, (X, Y), rad, width: thickness, alpha: ringA);
+            }
+        }
+
+        // Phase 3: smoke wisps (30-100%)
+        if (p > 0.3f)
+        {
+            float sp = (p - 0.3f) / 0.7f;
+            int smokeA = (int)(40 * (1f - sp));
+            for (int i = 0; i < 6; i++)
+            {
+                float angle = i * MathF.PI / 3f + p * 2f;
+                float dist = MaxRadius * 0.5f * sp;
+                int sx = X + (int)(MathF.Cos(angle) * dist);
+                int sy = Y + (int)(MathF.Sin(angle) * dist);
+                int sr = (int)(MaxRadius * 0.15f * (1f - sp * 0.5f));
+                r.DrawCircle(SmokeColor, (sx, sy), sr, alpha: smokeA);
+            }
+        }
+
+        // Debris lines radiating outward
+        if (p > 0.05f && p < 0.6f)
+        {
+            float dp = (p - 0.05f) / 0.55f;
+            int debrisA = (int)(80 * (1f - dp));
+            for (int i = 0; i < 12; i++)
+            {
+                float angle = i * MathF.PI / 6f + 0.3f;
+                float innerDist = MaxRadius * 0.2f * dp;
+                float outerDist = MaxRadius * 0.7f * dp;
+                int x1 = X + (int)(MathF.Cos(angle) * innerDist);
+                int y1 = Y + (int)(MathF.Sin(angle) * innerDist);
+                int x2 = X + (int)(MathF.Cos(angle) * outerDist);
+                int y2 = Y + (int)(MathF.Sin(angle) * outerDist);
+                r.DrawLine(RingColor, (x1, y1), (x2, y2), width: 2, alpha: debrisA);
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SpotlightCone — directed light cone highlighting active player
+// ═══════════════════════════════════════════════════════════════
+
+public class SpotlightCone
+{
+    private float _phase;
+    private float _currentX, _currentY;
+    private float _targetX, _targetY;
+    private bool _initialized;
+    public float Speed = 0.5f;
+    public (int R, int G, int B) Color = (255, 200, 80);
+
+    public void Update(float dt)
+    {
+        _phase += dt * Speed;
+        if (_initialized)
+        {
+            // Smooth exponential lerp for fluid transition
+            float t = 1f - MathF.Pow(0.02f, dt); // ~frame-rate independent lerp
+            _currentX += (_targetX - _currentX) * t;
+            _currentY += (_targetY - _currentY) * t;
+        }
+    }
+
+    /// <summary>Draw a smooth spotlight glow at (tx,ty).</summary>
+    public void DrawAt(Renderer r, int tx, int ty, int w, int h, int radius = 80)
+    {
+        _targetX = tx; _targetY = ty;
+        if (!_initialized) { _currentX = tx; _currentY = ty; _initialized = true; }
+
+        int cx = (int)_currentX, cy = (int)_currentY;
+        float breath = 0.85f + 0.15f * MathF.Sin(_phase * 1.4f);
+
+        // Simple layered glow — only 6 circles for performance, no per-pixel beam
+        // Each layer is slightly smaller/brighter for a soft radial gradient effect
+        int baseA = (int)(10 * breath);
+        r.DrawCircle(Color, (cx, cy), (int)(radius * 1.3f), alpha: Math.Max(1, baseA / 2));
+        r.DrawCircle(Color, (cx, cy), radius, alpha: baseA);
+        r.DrawCircle(Color, (cx, cy), radius * 75 / 100, alpha: (int)(baseA * 1.2f));
+        r.DrawCircle(Color, (cx, cy), radius * 50 / 100, alpha: (int)(baseA * 1.4f));
+        r.DrawCircle((255, 220, 120), (cx, cy), radius * 30 / 100, alpha: (int)(baseA * 1.0f));
+        r.DrawCircle((255, 240, 160), (cx, cy), radius * 15 / 100, alpha: (int)(baseA * 0.7f));
+
+        // Soft vertical beam — only 10-12 horizontal bands total (not per-pixel)
+        int beamW = radius / 3;
+        int bandCount = Math.Min(12, Math.Max(6, cy / 60));
+        for (int i = 0; i < bandCount; i++)
+        {
+            float t2 = (float)i / bandCount;
+            int bandY = (int)(t2 * cy);
+            int bandH = Math.Max(4, cy / bandCount);
+            float ramp = t2 * t2; // quadratic ramp: faint at top, visible near player
+            int bw = (int)(beamW * (0.3f + 0.7f * ramp));
+            int ba = (int)(6 * ramp * breath);
+            if (ba > 0)
+                r.DrawRect(Color, (cx - bw, bandY, bw * 2, bandH), alpha: ba);
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FireEdge — animated fire licking along screen edges
+// ═══════════════════════════════════════════════════════════════
+
+public class FireEdge
+{
+    private float _phase;
+    private readonly Random _rng = new(99);
+    public float Speed = 1.5f;
+    public int FlameCount = 30;
+    public int MaxFlameH = 35;
+    public int Alpha = 50;
+
+    public void Update(float dt) => _phase += dt * Speed;
+
+    public void Draw(Renderer r, int w, int h)
+    {
+        // Bottom edge flames
+        for (int i = 0; i < FlameCount; i++)
+        {
+            float fx = (float)i / FlameCount * w;
+            float wave = MathF.Sin(_phase * 3f + i * 0.7f) * 0.5f + 0.5f;
+            float wave2 = MathF.Sin(_phase * 4.3f + i * 1.1f) * 0.3f + 0.7f;
+            int flameH = (int)(MaxFlameH * wave * wave2);
+            if (flameH < 3) continue;
+
+            int flameW = w / FlameCount + 4;
+            int flameX = (int)fx - flameW / 2;
+
+            // Multi-layer flame: outer (red) → mid (orange) → core (yellow)
+            int outerA = (int)(Alpha * 0.6f * wave);
+            int midA = (int)(Alpha * 0.8f * wave);
+            int coreA = (int)(Alpha * wave);
+
+            r.DrawRect((180, 30, 10), (flameX, h - flameH, flameW, flameH), alpha: outerA);
+            r.DrawRect((240, 100, 10), (flameX + 2, h - flameH * 3 / 4, flameW - 4, flameH * 3 / 4), alpha: midA);
+            r.DrawRect((255, 200, 40), (flameX + 4, h - flameH / 2, flameW - 8, flameH / 2), alpha: coreA);
+        }
+
+        // Left edge (rotated flames going up-right)
+        for (int i = 0; i < FlameCount / 2; i++)
+        {
+            float fy = (float)i / (FlameCount / 2) * h;
+            float wave = MathF.Sin(_phase * 2.5f + i * 0.9f) * 0.5f + 0.5f;
+            int flameW2 = (int)(MaxFlameH * 0.6f * wave);
+            if (flameW2 < 2) continue;
+            int flameH2 = h / (FlameCount / 2) + 2;
+            int a2 = (int)(Alpha * 0.4f * wave);
+            r.DrawRect((200, 60, 10), (0, (int)fy, flameW2, flameH2), alpha: a2);
+            r.DrawRect((255, 140, 20), (0, (int)fy + 1, flameW2 * 2 / 3, flameH2 - 2), alpha: a2);
+        }
+
+        // Right edge
+        for (int i = 0; i < FlameCount / 2; i++)
+        {
+            float fy = (float)i / (FlameCount / 2) * h;
+            float wave = MathF.Sin(_phase * 2.8f + i * 1.1f + 1f) * 0.5f + 0.5f;
+            int flameW2 = (int)(MaxFlameH * 0.6f * wave);
+            if (flameW2 < 2) continue;
+            int flameH2 = h / (FlameCount / 2) + 2;
+            int a2 = (int)(Alpha * 0.4f * wave);
+            r.DrawRect((200, 60, 10), (w - flameW2, (int)fy, flameW2, flameH2), alpha: a2);
+            r.DrawRect((255, 140, 20), (w - flameW2 * 2 / 3, (int)fy + 1, flameW2 * 2 / 3, flameH2 - 2), alpha: a2);
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CardBreathEffect — subtle breathing scale on draw pile
+// ═══════════════════════════════════════════════════════════════
+
+public class CardBreathEffect
+{
+    private float _phase;
+    public float Speed = 1.2f;
+    public float Amplitude = 0.015f; // ±1.5% size change
+
+    public void Update(float dt) => _phase += dt * Speed;
+
+    /// <summary>Returns a multiplier near 1.0 for creating breathing scale.</summary>
+    public float Scale => 1f + Amplitude * MathF.Sin(_phase);
+
+    /// <summary>Offset to keep card centred while breathing.</summary>
+    public (int dx, int dy) Offset(int w, int h)
+    {
+        float s = Scale;
+        int dw = (int)(w * (s - 1f) * 0.5f);
+        int dh = (int)(h * (s - 1f) * 0.5f);
+        return (-dw, -dh);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GlossyReflection — static helper for drawing a 3D glossy stripe
+// ═══════════════════════════════════════════════════════════════
+
+public static class GlossyReflection
+{
+    /// <summary>Draw a diagonal glossy reflection stripe across a rectangle.</summary>
+    public static void Draw(Renderer r, int x, int y, int w, int h, int alpha = 30, float phase = 0f)
+    {
+        // Diagonal highlight stripe from top-left to ~60% across
+        int stripeW = Math.Max(4, w / 4);
+        int offset = (int)(phase * w) % (w + stripeW);
+        for (int i = 0; i < stripeW; i++)
+        {
+            float blend = 1f - MathF.Abs(i - stripeW / 2f) / (stripeW / 2f);
+            int a = (int)(alpha * blend * blend);
+            if (a < 1) continue;
+            // Diagonal line from (x+offset+i, y) to (x+offset+i-h/3, y+h)
+            int x1 = x + offset + i;
+            int x2 = x1 - h / 3;
+            r.DrawLine((255, 255, 255), (x1, y), (x2, y + h), alpha: a);
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// BeveledRect — helper for drawing a 3D beveled rectangle
+// ═══════════════════════════════════════════════════════════════
+
+public static class BeveledRect
+{
+    /// <summary>Draw a rectangle with beveled edges giving a 3D raised look.</summary>
+    public static void Draw(Renderer r, int x, int y, int w, int h,
+        (int R, int G, int B) faceColor, int bevelSize = 3, int alpha = 255)
+    {
+        // Face
+        r.DrawRect(faceColor, (x, y, w, h), alpha: alpha);
+
+        // Top highlight (lighter)
+        var hi = (Math.Min(255, faceColor.R + 60), Math.Min(255, faceColor.G + 60), Math.Min(255, faceColor.B + 60));
+        r.DrawRect(hi, (x, y, w, bevelSize), alpha: alpha * 70 / 100);
+        r.DrawRect(hi, (x, y, bevelSize, h), alpha: alpha * 50 / 100);
+
+        // Bottom/right shadow (darker)
+        var sh = (Math.Max(0, faceColor.R - 40), Math.Max(0, faceColor.G - 40), Math.Max(0, faceColor.B - 40));
+        r.DrawRect(sh, (x, y + h - bevelSize, w, bevelSize), alpha: alpha * 80 / 100);
+        r.DrawRect(sh, (x + w - bevelSize, y, bevelSize, h), alpha: alpha * 60 / 100);
+
+        // Inner highlight line
+        r.DrawRect((255, 255, 255), (x + 1, y + 1, w - 2, 1), alpha: alpha * 25 / 100);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SoftShadow — multi-layer graduated shadow for 3D depth
+// ═══════════════════════════════════════════════════════════════
+
+public static class SoftShadow
+{
+    /// <summary>Draw a soft multi-layer shadow behind a rectangle.</summary>
+    public static void Draw(Renderer r, int x, int y, int w, int h, int layers = 4, int maxAlpha = 80)
+    {
+        for (int i = layers; i >= 1; i--)
+        {
+            int offset = i * 2;
+            int expand = i;
+            int a = maxAlpha * (layers + 1 - i) / (layers + 1);
+            r.DrawRect((0, 0, 0), (x + offset - expand, y + offset - expand, w + expand * 2, h + expand * 2), alpha: a);
+        }
+    }
+}

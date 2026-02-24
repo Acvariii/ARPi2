@@ -632,6 +632,35 @@ public sealed class Renderer : IDisposable
         _gd.Clear(new Color(color.R, color.G, color.B));
     }
 
+    // ─── SkiaSharp → MonoGame texture conversion ────────────────────────
+    private readonly Dictionary<string, Texture2D> _skiaTextureCache = new();
+
+    /// <summary>Create a MonoGame Texture2D from a SkiaSharp bitmap. Caller must dispose the bitmap.</summary>
+    public Texture2D TextureFromSkia(SKBitmap bitmap)
+    {
+        int w = bitmap.Width, h = bitmap.Height;
+        var tex = new Texture2D(_gd, w, h, false, SurfaceFormat.Color);
+        tex.SetData(bitmap.GetPixelSpan().ToArray());
+        return tex;
+    }
+
+    /// <summary>Get or create a cached texture rendered via SkiaSharp.</summary>
+    public Texture2D GetOrCreateSkiaTexture(string cacheKey, int w, int h, Action<SKCanvas, int, int> drawAction)
+    {
+        if (_skiaTextureCache.TryGetValue(cacheKey, out var cached))
+            return cached;
+
+        using var bitmap = new SKBitmap(new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Unpremul));
+        using var canvas = new SKCanvas(bitmap);
+        canvas.Clear(SKColors.Transparent);
+        drawAction(canvas, w, h);
+        canvas.Flush();
+
+        var tex = TextureFromSkia(bitmap);
+        _skiaTextureCache[cacheKey] = tex;
+        return tex;
+    }
+
     // ─── Internals ─────────────────────────────────────────────────────
     private void EnsureBatch()
     {
@@ -642,6 +671,8 @@ public sealed class Renderer : IDisposable
     {
         foreach (var tex in _emojiCache.Values) tex.Dispose();
         _emojiCache.Clear();
+        foreach (var tex in _skiaTextureCache.Values) tex.Dispose();
+        _skiaTextureCache.Clear();
         _emojiTypeface?.Dispose();
         _pixel?.Dispose();
         _sb.Dispose();

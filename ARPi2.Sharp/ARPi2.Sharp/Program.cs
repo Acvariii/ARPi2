@@ -273,37 +273,45 @@ public class ARPi2Game : Game
         r.DrawCircle(GameConfig.Colors.Accent, (w * 84 / 100, h * 70 / 100), Math.Min(w, h) * 30 / 100, alpha: 6);
 
         int cx = w / 2;
-        int titleY = h * 18 / 100;
+        int titleY = h * 14 / 100;
         r.DrawText("ARPi2 Game Launcher", cx, titleY, 64, GameConfig.Colors.White, anchorX: "center", anchorY: "center");
-        r.DrawText("Use the Web UI to vote/select a game", cx, titleY + 56, 24, (200, 200, 200), anchorX: "center", anchorY: "center");
+        r.DrawText("Scan the QR code or use the Web UI to join", cx, titleY + 56, 24, (200, 200, 200), anchorX: "center", anchorY: "center");
 
-        // Connection info
-        var lines = _server?.GetLobbyConnectLines() ?? Array.Empty<string>();
-        int connectY = h * 30 / 100;
-        for (int i = 0; i < Math.Min(lines.Length, 6); i++)
-            r.DrawText(lines[i], cx, connectY + 26 + i * 22, 18, (230, 230, 230), anchorX: "center", anchorY: "center");
+        // ── Left side: QR code panel ──
+        int contentTop = h * 32 / 100;
+        int qrSize = Math.Clamp(Math.Min(w, h) * 24 / 100, 140, 260);
+        int qrX = w * 30 / 100;
+        int qrY = contentTop + qrSize / 2 + 30;
+        QRCodeRenderer.DrawQRPanel(r, qrX, qrY, qrSize,
+            title: "📱 SCAN TO JOIN",
+            accentColor: (100, 180, 255));
 
-        // Lobby header
-        int lobbyY = h * 44 / 100;
-        r.DrawText("Lobby", cx, lobbyY, 22, GameConfig.Colors.White, anchorX: "center", anchorY: "center");
+        // ── Right side: Lobby + player list ──
+        int rightCx = w * 70 / 100;
+        int lobbyY = contentTop;
+        r.DrawText("Lobby", rightCx, lobbyY, 26, GameConfig.Colors.White, anchorX: "center", anchorY: "center", bold: true);
+
+        // Divider line
+        int divW = w * 24 / 100;
+        r.DrawRect((120, 120, 140), (rightCx - divW / 2, lobbyY + 20, divW, 2), alpha: 80);
 
         // Player list
         var players = _server?.GetLobbyPlayers() ?? new List<LobbyPlayer>();
-        int startY = lobbyY + 64;
+        int startY = lobbyY + 48;
         for (int i = 0; i < Math.Min(players.Count, 8); i++)
         {
             var p = players[i];
             if (p.Seat < 0 || p.Seat > 7) continue;
             var col = GameConfig.PlayerColors[p.Seat % GameConfig.PlayerColors.Length];
             string label = $"{p.Name}  ({(p.Ready ? "Ready" : "Not ready")})";
-            int y = startY + i * 26;
-            r.DrawCircle(col, (cx - 190, y), 8);
-            r.DrawCircle(GameConfig.Colors.White, (cx - 190, y), 8, width: 2);
-            r.DrawText(label, cx, y, 18, col, anchorX: "center", anchorY: "center");
+            int y = startY + i * 30;
+            r.DrawCircle(col, (rightCx - 160, y), 8);
+            r.DrawCircle(GameConfig.Colors.White, (rightCx - 160, y), 8, width: 2);
+            r.DrawText(label, rightCx, y, 18, col, anchorX: "center", anchorY: "center");
         }
 
         if (players.Count == 0)
-            r.DrawText("Waiting for players to join…", cx, h * 56 / 100, 20, (200, 200, 200), anchorX: "center", anchorY: "center");
+            r.DrawText("Waiting for players to join…", rightCx, startY + 20, 20, (200, 200, 200), anchorX: "center", anchorY: "center");
     }
 
     // ───────────────────────────────────────────────────────────────
