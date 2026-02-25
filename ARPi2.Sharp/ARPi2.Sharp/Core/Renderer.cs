@@ -681,8 +681,21 @@ public sealed class Renderer : IDisposable
     public Texture2D TextureFromSkia(SKBitmap bitmap)
     {
         int w = bitmap.Width, h = bitmap.Height;
+        // Ensure pixel data is RGBA8888 (MonoGame SurfaceFormat.Color).
+        // Decoded PNGs default to Bgra8888 on most platforms, which swaps R/B.
+        SKBitmap rgba;
+        if (bitmap.ColorType == SKColorType.Rgba8888)
+        {
+            rgba = bitmap;
+        }
+        else
+        {
+            rgba = new SKBitmap(new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Unpremul));
+            bitmap.CopyTo(rgba, SKColorType.Rgba8888);
+        }
         var tex = new Texture2D(_gd, w, h, false, SurfaceFormat.Color);
-        tex.SetData(bitmap.GetPixelSpan().ToArray());
+        tex.SetData(rgba.GetPixelSpan().ToArray());
+        if (rgba != bitmap) rgba.Dispose();
         return tex;
     }
 

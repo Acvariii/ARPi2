@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Microsoft.Xna.Framework.Graphics;
 
 namespace ARPi2.Sharp.Core;
 
@@ -210,6 +211,7 @@ public class CardShowcaseAnim
 
     // Optional UU-card data for premium rendering
     public string? Kind, CardName, Desc;
+    public Texture2D? Illustration;
 
     // Sparkle timer
     private float _sparkleTimer;
@@ -224,7 +226,8 @@ public class CardShowcaseAnim
         int cardW = 140, int cardH = 195,
         float flyDuration = 0.35f, float holdDuration = 1.8f, float fadeDuration = 0.4f,
         (int, int)? src = null,
-        string? kind = null, string? cardName = null, string? desc = null)
+        string? kind = null, string? cardName = null, string? desc = null,
+        Texture2D? illustration = null)
     {
         X = x; Y = y; CardW = cardW; CardH = cardH;
         Emoji = emoji; Label = label; Corner = corner;
@@ -232,6 +235,7 @@ public class CardShowcaseAnim
         FlyDuration = flyDuration; HoldDuration = holdDuration; FadeDuration = fadeDuration;
         Src = src ?? (x, y + 300);
         Kind = kind; CardName = cardName; Desc = desc;
+        Illustration = illustration;
     }
 
     public float TotalDuration => FlyDuration + HoldDuration + FadeDuration;
@@ -328,7 +332,7 @@ public class CardShowcaseAnim
         if (!string.IsNullOrEmpty(Kind))
         {
             CardRendering.DrawUUCard(r, (dx, dy, w, h), Emoji, CardName ?? "",
-                Kind, AccentColor, Desc);
+                Kind, AccentColor, Desc, illustration: Illustration);
         }
         else
         {

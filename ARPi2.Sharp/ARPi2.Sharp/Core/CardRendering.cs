@@ -403,25 +403,21 @@ public static class CardRendering
         string emoji, string name, string kind,
         (int R, int G, int B) accentRgb,
         string? desc = null,
-        int fixedVariant = -1)
+        int fixedVariant = -1,
+        Texture2D? illustration = null)
     {
         int x2 = rect.x, y2 = rect.y, w2 = rect.w, h2 = rect.h;
         int cx = x2 + w2 / 2, cy = y2 + h2 / 2;
         string k = (kind ?? "").ToLowerInvariant();
 
-        // Per-kind palette
-        var (accent, bgTint, bgTint2) = k switch
-        {
-            "baby_unicorn" => ((220, 170, 255), (38, 12, 42),  (55, 22, 60)),
-            "unicorn"      => ((140, 120, 255), (12, 8, 42),   (22, 16, 60)),
-            "upgrade"      => ((80, 220, 130),  (6, 28, 14),   (12, 42, 22)),
-            "downgrade"    => ((240, 70, 70),   (38, 8, 8),    (55, 14, 12)),
-            "magic"        => ((100, 140, 255), (10, 10, 42),  (16, 18, 60)),
-            "instant"      => ((245, 200, 60),  (35, 25, 6),   (50, 40, 10)),
-            "neigh"        => ((180, 180, 180), (18, 18, 18),  (30, 30, 32)),
-            "super_neigh"  => ((200, 120, 255), (18, 8, 28),   (30, 14, 45)),
-            _              => ((150, 120, 255), (14, 10, 28),  (22, 16, 42)),
-        };
+        // Derive palette from the card's actual accent colour
+        var accent = (accentRgb.R, accentRgb.G, accentRgb.B);
+        var bgTint  = (Math.Max(5, accentRgb.R / 7 + 2),
+                       Math.Max(5, accentRgb.G / 8 + 2),
+                       Math.Max(5, accentRgb.B / 7 + 2));
+        var bgTint2 = (Math.Max(8, accentRgb.R / 5 + 4),
+                       Math.Max(8, accentRgb.G / 6 + 3),
+                       Math.Max(8, accentRgb.B / 5 + 3));
 
         // Illustration variant from hash (must NOT depend on position/size — they change during animation)
         int variant = fixedVariant >= 0 ? fixedVariant % 4
@@ -436,7 +432,7 @@ public static class CardRendering
 
         // ── SkiaSharp smooth face gradient + noise texture ──
         {
-            string faceKey = $"uuface_{k}_{w2}_{h2}";
+            string faceKey = $"uuface_{accent.Item1}_{accent.Item2}_{accent.Item3}_{w2}_{h2}";
             var faceTex = r.GetOrCreateSkiaTexture(faceKey, w2, h2, (canvas, cw, ch) =>
             {
                 using var bgPaint = new SKPaint { IsAntialias = true };
@@ -483,7 +479,7 @@ public static class CardRendering
         // ══ ILLUSTRATION ZONE ══════════════════════════════════
         int illInset = Math.Max(6, w2 / 8);
         int illTop = y2 + h2 * 15 / 100;
-        int illBot = y2 + h2 * 68 / 100;
+        int illBot = y2 + h2 * 88 / 100;
         int illArea_x = x2 + illInset;
         int illArea_y = illTop;
         int illArea_w = w2 - illInset * 2;
@@ -496,9 +492,32 @@ public static class CardRendering
         r.DrawRect((0, 0, 0), (illArea_x, illArea_y, illArea_w, Math.Max(1, illArea_h / 8)), alpha: 16);
         r.DrawRect((0, 0, 0), (illArea_x, illArea_y + illArea_h - Math.Max(1, illArea_h / 8), illArea_w, Math.Max(1, illArea_h / 8)), alpha: 22);
 
-        // Rich procedural illustration (clipped to illustration area)
+        // Illustration — use PNG texture if available, otherwise procedural art
         r.PushClip(new Rectangle(illArea_x, illArea_y, illArea_w, illArea_h));
-        UUCardArt.DrawIllustration(r, k, variant, (illArea_x, illArea_y, illArea_w, illArea_h), name);
+        if (illustration != null)
+        {
+            // Scale 1024x1024 PNG to fit illustration area (cover, center-crop)
+            float srcAspect = (float)illustration.Width / illustration.Height;
+            float dstAspect = (float)illArea_w / illArea_h;
+            int drawW, drawH;
+            if (srcAspect > dstAspect)
+            {
+                drawH = illArea_h;
+                drawW = (int)(illArea_h * srcAspect);
+            }
+            else
+            {
+                drawW = illArea_w;
+                drawH = (int)(illArea_w / srcAspect);
+            }
+            int drawX = illArea_x + (illArea_w - drawW) / 2;
+            int drawY = illArea_y + (illArea_h - drawH) / 2;
+            r.DrawTexture(illustration, new Rectangle(drawX, drawY, drawW, drawH));
+        }
+        else
+        {
+            UUCardArt.DrawIllustration(r, k, variant, (illArea_x, illArea_y, illArea_w, illArea_h), name);
+        }
         r.PopClip();
 
         // Illustration frame + corner ornaments
@@ -539,36 +558,17 @@ public static class CardRendering
         // Top-left (shadow then color)
         r.DrawText(kindLabel, x2 + 10, y2 + 9, cornerFs, (0, 0, 0), bold: true, anchorX: "left", anchorY: "top", alpha: 90);
         r.DrawText(kindLabel, x2 + 9, y2 + 8, cornerFs, accent, bold: true, anchorX: "left", anchorY: "top");
-        // Bottom-right
-        r.DrawText(kindLabel, x2 + w2 - 8, y2 + h2 - 7, cornerFs, (0, 0, 0), bold: true, anchorX: "right", anchorY: "bottom", alpha: 90);
-        r.DrawText(kindLabel, x2 + w2 - 9, y2 + h2 - 8, cornerFs, accent, bold: true, anchorX: "right", anchorY: "bottom");
 
         // ── Card name — below illustration ──
         string displayName = (name ?? "").Trim();
         if (displayName.Length > 0)
         {
             int nameFs = Math.Max(8, Math.Min(12, h2 * 10 / 100));
-            string dn = displayName.Length > 18 ? displayName[..18] : displayName;
-            int nameY = y2 + h2 * 74 / 100;
+            string dn = displayName.Length > 22 ? displayName[..22] : displayName;
+            int nameY = y2 + h2 * 93 / 100;
             r.DrawText(dn, cx + 1, nameY + 1, nameFs, (0, 0, 0), bold: true, anchorX: "center", anchorY: "center", alpha: 80);
             r.DrawText(dn, cx, nameY, nameFs, (230, 230, 240), bold: true, anchorX: "center", anchorY: "center");
         }
-
-        // ── Description text ──
-        string descText = (desc ?? "").Trim();
-        if (descText.Length > 0 && h2 > 80)
-        {
-            int descFs = Math.Max(6, Math.Min(9, h2 * 6 / 100));
-            string dd = descText.Length > 32 ? descText[..32] : descText;
-            int descY = y2 + h2 * 84 / 100;
-            r.DrawText(dd, cx, descY, descFs, (160, 160, 175), anchorX: "center", anchorY: "center");
-        }
-
-        // ── Bottom accent band ──
-        int bandY = y2 + h2 * 92 / 100;
-        int bandH2 = Math.Max(2, h2 / 30);
-        r.DrawRect(accent, (x2 + illInset, bandY, w2 - illInset * 2, bandH2), alpha: 50);
-        r.DrawRect((255, 255, 255), (x2 + illInset, bandY, w2 - illInset * 2, 1), alpha: 12);
     }
 
     // ───── Background dispatch ─────

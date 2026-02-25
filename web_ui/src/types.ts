@@ -171,14 +171,29 @@ export type Snapshot = {
   monopoly?: {
     current_turn_seat?: number | null;
     current_turn_name?: string | null;
+    dice_values?: [number, number] | null;
+    free_parking_pot?: number;
     players?: Array<{
       player_idx: number;
       name: string;
       money: number;
+      net_worth?: number;
       jail_free_cards?: number;
       position?: number;
       in_jail?: boolean;
-      properties: Array<{ idx: number; name: string }>;
+      is_bankrupt?: boolean;
+      houses?: number;
+      hotels?: number;
+      properties: Array<{
+        idx: number;
+        name: string;
+        color?: string | null;
+        group?: string | null;
+        houses?: number;
+        mortgaged?: boolean;
+        price?: number;
+        house_cost?: number;
+      }>;
     }>;
     // property index -> owner player index (stringified keys to match JSON)
     ownership?: Record<string, number>;

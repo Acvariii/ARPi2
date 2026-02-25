@@ -98,6 +98,7 @@ public static class UUCardArt
             else if (cn.Contains("torpedo")) { bgDark = new SKColor(6, 14, 24); bgMid = new SKColor(14, 30, 50); bgLight = new SKColor(28, 60, 95); glow = new SKColor(80, 160, 240); accent = new SKColor(160, 210, 255); }
             else if (cn.Contains("narwhal")) { bgDark = new SKColor(4, 16, 28); bgMid = new SKColor(10, 35, 55); bgLight = new SKColor(22, 70, 105); glow = new SKColor(60, 180, 230); accent = new SKColor(140, 220, 255); }
             else if (cn.Contains("fertile")) { bgDark = new SKColor(28, 10, 24); bgMid = new SKColor(55, 22, 48); bgLight = new SKColor(100, 45, 88); glow = new SKColor(235, 130, 200); accent = new SKColor(255, 180, 230); }
+            else if (cn.Contains("destructive")) { bgDark = new SKColor(30, 4, 4); bgMid = new SKColor(65, 10, 10); bgLight = new SKColor(120, 22, 22); glow = new SKColor(255, 80, 40); accent = new SKColor(255, 160, 80); }
             else if (cn.Contains("flying")) { bgDark = new SKColor(6, 12, 30); bgMid = new SKColor(14, 25, 60); bgLight = new SKColor(30, 50, 115); glow = new SKColor(100, 160, 255); accent = new SKColor(180, 210, 255); }
         }
 
@@ -519,6 +520,7 @@ public static class UUCardArt
         if (cn.Contains("alluring")) { DrawUni_AlluringNarwhal(r, x, y, w, h, cx, cy); return; }
         if (cn.Contains("narwhal")) { DrawUni_AlluringNarwhal(r, x, y, w, h, cx, cy); return; } // generic narwhal fallback
         if (cn.Contains("fertile")) { DrawUni_Fertile(r, x, y, w, h, cx, cy); return; }
+        if (cn.Contains("destructive")) { DrawUni_Destructive(r, x, y, w, h, cx, cy); return; }
         if (cn.Contains("annoying") && cn.Contains("flying")) { DrawUni_AnnoyingFlying(r, x, y, w, h, cx, cy); return; }
         if (cn.Contains("swift") && cn.Contains("flying")) { DrawUni_SwiftFlying(r, x, y, w, h, cx, cy); return; }
         if (cn.Contains("greedy") && cn.Contains("flying")) { DrawUni_GreedyFlying(r, x, y, w, h, cx, cy); return; }
@@ -1896,6 +1898,87 @@ public static class UUCardArt
             int px = cx - s * 20 / 100 - p * s * 5 / 100;
             int py = cy + s * 5 / 100 + (int)(Math.Sin(p * 1.2) * s * 4 / 100);
             r.DrawCircle((80, 200, 255), (px, py), Math.Max(1, s * (3 - p) / 100), alpha: (byte)(120 - p * 18));
+        }
+    }
+
+    // Extremely Destructive Unicorn — explosive chaos, cracked ground, fire and fury
+    private static void DrawUni_Destructive(Renderer r, int x, int y, int w, int h, int cx, int cy)
+    {
+        int s = Math.Min(w, h);
+
+        // Intense fiery glow
+        r.DrawCircle((255, 60, 20), (cx, cy), s * 35 / 100, alpha: 45);
+        r.DrawCircle((255, 120, 40), (cx, cy), s * 25 / 100, alpha: 35);
+
+        // Cracked ground radiating from center
+        for (int cr = 0; cr < 8; cr++)
+        {
+            double ang = cr * Math.PI / 4 + 0.2;
+            int ex = cx + (int)(Math.Cos(ang) * s * 38 / 100);
+            int ey = cy + s * 15 / 100 + (int)(Math.Sin(ang) * s * 18 / 100);
+            r.DrawLine((80, 40, 20), (cx, cy + s * 15 / 100), (ex, ey), width: 2, alpha: 160);
+            // Branch cracks
+            int bx = cx + (int)(Math.Cos(ang + 0.3) * s * 28 / 100);
+            int by2 = cy + s * 15 / 100 + (int)(Math.Sin(ang + 0.3) * s * 12 / 100);
+            r.DrawLine((60, 30, 15), (cx + (ex - cx) / 2, cy + s * 15 / 100 + (ey - cy - s * 15 / 100) / 2), (bx, by2), width: 1, alpha: 120);
+        }
+
+        // Explosion rings
+        for (int ring = 0; ring < 4; ring++)
+            r.DrawCircle((255, 100 + ring * 30, 30), (cx, cy - s * 5 / 100), s * (12 + ring * 7) / 100, width: 2, alpha: (byte)(100 - ring * 20));
+
+        // Muscular unicorn body — bulky, aggressive
+        r.DrawCircle((160, 30, 30), (cx, cy), s * 14 / 100, alpha: 220); // body
+        r.DrawCircle((180, 40, 40), (cx - s * 2 / 100, cy - s * 2 / 100), s * 12 / 100, alpha: 180); // highlight
+
+        // Head — forward-facing, aggressive
+        r.DrawCircle((160, 30, 30), (cx, cy - s * 18 / 100), s * 8 / 100, alpha: 220);
+        r.DrawCircle((180, 50, 50), (cx - s * 2 / 100, cy - s * 19 / 100), s * 6 / 100, alpha: 150);
+
+        // Blazing horn — fiery
+        DrawHorn(r, cx, cy - s * 28 / 100, s * 12 / 100, (255, 120, 20), (255, 220, 80));
+        // Horn fire glow
+        r.DrawCircle((255, 160, 40), (cx, cy - s * 30 / 100), s * 4 / 100, alpha: 60);
+
+        // Angry eyes — red glow
+        r.DrawCircle((255, 40, 20), (cx - s * 4 / 100, cy - s * 19 / 100), s * 2 / 100, alpha: 230);
+        r.DrawCircle((255, 40, 20), (cx + s * 4 / 100, cy - s * 19 / 100), s * 2 / 100, alpha: 230);
+        r.DrawCircle((255, 200, 80), (cx - s * 4 / 100, cy - s * 19 / 100), s * 1 / 100, alpha: 255);
+        r.DrawCircle((255, 200, 80), (cx + s * 4 / 100, cy - s * 19 / 100), s * 1 / 100, alpha: 255);
+
+        // Legs — planted, powerful
+        r.DrawRect((140, 25, 25), (cx - s * 10 / 100, cy + s * 10 / 100, s * 5 / 100, s * 14 / 100), alpha: 220);
+        r.DrawRect((140, 25, 25), (cx + s * 5 / 100, cy + s * 10 / 100, s * 5 / 100, s * 14 / 100), alpha: 220);
+
+        // Flaming mane
+        for (int fm = 0; fm < 6; fm++)
+        {
+            int fx = cx + (int)(Math.Cos(fm * 0.7 + 1.0) * s * (8 + fm) / 100);
+            int fy = cy - s * 14 / 100 - fm * s * 2 / 100;
+            r.DrawCircle((255, 100 + fm * 20, 20), (fx, fy), Math.Max(2, s * (4 - fm / 2) / 100), alpha: (byte)(200 - fm * 25));
+        }
+
+        // Flying debris chunks
+        for (int db = 0; db < 10; db++)
+        {
+            double da = db * 0.65 + 0.3;
+            int dx = cx + (int)(Math.Cos(da) * s * (30 + db * 2) / 100);
+            int dy = cy - s * 5 / 100 + (int)(Math.Sin(da) * s * (20 + db) / 100);
+            int dz = Math.Max(2, s * (3 - db / 4) / 100);
+            r.DrawRect((100, 60, 30), (dx - dz / 2, dy - dz / 2, dz, dz), alpha: (byte)(180 - db * 14));
+        }
+
+        // Impact sparks
+        DrawSparkle4(r, cx - s * 28 / 100, cy - s * 10 / 100, s * 3 / 100, (255, 220, 60), 200);
+        DrawSparkle4(r, cx + s * 25 / 100, cy - s * 15 / 100, s * 4 / 100, (255, 180, 40), 180);
+        DrawSparkle4(r, cx + s * 5 / 100, cy - s * 32 / 100, s * 3 / 100, (255, 240, 100), 190);
+
+        // Smoke wisps at base
+        for (int sm = 0; sm < 5; sm++)
+        {
+            int smx = x + s * 10 / 100 + sm * s * 18 / 100;
+            int smy = cy + s * 25 / 100;
+            r.DrawCircle((60, 40, 30), (smx, smy), s * 5 / 100, alpha: (byte)(50 - sm * 6));
         }
     }
 

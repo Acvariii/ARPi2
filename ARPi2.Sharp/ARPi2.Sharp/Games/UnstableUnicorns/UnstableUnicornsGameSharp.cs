@@ -5,6 +5,8 @@ using System.Linq;
 using System.Text.Json;
 using ARPi2.Sharp.Core;
 using ARPi2.Sharp.Games.Blackjack; // for ListShuffleExt
+using Microsoft.Xna.Framework.Graphics;
+using SkiaSharp;
 
 namespace ARPi2.Sharp.Games.UnstableUnicorns;
 
@@ -117,6 +119,20 @@ public class UnstableUnicornsGameSharp : BaseGame
     private float _sparkleTimer;
     private string _lastEvent = "";
     private double _lastEventAge = 999.0;
+
+    // PNG card art textures (loaded on demand from Content/Unstable Unicorns cards/)
+    private readonly Dictionary<string, Texture2D?> _cardTextures = new();
+    private string[]? _babyPngNames;
+    private string[]? _basicPngNames;
+
+    // Per-card-instance variant index for baby/basic unicorns
+    // Key = object reference identity via a wrapper. We tag each card-in-list
+    // entry with a monotonic variant counter so the same baby unicorn keeps
+    // the same art regardless of list position changes.
+    private int _nextVariant;
+    // Maps "cardId:variantIdx" keys for on-screen cards to their variant number
+    // We track per (seat, slotIndex) for stables
+    private readonly Dictionary<string, int> _instanceVariants = new();
 
     private static readonly (int R, int G, int B)[] SeatColors =
     {
@@ -302,12 +318,16 @@ public class UnstableUnicornsGameSharp : BaseGame
         _hands.Clear();
         _stables.Clear();
         _protectedTurns.Clear();
+        _instanceVariants.Clear();
+        _nextVariant = 0;
 
         foreach (var s in seats)
         {
             _hands[s] = new List<string>();
             _stables[s] = new List<string> { "baby_unicorn" };
             _protectedTurns[s] = 0;
+            // Assign a unique variant for the starting baby unicorn
+            AssignVariant(s, 0);
         }
 
         // Deal 5
@@ -867,10 +887,27 @@ public class UnstableUnicornsGameSharp : BaseGame
     private void AddToStable(int seat, string cardId)
     {
         if (!_stables.ContainsKey(seat)) _stables[seat] = new List<string>();
+        int slotIdx = _stables[seat].Count;
         _stables[seat].Add(cardId);
+        AssignVariant(seat, slotIdx);
         var ck = _cards.GetValueOrDefault(cardId)?.Kind ?? "";
         if (ck is "baby_unicorn" or "unicorn")
             TriggerBarbedWire(seat);
+    }
+
+    /// <summary>Assign a persistent variant number to a stable slot.</summary>
+    private void AssignVariant(int seat, int slotIdx)
+    {
+        string key = $"{seat}:{slotIdx}";
+        if (!_instanceVariants.ContainsKey(key))
+            _instanceVariants[key] = _nextVariant++;
+    }
+
+    /// <summary>Get the variant number for a stable slot.</summary>
+    private int GetVariant(int seat, int slotIdx)
+    {
+        string key = $"{seat}:{slotIdx}";
+        return _instanceVariants.GetValueOrDefault(key, slotIdx);
     }
 
     private void CheckWin()
@@ -994,9 +1031,11 @@ public class UnstableUnicornsGameSharp : BaseGame
                     _reactionStack.Add("super_neigh");
                 }
 
-                // Animate the neigh card flying to centre
+                // Animate the neigh card flying to centre + showcase
                 if (buttonId is "uu_react_neigh" or "uu_react_super")
                 {
+                    string neighId = buttonId == "uu_react_super" ? "super_neigh" : "neigh";
+                    var neighDef = _cards.GetValueOrDefault(neighId);
                     int cx = ScreenW / 2, cy = ScreenH / 2;
                     var src = _zoneCenters.GetValueOrDefault(seat, (cx, cy));
                     _cardFlips.Add(new CardFlyAnim(src, (cx, cy), color: (220, 30, 30)));
@@ -1004,7 +1043,22 @@ public class UnstableUnicornsGameSharp : BaseGame
                     _textPops.Add(new TextPopAnim("NEIGH! \ud83d\udeab", cx, cy - 20,
                         (255, 80, 60), fontSize: 52, duration: 1.6f));
                     _screenShakeTimer = 0.3f;
-                    NoteEvent($"{PlayerName(seat)} played Neigh!");
+                    NoteEvent($"{PlayerName(seat)} played {neighDef?.Name ?? "Neigh"}!");
+
+                    // Showcase the neigh card art
+                    if (neighDef != null)
+                    {
+                        var nRgb = HexToRgb(neighDef.Color, (180, 180, 180));
+                        var nTex = GetCardTexture(neighDef);
+                        string nCorner = neighDef.Kind.Length > 4
+                            ? neighDef.Kind[..4].ToUpperInvariant()
+                            : neighDef.Kind.ToUpperInvariant();
+                        _showcases.Add(new CardShowcaseAnim(
+                            cx, cy, neighDef.Emoji, "", accentColor: nRgb, corner: nCorner,
+                            src: (src.Item1, src.Item2),
+                            kind: neighDef.Kind, cardName: neighDef.Name, desc: neighDef.Desc,
+                            illustration: nTex));
+                    }
 
                     // A Neigh/Super Neigh immediately ends the reaction window
                     _reactionPending.Clear();
@@ -1113,6 +1167,7 @@ public class UnstableUnicornsGameSharp : BaseGame
             string cardName = "a card";
             string? cardDesc = null;
             (int, int, int) cardRgb = (160, 80, 200);
+            Texture2D? cardTex = null;
             if (hand != null && idx >= 0 && idx < hand.Count)
             {
                 var cid = hand[idx];
@@ -1124,6 +1179,8 @@ public class UnstableUnicornsGameSharp : BaseGame
                     cardName = cd.Name;
                     cardDesc = cd.Desc;
                     cardRgb = HexToRgb(cd.Color, (160, 80, 200));
+                    // Use the next variant index so the animation matches the board slot
+                    cardTex = GetCardTexture(cd, _nextVariant);
                 }
             }
 
@@ -1145,7 +1202,8 @@ public class UnstableUnicornsGameSharp : BaseGame
                     ScreenW / 2, ScreenH / 2,
                     cardEmoji, "", accentColor: cardRgb, corner: corner,
                     src: (src.Item1, src.Item2),
-                    kind: cardKind, cardName: cardName, desc: cardDesc));
+                    kind: cardKind, cardName: cardName, desc: cardDesc,
+                    illustration: cardTex));
             }
 
             _particles.EmitSparkle(dst.Item1, dst.Item2, col, 20);
@@ -1658,6 +1716,33 @@ public class UnstableUnicornsGameSharp : BaseGame
                         int ri = Rng.Next(h.Count);
                         _discardPile.Add(h[ri]);
                         h.RemoveAt(ri);
+                    }
+                }
+            }
+            return;
+        }
+
+        if (typ == "ALL_SACRIFICE_ON_ENTER")
+        {
+            AddToStable(actor, cardId);
+            if (!enterSuppressed)
+            {
+                foreach (var s in ActivePlayers)
+                {
+                    var stable = _stables.GetValueOrDefault(s);
+                    if (stable == null || stable.Count == 0) continue;
+                    // Find unicorn indices (not the card itself if same player)
+                    var unicornIdxs = new List<int>();
+                    for (int i = 0; i < stable.Count; i++)
+                    {
+                        if (s == actor && stable[i] == cardId) continue; // don't sacrifice self
+                        var ck = _cards.GetValueOrDefault(stable[i])?.Kind ?? "";
+                        if (ck is "unicorn" or "baby_unicorn") unicornIdxs.Add(i);
+                    }
+                    if (unicornIdxs.Count > 0)
+                    {
+                        int ri = unicornIdxs[Rng.Next(unicornIdxs.Count)];
+                        TrySacrificeStableCard(s, ri);
                     }
                 }
             }
@@ -2943,7 +3028,7 @@ public class UnstableUnicornsGameSharp : BaseGame
                 int x = cx2 + (ci % cardsPerRow) * (cardW + gap);
                 int y = cy2 + (ci / cardsPerRow) * (cardH + gap);
                 if (x + cardW > zx + zoneW - 6 || y + cardH > zy + zoneH - 6) break;
-                DrawCardFace(r, (x, y, cardW, cardH), stable[ci]);
+                DrawCardFace(r, (x, y, cardW, cardH), stable[ci], GetVariant(s, ci));
             }
 
             // Card fan hint at bottom (# in hand)
@@ -3107,11 +3192,98 @@ public class UnstableUnicornsGameSharp : BaseGame
         }
     }
 
-    private void DrawCardFace(Renderer r, (int x, int y, int w, int h) rect, string cid)
+    private void DrawCardFace(Renderer r, (int x, int y, int w, int h) rect, string cid, int instanceIdx = 0)
     {
         var c = _cards.GetValueOrDefault(cid);
         if (c == null) return;
         var rgb = HexToRgb(c.Color, (140, 140, 140));
-        CardRendering.DrawUUCard(r, rect, c.Emoji, c.Name, c.Kind, rgb, c.Desc);
+        var tex = GetCardTexture(c, instanceIdx);
+        CardRendering.DrawUUCard(r, rect, c.Emoji, c.Name, c.Kind, rgb, c.Desc, illustration: tex);
+    }
+
+    // ── PNG card art: load from Content/Unstable Unicorns cards/ on demand ──
+
+    private static readonly string CardArtRoot = Path.Combine(
+        AppDomain.CurrentDomain.BaseDirectory, "Content", "Unstable Unicorns cards");
+
+    private Texture2D? GetCardTexture(UUCardDef c, int instanceIdx = 0)
+    {
+        string? pngPath = ResolveCardPng(c, instanceIdx);
+        if (pngPath == null) return null;
+
+        // Cache by resolved PNG path so variants get unique textures
+        if (_cardTextures.TryGetValue(pngPath, out var cached))
+            return cached;
+
+        Texture2D? tex = null;
+        if (File.Exists(pngPath))
+        {
+            try
+            {
+                using var bmp = SKBitmap.Decode(pngPath);
+                if (bmp != null)
+                    tex = Renderer.TextureFromSkia(bmp);
+            }
+            catch { /* silently fall back to procedural art */ }
+        }
+        _cardTextures[pngPath] = tex;
+        return tex;
+    }
+
+    private string? ResolveCardPng(UUCardDef c, int instanceIdx = 0)
+    {
+        string kind = c.Kind.ToLowerInvariant();
+        string folder;
+        switch (kind)
+        {
+            case "baby_unicorn":
+                folder = "Baby Unicorns";
+                return PickVariantPng(folder, ref _babyPngNames, instanceIdx);
+            case "unicorn":
+                // Check if it's a basic unicorn (id starts with unicorn_basic)
+                if (c.Id.StartsWith("unicorn_basic"))
+                {
+                    folder = "Basic Unicorns";
+                    return PickVariantPng(folder, ref _basicPngNames, instanceIdx);
+                }
+                folder = "Magical Unicorns";
+                break;
+            case "upgrade":   folder = "Upgrade Cards"; break;
+            case "downgrade": folder = "Downgrade Cards"; break;
+            case "magic":     folder = "Magic Cards"; break;
+            case "instant":   folder = "Instant Cards"; break;
+            case "neigh":     folder = "Instant Cards"; break;
+            case "super_neigh": folder = "Instant Cards"; break;
+            default:          return null;
+        }
+
+        // Direct name match
+        string path = Path.Combine(CardArtRoot, folder, c.Name + ".png");
+        if (File.Exists(path)) return path;
+
+        // Try case-insensitive search
+        string dir = Path.Combine(CardArtRoot, folder);
+        if (!Directory.Exists(dir)) return null;
+        foreach (var f in Directory.GetFiles(dir, "*.png"))
+        {
+            if (string.Equals(Path.GetFileNameWithoutExtension(f), c.Name, StringComparison.OrdinalIgnoreCase))
+                return f;
+        }
+        return null;
+    }
+
+    private string? PickVariantPng(string folder, ref string[]? nameCache, int instanceIdx)
+    {
+        string dir = Path.Combine(CardArtRoot, folder);
+        if (!Directory.Exists(dir)) return null;
+
+        if (nameCache == null)
+            nameCache = Directory.GetFiles(dir, "*.png").Select(Path.GetFileNameWithoutExtension).Where(n => n != null).ToArray()!;
+
+        if (nameCache.Length == 0) return null;
+
+        // Each stable slot gets a different variant, cycling through all PNGs
+        int idx = ((instanceIdx % nameCache.Length) + nameCache.Length) % nameCache.Length;
+        return Path.Combine(dir, nameCache[idx] + ".png");
     }
 }

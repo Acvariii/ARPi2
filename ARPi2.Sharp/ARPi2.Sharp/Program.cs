@@ -277,7 +277,7 @@ public class ARPi2Game : Game
         r.DrawText("ARPi2 Game Launcher", cx, titleY, 64, GameConfig.Colors.White, anchorX: "center", anchorY: "center");
         r.DrawText("Scan the QR code or use the Web UI to join", cx, titleY + 56, 24, (200, 200, 200), anchorX: "center", anchorY: "center");
 
-        // ── Left side: QR code panel ──
+        // ── Left side: QR code panels ──
         int contentTop = h * 32 / 100;
         int qrSize = Math.Clamp(Math.Min(w, h) * 24 / 100, 140, 260);
         int qrX = w * 30 / 100;
@@ -285,6 +285,12 @@ public class ARPi2Game : Game
         QRCodeRenderer.DrawQRPanel(r, qrX, qrY, qrSize,
             title: "📱 SCAN TO JOIN",
             accentColor: (100, 180, 255));
+
+        // Hamachi QR (below LAN QR, only if a 25.x.x.x IP exists)
+        int hamachiQrY = qrY + qrSize / 2 + 80 + qrSize / 2;
+        QRCodeRenderer.DrawHamachiQRPanel(r, qrX, hamachiQrY, qrSize,
+            title: "🔗 HAMACHI",
+            accentColor: (180, 100, 255));
 
         // ── Right side: Lobby + player list ──
         int rightCx = w * 70 / 100;

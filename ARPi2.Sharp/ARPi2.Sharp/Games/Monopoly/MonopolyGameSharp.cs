@@ -123,13 +123,16 @@ public sealed class MonopolyGameSharp : BaseGame
     private readonly List<PulseRing> _pulseRings = new();
     private readonly List<ScreenFlash> _flashes = new();
     private readonly List<CardFlipInPlace> _cardFlips = new();
+    private readonly List<ExplosionBurst> _explosions = new();
     private readonly AmbientSystem _ambient;
     private readonly LightBeamSystem _lightBeams = LightBeamSystem.ForTheme("monopoly");
-    private readonly VignettePulse _vignette = new();
+    private readonly VignettePulse _vignette = new() { DarkAlpha = 0 }; // disabled — was darkening the board
     private readonly Starfield _starfield;
     private readonly FloatingIconSystem _floatingIcons = FloatingIconSystem.ForTheme("monopoly");
     private readonly WaveBand _waveBand = WaveBand.ForTheme("monopoly");
     private readonly HeatShimmer _heatShimmer = HeatShimmer.ForTheme("monopoly");
+    private readonly FireEdge _fireEdge = new() { Speed = 1.2f, FlameCount = 24, MaxFlameH = 28, Alpha = 35 };
+    private readonly SpotlightCone _spotlight = new() { Speed = 0.4f, Color = (255, 210, 90) };
     private bool _animPrevGameOver;
     private float _animFwTimer;
 
@@ -370,6 +373,10 @@ public sealed class MonopolyGameSharp : BaseGame
         _floatingIcons.Update(fdt, ScreenW, ScreenH);
         _waveBand.Update(fdt);
         _heatShimmer.Update(fdt);
+        _fireEdge.Update(fdt);
+        _spotlight.Update(fdt);
+        foreach (var ex in _explosions) ex.Update(fdt);
+        _explosions.RemoveAll(e => e.Done);
 
         // Winner fireworks
         bool isWin = State == "winner";
@@ -1609,21 +1616,42 @@ public sealed class MonopolyGameSharp : BaseGame
             {
                 if (pi < 0 || pi >= _properties.Count) continue;
                 var prop = _properties[pi];
+                var d = prop.Data;
+                string? hexColor = d.Color != default ? $"#{d.Color.R:x2}{d.Color.G:x2}{d.Color.B:x2}" : null;
                 props.Add(new Dictionary<string, object?>
                 {
                     ["idx"] = pi,
-                    ["name"] = prop.Data.Name,
+                    ["name"] = d.Name,
+                    ["color"] = hexColor,
+                    ["group"] = d.Group,
+                    ["houses"] = prop.Houses,
+                    ["mortgaged"] = prop.IsMortgaged,
+                    ["price"] = d.Price,
+                    ["house_cost"] = d.HouseCost,
                 });
             }
+
+            int totalHouses = p.Properties.Where(i => i >= 0 && i < _properties.Count).Sum(i => _properties[i].Houses);
+            int hotels = p.Properties.Where(i => i >= 0 && i < _properties.Count).Count(i => _properties[i].Houses == 5);
+            int houseCount = totalHouses - hotels * 5;
+            int netWorth = p.Money
+                + p.Properties.Where(i => i >= 0 && i < _properties.Count)
+                    .Sum(i => _properties[i].IsMortgaged ? _properties[i].Data.Price / 2 : _properties[i].Data.Price)
+                + houseCount * 50 + hotels * 250;
+
             players.Add(new Dictionary<string, object?>
             {
                 ["player_idx"] = pidx,
                 ["name"] = PlayerName(pidx),
                 ["money"] = p.Money,
+                ["net_worth"] = netWorth,
                 ["jail_free_cards"] = p.GetOutOfJailCards,
                 ["properties"] = props,
                 ["position"] = p.Position,
                 ["in_jail"] = p.InJail,
+                ["is_bankrupt"] = p.IsBankrupt,
+                ["houses"] = houseCount,
+                ["hotels"] = hotels,
             });
         }
 
@@ -1650,6 +1678,8 @@ public sealed class MonopolyGameSharp : BaseGame
                 ["ownership"] = ownership,
                 ["current_turn_seat"] = currentTurnSeat,
                 ["current_turn_name"] = currentTurnName,
+                ["dice_values"] = _diceValues != (0, 0) ? new[] { _diceValues.Item1, _diceValues.Item2 } : null,
+                ["free_parking_pot"] = _freeParkingPot,
             }
         };
     }
@@ -2248,6 +2278,11 @@ public sealed class MonopolyGameSharp : BaseGame
             _lightBeams.Draw(r, width, height);
             _starfield.Draw(r);
             _floatingIcons.Draw(r);
+            _fireEdge.Draw(r, width, height);
+            // Ambient overlays (behind board)
+            _waveBand.Draw(r, width, height);
+            _heatShimmer.Draw(r, width, height);
+
             int margin = 10;
             int size = Math.Max(200, Math.Min(width - 2 * margin, height - 2 * margin));
             int bx = margin + (width - 2 * margin - size) / 2;
@@ -2258,19 +2293,42 @@ public sealed class MonopolyGameSharp : BaseGame
             DrawTokens(r);
             if (_diceRolling || _diceValues != (0, 0)) DrawDice(r);
             DrawToasts(r, width, height);
-            DrawAnimations(r, width, height);
+            DrawForegroundAnimations(r, width, height);
+            _vignette.Draw(r, width, height);
             return;
         }
 
-        // Background
+        // ── Background layers ──
         CardRendering.DrawGameBackground(r, width, height, "monopoly");
         _ambient.Draw(r);
         _lightBeams.Draw(r, width, height);
         _starfield.Draw(r);
         _floatingIcons.Draw(r);
+        _fireEdge.Draw(r, width, height);
+
+        // ── Ambient overlays (behind board) ──
+        _waveBand.Draw(r, width, height);
+        _heatShimmer.Draw(r, width, height);
+
+        // ── Table center glow (behind board) ──
+        DrawTableCenterGlow(r, width, height);
+
+        // ── Decorative corner accents ──
+        DrawCornerAccents(r, width, height);
 
         // Panels
         DrawPanels(r);
+
+        // ── Spotlight on current player ──
+        if (State == "playing" && ActivePlayers.Count > 0)
+        {
+            int spotSeat = CurrentSeat;
+            if (_panels.TryGetValue(spotSeat, out var spotPanel))
+            {
+                var (px, py, pw, ph) = spotPanel.Rect;
+                _spotlight.DrawAt(r, px + pw / 2, py + ph / 2, width, height, radius: 100);
+            }
+        }
 
         // Board
         DrawBoard(r);
@@ -2291,8 +2349,9 @@ public sealed class MonopolyGameSharp : BaseGame
             _popup.Draw(r);
         }
 
-        // Animations
-        DrawAnimations(r, width, height);
+        // ── Foreground action animations (on top) ──
+        DrawForegroundAnimations(r, width, height);
+        _vignette.Draw(r, width, height);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -2308,13 +2367,34 @@ public sealed class MonopolyGameSharp : BaseGame
             bool isCurrent = idx == currIdx;
             panel.DrawBackground(r, isCurrent);
 
-            // Balance text
-            string jailInd = player.GetOutOfJailCards > 0 ? " 🔑" : "";
-            string moneyText = $"${player.Money}{jailInd}";
-            panel.DrawTextOriented(r, moneyText, 0.5f, 0.30f, 20, (0, 0, 0));
+            // ── Player name with token emoji ──
+            string emoji = idx < TokenEmojis.Length ? TokenEmojis[idx] : "●";
+            panel.DrawTextOriented(r, $"{emoji} {SeatLabel(idx)}", 0.5f, 0.08f, 14, (255, 255, 255));
 
-            // Draw name
-            panel.DrawTextOriented(r, SeatLabel(idx), 0.5f, 0.12f, 14, (255, 255, 255));
+            // ── Balance ──
+            string jailInd = player.InJail ? " ⛓" : player.GetOutOfJailCards > 0 ? " 🔑" : "";
+            string moneyText = $"${player.Money}{jailInd}";
+            panel.DrawTextOriented(r, moneyText, 0.5f, 0.24f, 22, (255, 255, 220));
+
+            // ── Property / house summary line ──
+            int propCount = player.Properties.Count;
+            int totalHouses = player.Properties
+                .Where(pi => pi >= 0 && pi < _properties.Count)
+                .Sum(pi => _properties[pi].Houses);
+            int hotels = player.Properties
+                .Where(pi => pi >= 0 && pi < _properties.Count)
+                .Count(pi => _properties[pi].Houses == 5);
+            int houses = totalHouses - hotels * 5;
+            string statLine = $"🏠{houses} 🏨{hotels} 📜{propCount}";
+            panel.DrawTextOriented(r, statLine, 0.5f, 0.40f, 11, (200, 200, 200));
+
+            // ── Net worth ──
+            int netWorth = player.Money
+                + player.Properties
+                    .Where(pi => pi >= 0 && pi < _properties.Count)
+                    .Sum(pi => _properties[pi].IsMortgaged ? _properties[pi].Data.Price / 2 : _properties[pi].Data.Price)
+                + houses * 50 + hotels * 250;
+            panel.DrawTextOriented(r, $"Net: ${netWorth}", 0.5f, 0.52f, 10, (170, 220, 170));
 
             // Buttons
             if (_buttons.TryGetValue(idx, out var btns))
@@ -2329,89 +2409,146 @@ public sealed class MonopolyGameSharp : BaseGame
     private void DrawBoard(Renderer r)
     {
         var (bx, by, bw, bh) = _boardRect;
+        int corner = bw / 11;
 
-        // Shadow
+        // ── Deep shadow stack ──
+        r.DrawRect((0, 0, 0), (bx + 8, by + 8, bw, bh), alpha: 50);
         r.DrawRect((0, 0, 0), (bx + 5, by + 5, bw, bh), alpha: 80);
-        // Board base
-        r.DrawRect((215, 235, 215), (bx, by, bw, bh));
-        // Inner fill
-        r.DrawRect((230, 245, 228), (bx + 4, by + 4, bw - 8, bh - 8), alpha: 120);
-        // Gold border
-        r.DrawRect((160, 140, 80), (bx, by, bw, bh), width: 3);
+        r.DrawRect((0, 0, 0), (bx + 2, by + 2, bw, bh), alpha: 40);
 
-        // Draw each space
+        // ── Board base — rich green felt ──
+        r.DrawRect((195, 225, 195), (bx, by, bw, bh));
+        // Subtle gradient darkening at edges
+        int gradBand = bw / 16;
+        r.DrawRect((0, 0, 0), (bx, by, bw, gradBand), alpha: 15);
+        r.DrawRect((0, 0, 0), (bx, by + bh - gradBand, bw, gradBand), alpha: 15);
+        r.DrawRect((0, 0, 0), (bx, by, gradBand, bh), alpha: 12);
+        r.DrawRect((0, 0, 0), (bx + bw - gradBand, by, gradBand, bh), alpha: 12);
+        // Inner field — lighter center
+        int innerX = bx + corner, innerY = by + corner;
+        int innerW = bw - 2 * corner, innerH = bh - 2 * corner;
+        r.DrawRect((210, 238, 208), (innerX, innerY, innerW, innerH));
+        r.DrawRect((220, 245, 218), (innerX + 4, innerY + 4, innerW - 8, innerH - 8), alpha: 180);
+
+        // ── Premium gold border ──
+        r.DrawRect((120, 100, 40), (bx, by, bw, bh), width: 4);
+        r.DrawRect((200, 175, 80), (bx + 1, by + 1, bw - 2, bh - 2), width: 1, alpha: 150);
+        r.DrawRect((180, 160, 60), (bx + 5, by + 5, bw - 10, bh - 10), width: 1, alpha: 60);
+
+        // ── Center branding ──
+        DrawBoardCenter(r, bx, by, bw, bh, innerX, innerY, innerW, innerH);
+
+        // ── Draw each space ──
         for (int i = 0; i < _spaces.Count && i < _properties.Count; i++)
         {
             var (sx, sy, sw, sh) = _spaces[i];
             var space = _properties[i];
             string spaceType = space.Data.Type;
+            bool isCorner = i == 0 || i == 10 || i == 20 || i == 30;
 
-            // Shadow + background
-            r.DrawRect((0, 0, 0), (sx + 2, sy + 2, sw, sh), alpha: 30);
-            r.DrawRect((248, 248, 245), (sx, sy, sw, sh));
+            // ── Space background ──
+            r.DrawRect((0, 0, 0), (sx + 2, sy + 2, sw, sh), alpha: 25);
+            r.DrawRect((250, 250, 248), (sx, sy, sw, sh));
+            // Subtle inner highlight
+            r.DrawRect((255, 255, 255), (sx + 1, sy + 1, sw - 2, 2), alpha: 80);
+            r.DrawRect((0, 0, 0), (sx + 1, sy + sh - 2, sw - 2, 1), alpha: 20);
 
-            // Color bar
-            if (space.Data.Color != default)
+            // ── Property color bar — gradient with sheen ──
+            if (space.Data.Color != default && spaceType == "property")
             {
                 var pc = space.Data.Color;
-                int barH = Math.Max(12, sh / 3);
+                int barH = Math.Max(14, sh / 3);
                 r.DrawRect(pc, (sx + 1, sy + 1, sw - 2, barH));
-                var hl = (Math.Min(255, pc.R + 60), Math.Min(255, pc.G + 60), Math.Min(255, pc.B + 60));
-                r.DrawRect(hl, (sx + 1, sy + barH - 2, sw - 2, 2), alpha: 100);
+                // Gradient sheen at top
+                var lighter = (Math.Min(255, pc.R + 50), Math.Min(255, pc.G + 50), Math.Min(255, pc.B + 50));
+                r.DrawRect(lighter, (sx + 1, sy + 1, sw - 2, Math.Max(2, barH / 3)), alpha: 100);
+                // Dark bottom edge
+                var darker = (Math.Max(0, pc.R - 40), Math.Max(0, pc.G - 40), Math.Max(0, pc.B - 40));
+                r.DrawRect(darker, (sx + 1, sy + barH, sw - 2, 2), alpha: 80);
+                // Separator line
+                r.DrawRect((60, 60, 60), (sx + 1, sy + barH + 1, sw - 2, 1), alpha: 40);
             }
 
-            // Owner glow
+            // ── Owner indicator — colored bottom strip ──
             if (space.Owner >= 0 && (spaceType == "property" || spaceType == "railroad" || spaceType == "utility"))
             {
                 var oc = GameConfig.PlayerColors[space.Owner];
-                r.DrawRect(oc, (sx - 1, sy - 1, sw + 2, sh + 2), width: 4, alpha: 100);
-                r.DrawRect(oc, (sx + 2, sy + 2, sw - 4, sh - 4), width: 3);
+                // Solid owner strip at bottom
+                r.DrawRect(oc, (sx + 1, sy + sh - 6, sw - 2, 5));
+                // Subtle border glow
+                r.DrawRect(oc, (sx, sy, sw, sh), width: 2, alpha: 70);
             }
 
-            // Houses/Hotels
-            if (space.Houses > 0 && spaceType == "property")
+            // ── Mortgage overlay ──
+            if (space.IsMortgaged)
             {
+                r.DrawRect((0, 0, 0), (sx, sy, sw, sh), alpha: 100);
+                // Diagonal stripes
+                for (int stripe = -sh; stripe < sw + sh; stripe += 8)
+                {
+                    int x1 = sx + stripe, y1 = sy;
+                    int x2 = sx + stripe - sh, y2 = sy + sh;
+                    x1 = Math.Max(sx, Math.Min(sx + sw, x1));
+                    x2 = Math.Max(sx, Math.Min(sx + sw, x2));
+                    r.DrawLine((255, 60, 60), (x1, y1), (x2, y2), width: 1, alpha: 60);
+                }
+                r.DrawText("M", sx + sw / 2, sy + sh / 2, 14, (255, 60, 60), bold: true, anchorX: "center", anchorY: "center", alpha: 200);
+            }
+
+            // ── Houses / Hotels — premium indicators ──
+            if (space.Houses > 0 && spaceType == "property" && !space.IsMortgaged)
+            {
+                int barH2 = Math.Max(14, sh / 3);
                 if (space.Houses == 5)
                 {
-                    int hx = sx + sw / 2 - 10, hy = sy + sh - 16;
-                    r.DrawRect((200, 0, 0), (hx, hy, 20, 14));
-                    r.DrawText("H", hx + 10, hy + 7, 10, (255, 255, 255), anchorX: "center", anchorY: "center");
+                    // Hotel — red rectangle with gold accent
+                    int hw = Math.Min(20, sw * 60 / 100), hh = 10;
+                    int hx = sx + (sw - hw) / 2, hy = sy + barH2 + 3;
+                    r.DrawRect((180, 10, 10), (hx, hy, hw, hh));
+                    r.DrawRect((220, 40, 40), (hx, hy, hw, 3), alpha: 120);
+                    r.DrawRect((140, 0, 0), (hx, hy, hw, hh), width: 1);
+                    r.DrawText("H", hx + hw / 2, hy + hh / 2, 8, (255, 230, 120), bold: true, anchorX: "center", anchorY: "center");
                 }
                 else
                 {
-                    int hw = 9, hh = 9, gap = 3;
-                    int totalW = space.Houses * hw + (space.Houses - 1) * gap;
-                    int sx0 = sx + (sw - totalW) / 2;
-                    int hy = sy + sh - 14;
+                    // Houses — green with highlights
+                    int hw = 7, hh = 7, gap = 2;
+                    int totalHW = space.Houses * hw + (space.Houses - 1) * gap;
+                    int sx0 = sx + (sw - totalHW) / 2;
+                    int hy = sy + barH2 + 4;
                     for (int j = 0; j < space.Houses; j++)
                     {
                         int hx = sx0 + j * (hw + gap);
-                        r.DrawRect((20, 180, 20), (hx, hy, hw, hh));
-                        r.DrawRect((10, 120, 10), (hx, hy, hw, hh), width: 1);
+                        r.DrawRect((30, 160, 30), (hx, hy, hw, hh));
+                        r.DrawRect((60, 200, 60), (hx, hy, hw, 2), alpha: 140);
+                        r.DrawRect((15, 110, 15), (hx, hy, hw, hh), width: 1);
                     }
                 }
             }
 
-            // Space name (word-wrapped, always horizontal)
-            string name = space.Data.Name;
-            if (!string.IsNullOrEmpty(name) && (!_popup.Active || BoardOnlyMode))
+            // ── Corner space artwork ──
+            if (isCorner)
             {
-                int cx = sx + sw / 2, cy = sy + sh / 2;
+                DrawCornerSpace(r, i, sx, sy, sw, sh);
+            }
 
-                // Free Parking special
-                if (i == 20 && spaceType == "free_parking" && _freeParkingPot > 0)
+            // ── Space name + price ── (skip for spaces that draw custom icons)
+            bool hasCustomIcon = spaceType is "income_tax" or "luxury_tax" or "chance" or "community_chest" or "railroad" or "utility";
+            if (!isCorner && !hasCustomIcon)
+            {
+                string name = space.Data.Name;
+                if (!string.IsNullOrEmpty(name) && !space.IsMortgaged)
                 {
-                    r.DrawText("Free", cx, cy - 8, 11, (0, 0, 0), anchorX: "center", anchorY: "center");
-                    r.DrawText("Parking", cx, cy + 4, 11, (0, 0, 0), anchorX: "center", anchorY: "center");
-                    r.DrawText($"${_freeParkingPot}", cx, cy + 16, 10, (255, 215, 0), anchorX: "center", anchorY: "center");
-                }
-                else
-                {
+                    int cx = sx + sw / 2;
+                    int textAreaTop = sy + (space.Data.Color != default && spaceType == "property" ? Math.Max(14, sh / 3) + (space.Houses > 0 ? 15 : 4) : 4);
+                    int textAreaBot = sy + sh - (space.Owner >= 0 ? 10 : 4);
+                    int textCy = textAreaTop + (textAreaBot - textAreaTop) / 2;
+
+                    // Name
+                    int fs = sw < 50 ? 8 : name.Length > 14 ? 9 : name.Length > 10 ? 10 : 11;
                     var words = name.Split(' ');
-                    int fs = name.Length > 12 ? 10 : name.Length > 10 ? 11 : 12;
                     if (words.Length > 1)
                     {
-                        // Multi-line
                         var lines = new List<string>();
                         string cur = "";
                         foreach (string w in words)
@@ -2422,53 +2559,253 @@ public sealed class MonopolyGameSharp : BaseGame
                         }
                         if (cur.Length > 0) lines.Add(cur);
                         int lh = fs + 2;
-                        int totalH = lines.Count * lh;
-                        int startY = cy - totalH / 2 + lh / 2;
+                        int startY = textCy - (lines.Count * lh) / 2 + lh / 2;
                         for (int li = 0; li < lines.Count; li++)
-                            r.DrawText(lines[li], cx, startY + li * lh, fs, (0, 0, 0), anchorX: "center", anchorY: "center");
+                            r.DrawText(lines[li], cx, startY + li * lh, fs, (30, 30, 30), anchorX: "center", anchorY: "center");
                     }
                     else
                     {
-                        r.DrawText(name, cx, cy, fs, (0, 0, 0), anchorX: "center", anchorY: "center");
+                        r.DrawText(name, cx, textCy, fs, (30, 30, 30), anchorX: "center", anchorY: "center");
+                    }
+
+                    // Price label for buyable spaces
+                    if (space.Data.Price > 0 && space.Owner < 0 && !space.IsMortgaged)
+                    {
+                        int priceY = sy + sh - 8;
+                        r.DrawText($"${space.Data.Price}", cx, priceY, Math.Max(7, fs - 2), (100, 100, 100), anchorX: "center", anchorY: "center");
                     }
                 }
             }
 
-            // Border
-            r.DrawRect((80, 80, 80), (sx, sy, sw, sh), width: 1);
-        }
-
-        // Card banner
-        if (_cardBannerText != null && _cardBannerTs > 0 && _clock - _cardBannerTs <= 10.0)
-        {
-            string title = _cardBannerDeck == "chance" ? "❓ Chance" : "🎁 Community Chest";
-            string raw = _cardBannerText;
-            var lines = new List<string>();
-            string cur2 = "";
-            foreach (string w in raw.Split(' '))
+            // ── Space icon + label for special spaces (drawn instead of the name) ──
+            if (spaceType == "railroad" && !space.IsMortgaged)
             {
-                string nxt = string.IsNullOrEmpty(cur2) ? w : cur2 + " " + w;
-                if (nxt.Length <= 34) cur2 = nxt;
-                else { if (cur2.Length > 0) lines.Add(cur2); cur2 = w; }
+                int nameFs = sw < 50 ? 7 : 8;
+                var words = space.Data.Name.Split(' ');
+                int lineY = sy + 6;
+                foreach (string w in words) { r.DrawText(w, sx + sw / 2, lineY + nameFs / 2, nameFs, (30, 30, 30), anchorX: "center", anchorY: "center"); lineY += nameFs + 2; }
+                r.DrawText("🚂", sx + sw / 2, sy + sh * 55 / 100, Math.Max(10, sw / 4), (50, 50, 50), anchorX: "center", anchorY: "center");
+                if (space.Data.Price > 0 && space.Owner < 0)
+                    r.DrawText($"${space.Data.Price}", sx + sw / 2, sy + sh - 8, Math.Max(7, nameFs), (100, 100, 100), anchorX: "center", anchorY: "center");
             }
-            if (cur2.Length > 0) lines.Add(cur2);
-            if (lines.Count > 4) lines = lines.Take(4).ToList();
+            else if (spaceType == "utility" && !space.IsMortgaged)
+            {
+                string icon = space.Data.Name.Contains("Electric") ? "💡" : "💧";
+                int nameFs = sw < 50 ? 7 : 8;
+                var words = space.Data.Name.Split(' ');
+                int lineY = sy + 6;
+                foreach (string w in words) { r.DrawText(w, sx + sw / 2, lineY + nameFs / 2, nameFs, (30, 30, 30), anchorX: "center", anchorY: "center"); lineY += nameFs + 2; }
+                r.DrawText(icon, sx + sw / 2, sy + sh * 55 / 100, Math.Max(10, sw / 4), (50, 50, 50), anchorX: "center", anchorY: "center");
+                if (space.Data.Price > 0 && space.Owner < 0)
+                    r.DrawText($"${space.Data.Price}", sx + sw / 2, sy + sh - 8, Math.Max(7, nameFs), (100, 100, 100), anchorX: "center", anchorY: "center");
+            }
+            else if (spaceType == "chance")
+            {
+                r.DrawText("?", sx + sw / 2, sy + sh / 2 - 2, Math.Max(16, sw / 2), (200, 50, 50), bold: true, anchorX: "center", anchorY: "center");
+            }
+            else if (spaceType == "community_chest")
+            {
+                r.DrawText("💰", sx + sw / 2, sy + sh / 2 - 2, Math.Max(12, sw / 3), (50, 50, 50), anchorX: "center", anchorY: "center");
+            }
+            else if (spaceType == "income_tax")
+            {
+                r.DrawText("INCOME", sx + sw / 2, sy + sh / 4, Math.Max(7, sw / 5), (80, 80, 80), bold: true, anchorX: "center", anchorY: "center");
+                r.DrawText("TAX", sx + sw / 2, sy + sh / 2 - 2, Math.Max(10, sw / 4), (80, 80, 80), bold: true, anchorX: "center", anchorY: "center");
+                r.DrawText($"${MonopolyData.IncomeTax}", sx + sw / 2, sy + sh * 3 / 4, Math.Max(8, sw / 5), (180, 50, 50), anchorX: "center", anchorY: "center");
+            }
+            else if (spaceType == "luxury_tax")
+            {
+                r.DrawText("LUXURY", sx + sw / 2, sy + sh / 4, Math.Max(7, sw / 5), (80, 80, 80), bold: true, anchorX: "center", anchorY: "center");
+                r.DrawText("💎", sx + sw / 2, sy + sh / 2 - 2, Math.Max(10, sw / 4), (50, 50, 50), anchorX: "center", anchorY: "center");
+                r.DrawText($"${MonopolyData.LuxuryTax}", sx + sw / 2, sy + sh * 3 / 4, Math.Max(8, sw / 5), (180, 50, 50), anchorX: "center", anchorY: "center");
+            }
 
-            int bw2 = (int)(bw * 0.56), bh2 = (int)(bh * 0.15);
-            int x2 = bx + (bw - bw2) / 2;
-            int y2 = by + (int)(bh * 0.22) + bh2 / 2;
-            r.DrawRect((255, 255, 240), (x2, y2, bw2, bh2), alpha: 235);
-            r.DrawRect((80, 80, 80), (x2, y2, bw2, bh2), width: 2);
-            r.DrawText(title, x2 + bw2 / 2, y2 + (int)(bh2 * 0.70), 14, (20, 20, 20), bold: true, anchorX: "center", anchorY: "center");
-            int baseY = y2 + (int)(bh2 * 0.48);
-            for (int li = 0; li < lines.Count; li++)
-                r.DrawText(lines[li], x2 + bw2 / 2, baseY - li * 16, 11, (20, 20, 20), anchorX: "center", anchorY: "center");
+            // ── Border ──
+            r.DrawRect((100, 100, 100), (sx, sy, sw, sh), width: 1, alpha: 180);
         }
+
+        // ── Card banner ──
+        DrawCardBanner(r, bx, by, bw, bh);
+    }
+
+    // ── Board center — Monopoly branding ──
+    private void DrawBoardCenter(Renderer r, int bx, int by, int bw, int bh, int ix, int iy, int iw, int ih)
+    {
+        int cx = bx + bw / 2, cy = by + bh / 2;
+
+        // Decorative border around inner field
+        r.DrawRect((160, 140, 80), (ix, iy, iw, ih), width: 2, alpha: 70);
+        r.DrawRect((200, 175, 80), (ix + 3, iy + 3, iw - 6, ih - 6), width: 1, alpha: 35);
+
+        // Red banner background for title
+        int bannerW = iw * 65 / 100, bannerH = Math.Max(24, ih / 8);
+        int bannerX = cx - bannerW / 2, bannerY = cy - ih * 28 / 100;
+        r.DrawRect((200, 30, 30), (bannerX, bannerY, bannerW, bannerH));
+        r.DrawRect((230, 60, 60), (bannerX, bannerY, bannerW, 3), alpha: 120);
+        r.DrawRect((150, 10, 10), (bannerX, bannerY + bannerH - 2, bannerW, 2), alpha: 100);
+        r.DrawRect((120, 20, 20), (bannerX, bannerY, bannerW, bannerH), width: 1, alpha: 180);
+
+        // "MONOPOLY" title — sized to fit inside the banner
+        int titleFs = Math.Max(10, Math.Min(bannerH * 55 / 100, bannerW / 8));
+        r.DrawText("MONOPOLY", cx + 1, bannerY + bannerH / 2 + 1, titleFs, (100, 0, 0), bold: true, anchorX: "center", anchorY: "center", alpha: 100);
+        r.DrawText("MONOPOLY", cx, bannerY + bannerH / 2, titleFs, (255, 255, 255), bold: true, anchorX: "center", anchorY: "center");
+
+        // Decorative lines above and below banner
+        int lineW = bannerW * 80 / 100;
+        r.DrawRect((160, 140, 80), (cx - lineW / 2, bannerY - 5, lineW, 1), alpha: 80);
+        r.DrawRect((160, 140, 80), (cx - lineW / 2, bannerY + bannerH + 4, lineW, 1), alpha: 80);
+
+        // Current turn display
+        if (State == "playing" && ActivePlayers.Count > 0)
+        {
+            int turnY = cy + ih * 25 / 100;
+            int seat = CurrentSeat;
+            var turnColor = GameConfig.PlayerColors[seat];
+            // Small pulsing dot indicator (not a large glow)
+            double pulse = 0.6 + 0.4 * Math.Sin(_clock * 3);
+            int dotR = Math.Max(3, ih / 30);
+            int dotX = cx - iw * 18 / 100;
+            r.DrawCircle(turnColor, (dotX, turnY), dotR, alpha: (int)(200 * pulse));
+            r.DrawText($"{SeatLabel(seat)}'s Turn", cx, turnY, Math.Max(9, ih / 14), turnColor, bold: true, anchorX: "center", anchorY: "center");
+        }
+    }
+
+    // ── Corner space artwork ──
+    private void DrawCornerSpace(Renderer r, int spaceIdx, int sx, int sy, int sw, int sh)
+    {
+        int cx = sx + sw / 2, cy = sy + sh / 2;
+        int s = Math.Min(sw, sh);
+
+        switch (spaceIdx)
+        {
+            case 0: // GO
+                r.DrawRect((230, 240, 230), (sx, sy, sw, sh));
+                // Large red left-pointing arrow (← direction of play)
+                int aW = s * 40 / 100; // total arrow width
+                int aH = s * 12 / 100; // shaft height
+                int headH = s * 28 / 100; // arrowhead height
+                int headW = s * 18 / 100; // arrowhead depth
+                int aY = cy + s * 2 / 100; // vertical center of arrow
+                // Shaft (horizontal bar, right portion)
+                r.DrawRect((220, 30, 30), (cx - aW / 2 + headW, aY - aH / 2, aW - headW, aH));
+                // Arrowhead — triangular, pointing LEFT
+                for (int a = 0; a < headW; a++)
+                {
+                    double frac = (double)a / headW; // 0 at tip, 1 at base
+                    int lineH = (int)(headH * frac);
+                    if (lineH < 1) lineH = 1;
+                    int px = cx - aW / 2 + a;
+                    r.DrawRect((220, 30, 30), (px, aY - lineH / 2, 1, lineH));
+                }
+                r.DrawText("GO", cx, cy - s * 22 / 100, Math.Max(14, s * 30 / 100), (220, 30, 30), bold: true, anchorX: "center", anchorY: "center");
+                r.DrawText("COLLECT $200", cx, cy + s * 28 / 100, Math.Max(7, s * 12 / 100), (30, 30, 30), anchorX: "center", anchorY: "center");
+                break;
+
+            case 10: // Jail / Just Visiting
+                r.DrawRect((230, 235, 240), (sx, sy, sw, sh));
+                // Jail cell area
+                int jailW = sw * 55 / 100, jailH = sh * 55 / 100;
+                int jailX = sx + sw - jailW - 4, jailY = sy + 4;
+                r.DrawRect((245, 200, 160), (jailX, jailY, jailW, jailH));
+                r.DrawRect((100, 80, 60), (jailX, jailY, jailW, jailH), width: 2);
+                // Bars
+                int barCount = 4;
+                for (int b = 1; b < barCount; b++)
+                {
+                    int bx2 = jailX + b * jailW / barCount;
+                    r.DrawLine((80, 80, 80), (bx2, jailY), (bx2, jailY + jailH), width: 2, alpha: 200);
+                }
+                r.DrawText("IN", jailX + jailW / 2, jailY + jailH / 3, Math.Max(8, s * 12 / 100), (30, 30, 30), bold: true, anchorX: "center", anchorY: "center");
+                r.DrawText("JAIL", jailX + jailW / 2, jailY + jailH * 2 / 3, Math.Max(8, s * 12 / 100), (30, 30, 30), bold: true, anchorX: "center", anchorY: "center");
+                // "Just Visiting" text
+                r.DrawText("JUST", sx + 6, sy + sh - 18, Math.Max(7, s * 10 / 100), (60, 60, 60), anchorX: "left", anchorY: "center");
+                r.DrawText("VISITING", sx + 6, sy + sh - 8, Math.Max(7, s * 10 / 100), (60, 60, 60), anchorX: "left", anchorY: "center");
+                break;
+
+            case 20: // Free Parking
+                r.DrawRect((230, 240, 230), (sx, sy, sw, sh));
+                r.DrawText("FREE", cx, cy - s * 14 / 100, Math.Max(10, s * 18 / 100), (200, 30, 30), bold: true, anchorX: "center", anchorY: "center");
+                r.DrawText("PARKING", cx, cy + s * 5 / 100, Math.Max(8, s * 14 / 100), (200, 30, 30), bold: true, anchorX: "center", anchorY: "center");
+                // Car icon
+                int carW = s * 30 / 100, carH = s * 15 / 100;
+                int carX = cx - carW / 2, carY = cy + s * 18 / 100;
+                r.DrawRect((200, 50, 50), (carX, carY, carW, carH));
+                r.DrawRect((150, 30, 30), (carX + carW / 4, carY - carH / 2, carW / 2, carH / 2));
+                r.DrawCircle((40, 40, 40), (carX + carW / 5, carY + carH), Math.Max(2, carH / 3));
+                r.DrawCircle((40, 40, 40), (carX + carW * 4 / 5, carY + carH), Math.Max(2, carH / 3));
+                if (_freeParkingPot > 0)
+                    r.DrawText($"${_freeParkingPot}", cx, sy + sh - 10, Math.Max(8, s * 13 / 100), (255, 200, 0), bold: true, anchorX: "center", anchorY: "center");
+                break;
+
+            case 30: // Go To Jail
+                r.DrawRect((230, 235, 240), (sx, sy, sw, sh));
+                r.DrawText("GO TO", cx, cy - s * 14 / 100, Math.Max(9, s * 16 / 100), (200, 30, 30), bold: true, anchorX: "center", anchorY: "center");
+                r.DrawText("JAIL", cx, cy + s * 5 / 100, Math.Max(12, s * 22 / 100), (200, 30, 30), bold: true, anchorX: "center", anchorY: "center");
+                // Pointing hand
+                r.DrawText("👮", cx, cy + s * 25 / 100, Math.Max(12, s * 20 / 100), (50, 50, 50), anchorX: "center", anchorY: "center");
+                break;
+        }
+    }
+
+    // ── Card banner ──
+    private void DrawCardBanner(Renderer r, int bx, int by, int bw, int bh)
+    {
+        if (_cardBannerText == null || _cardBannerTs <= 0 || _clock - _cardBannerTs > 10.0) return;
+
+        double age = _clock - _cardBannerTs;
+        double fadeIn = Math.Min(1.0, age / 0.3);
+        double fadeOut = age > 8.0 ? Math.Max(0, 1.0 - (age - 8.0) / 2.0) : 1.0;
+        double alpha = fadeIn * fadeOut;
+        if (alpha < 0.01) return;
+
+        bool isChance = _cardBannerDeck == "chance";
+        string title = isChance ? "❓ CHANCE" : "🏦 COMMUNITY CHEST";
+        var titleColor = isChance ? (255, 200, 50) : (80, 180, 255);
+        var borderColor = isChance ? (200, 150, 30) : (40, 120, 200);
+        var bgColor = isChance ? (60, 40, 10) : (10, 30, 60);
+
+        string raw = _cardBannerText;
+        var lines = new List<string>();
+        string cur2 = "";
+        foreach (string w in raw.Split(' '))
+        {
+            string nxt = string.IsNullOrEmpty(cur2) ? w : cur2 + " " + w;
+            if (nxt.Length <= 32) cur2 = nxt;
+            else { if (cur2.Length > 0) lines.Add(cur2); cur2 = w; }
+        }
+        if (cur2.Length > 0) lines.Add(cur2);
+        if (lines.Count > 4) lines = lines.Take(4).ToList();
+
+        int bw2 = (int)(bw * 0.56), bh2 = Math.Max(60, (int)(bh * 0.18));
+        int x2 = bx + (bw - bw2) / 2;
+        int y2 = by + (int)(bh * 0.25);
+
+        int mainAlpha = (int)(255 * alpha);
+        int bgAlpha = (int)(230 * alpha);
+
+        // Shadow
+        r.DrawRect((0, 0, 0), (x2 + 4, y2 + 4, bw2, bh2), alpha: Math.Max(1, (int)(80 * alpha)));
+        // Background
+        r.DrawRect(bgColor, (x2, y2, bw2, bh2), alpha: bgAlpha);
+        // Top accent
+        r.DrawRect(titleColor, (x2, y2, bw2, 3), alpha: mainAlpha);
+        // Border
+        r.DrawRect(borderColor, (x2, y2, bw2, bh2), width: 2, alpha: Math.Max(1, (int)(180 * alpha)));
+
+        // Title
+        r.DrawText(title, x2 + bw2 / 2, y2 + 14, 14, titleColor, bold: true, anchorX: "center", anchorY: "center", alpha: mainAlpha);
+
+        // Card text
+        int textStartY = y2 + 30;
+        for (int li = 0; li < lines.Count; li++)
+            r.DrawText(lines[li], x2 + bw2 / 2, textStartY + li * 14, 11, (240, 240, 240), anchorX: "center", anchorY: "center", alpha: mainAlpha);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
     //  Draw — Tokens
     // ═══════════════════════════════════════════════════════════════════════
+    private static readonly string[] TokenEmojis = { "🎩", "🚗", "🐕", "👢", "🚢", "🔔", "🎲", "⭐" };
+
     private void DrawTokens(Renderer r)
     {
         foreach (int idx in ActivePlayers)
@@ -2477,6 +2814,7 @@ public sealed class MonopolyGameSharp : BaseGame
             if (player.IsBankrupt) continue;
 
             int cx, cy;
+            bool isAnimating = false;
             if (_tokenAnims.TryGetValue(idx, out var anim))
             {
                 double totalElapsed = _clock - anim.StartTime;
@@ -2489,6 +2827,7 @@ public sealed class MonopolyGameSharp : BaseGame
                 }
                 else
                 {
+                    isAnimating = true;
                     double segProgress = (totalElapsed - seg * anim.SegmentDuration) / anim.SegmentDuration;
                     int startPos = seg == 0 ? anim.StartPos : anim.Path[seg - 1];
                     int endPos = anim.Path[seg];
@@ -2500,6 +2839,18 @@ public sealed class MonopolyGameSharp : BaseGame
                     cy = (int)(scy + (ecy - scy) * segProgress);
                     double jumpH = 40 * (1 - Math.Pow(2 * segProgress - 1, 2));
                     cy -= (int)jumpH;
+
+                    // ── Trail afterimages ──
+                    for (int t = 3; t >= 1; t--)
+                    {
+                        double trailProg = Math.Max(0, segProgress - t * 0.08);
+                        int tcx = (int)(scx + (ecx - scx) * trailProg);
+                        int tcy = (int)(scy + (ecy - scy) * trailProg);
+                        double tj = 40 * (1 - Math.Pow(2 * trailProg - 1, 2));
+                        tcy -= (int)tj;
+                        int ta = 25 - t * 6;
+                        r.DrawCircle(GameConfig.PlayerColors[idx], (tcx, tcy), 14 - t * 2, alpha: Math.Max(5, ta));
+                    }
                 }
             }
             else
@@ -2508,27 +2859,66 @@ public sealed class MonopolyGameSharp : BaseGame
                 cx = sx + sw / 2; cy = sy + sh / 2;
             }
 
-            // Offset for multiple players
+            // Offset for multiple players on same space
             int oIdx = ActivePlayers.IndexOf(idx);
-            if (ActivePlayers.Count > 1)
+            int activeCount = ActivePlayers.Count(i => !_players[i].IsBankrupt);
+            if (activeCount > 1)
             {
                 double angle = (double)oIdx / ActivePlayers.Count * 6.28;
-                cx += (int)(12 * Math.Cos(angle));
-                cy += (int)(12 * Math.Sin(angle));
+                cx += (int)(14 * Math.Cos(angle));
+                cy += (int)(14 * Math.Sin(angle));
             }
 
             var color = GameConfig.PlayerColors[idx];
-            // Shadow
-            r.DrawCircle((0, 0, 0), (cx + 3, cy + 3), 16, alpha: 60);
-            // Glow for current
-            if (idx == CurrentSeat) r.DrawCircle(color, (cx, cy), 22, alpha: 40);
-            // Body
-            r.DrawCircle(color, (cx, cy), 16);
-            // Highlight
-            var hl = (Math.Min(255, color.R + 70), Math.Min(255, color.G + 70), Math.Min(255, color.B + 70));
-            r.DrawCircle(hl, (cx - 4, cy - 4), 6, alpha: 90);
-            // Outline
-            r.DrawCircle((0, 0, 0), (cx, cy), 16, width: 2);
+            int tokenR = 18;
+
+            // ── Drop shadow (offset, soft) ──
+            r.DrawCircle((0, 0, 0), (cx + 4, cy + 4), tokenR + 2, alpha: 40);
+            r.DrawCircle((0, 0, 0), (cx + 2, cy + 2), tokenR + 1, alpha: 60);
+
+            // ── Animated glow for current player ──
+            if (idx == CurrentSeat)
+            {
+                double pulse = 0.5 + 0.5 * Math.Sin(_clock * 4.0);
+                int glowAlpha = (int)(30 + 35 * pulse);
+                int glowR = tokenR + 8 + (int)(4 * pulse);
+                r.DrawCircle(color, (cx, cy), glowR, alpha: glowAlpha);
+                r.DrawCircle(color, (cx, cy), glowR - 3, alpha: glowAlpha / 2);
+            }
+
+            // ── Base ring (dark outline beneath body) ──
+            r.DrawCircle((Math.Max(0, color.R - 80), Math.Max(0, color.G - 80), Math.Max(0, color.B - 80)),
+                         (cx, cy), tokenR + 1, alpha: 200);
+
+            // ── Token body ──
+            r.DrawCircle(color, (cx, cy), tokenR);
+
+            // ── Inner gradient: lighter ring inside body ──
+            var lighter = (Math.Min(255, color.R + 40), Math.Min(255, color.G + 40), Math.Min(255, color.B + 40));
+            r.DrawCircle(lighter, (cx, cy), tokenR - 3, alpha: 80);
+
+            // ── Top-left specular highlight ──
+            var specular = (Math.Min(255, color.R + 100), Math.Min(255, color.G + 100), Math.Min(255, color.B + 100));
+            r.DrawCircle(specular, (cx - 5, cy - 5), 7, alpha: 100);
+            r.DrawCircle((255, 255, 255), (cx - 5, cy - 5), 4, alpha: 70);
+
+            // ── Bottom-right shadow lip ──
+            r.DrawCircle((Math.Max(0, color.R - 50), Math.Max(0, color.G - 50), Math.Max(0, color.B - 50)),
+                         (cx + 3, cy + 3), tokenR - 2, alpha: 40);
+
+            // ── Crisp border ──
+            r.DrawCircle((20, 20, 25), (cx, cy), tokenR, width: 2);
+
+            // ── Player number label (small, avoids covering space text) ──
+            r.DrawText($"{idx + 1}", cx, cy + 1, 11, (255, 255, 255), bold: true, anchorX: "center", anchorY: "center");
+
+            // ── In-jail indicator ──
+            if (player.InJail)
+            {
+                // tiny bars over the token
+                for (int b = -1; b <= 1; b++)
+                    r.DrawRect((60, 60, 60), (cx + b * 7 - 1, cy - tokenR - 2, 2, tokenR * 2 + 4), alpha: 160);
+            }
         }
     }
 
@@ -2626,10 +3016,10 @@ public sealed class MonopolyGameSharp : BaseGame
             if (dimAlpha > 1) r.DrawRect((0, 0, 0), (0, 0, width, height), alpha: dimAlpha);
         }
 
-        int baseY = cy + 55;
+        int baseY = cy + 40;
         int maxVisible = 4;
-        int rowH = 22;
-        int fontSize = 20;
+        int rowH = 46;
+        int fontSize = 28;
         double slideInDur = 0.28, slideOutDur = 0.35;
         int slideDist = width / 2 + 120;
 
@@ -2657,9 +3047,9 @@ public sealed class MonopolyGameSharp : BaseGame
             }
 
             int y = baseY + i * rowH;
-            int tw = (int)(bw * 0.92);
-            int th = 18;
-            int tx = cx - tw / 2 + (int)slideX;
+            int tw = width - 40;
+            int th = 40;
+            int tx = width / 2 - tw / 2 + (int)slideX;
             int aBg = (int)(200 * alphaMult);
             int aBorder = (int)(90 * alphaMult);
             int aGlow = (int)(45 * alphaMult);
@@ -2676,7 +3066,7 @@ public sealed class MonopolyGameSharp : BaseGame
             // Border
             r.DrawRect((200, 170, 40), (tx, y - th / 2, tw, th), width: 1, alpha: aBorder);
             // Text
-            r.DrawText(t.Text, cx + (int)slideX, y, fontSize, t.Color, bold: true, anchorX: "center", anchorY: "center", alpha: aText);
+            r.DrawText(t.Text, width / 2 + (int)slideX, y, fontSize, t.Color, bold: true, anchorX: "center", anchorY: "center", alpha: aText);
 
             // Sparkles
             if (alphaMult > 0.3 && Rng.NextDouble() < 0.45)
@@ -2748,21 +3138,51 @@ public sealed class MonopolyGameSharp : BaseGame
         r.DrawText("🏆 MONOPOLY CHAMPION 🏆", cx, cy + 20, 36, (255, 255, 200), bold: true, anchorX: "center", anchorY: "center");
         r.DrawText($"💰 Final Balance: ${_players[wi].Money}", cx, cy + 80, 26, (255, 255, 255), anchorX: "center", anchorY: "center");
 
-        DrawAnimations(r, w, h);
+        DrawForegroundAnimations(r, w, h);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
     //  Draw — Animations
     // ═══════════════════════════════════════════════════════════════════════
-    private void DrawAnimations(Renderer r, int w, int h)
+    private void DrawForegroundAnimations(Renderer r, int w, int h)
     {
         _particles.Draw(r);
         foreach (var pr in _pulseRings) pr.Draw(r);
         foreach (var cf in _cardFlips) cf.Draw(r);
         foreach (var fl in _flashes) fl.Draw(r, w, h);
         foreach (var tp in _textPops) tp.Draw(r);
-        _waveBand.Draw(r, w, h);
-        _heatShimmer.Draw(r, w, h);
-        _vignette.Draw(r, w, h);
+        foreach (var ex in _explosions) ex.Draw(r);
+    }
+
+    private void DrawTableCenterGlow(Renderer r, int w, int h)
+    {
+        int cx = w / 2, cy = h / 2;
+        // Breathing radial glow
+        float breath = 0.7f + 0.3f * MathF.Sin((float)_clock * 1.1f);
+        int outerA = (int)(12 * breath);
+        int innerA = (int)(8 * breath);
+        r.DrawCircle((40, 120, 40), (cx, cy), (int)(Math.Min(w, h) * 0.35f), alpha: outerA);
+        r.DrawCircle((80, 180, 80), (cx, cy), (int)(Math.Min(w, h) * 0.22f), alpha: innerA);
+        r.DrawCircle((120, 200, 100), (cx, cy), (int)(Math.Min(w, h) * 0.12f), alpha: (int)(6 * breath));
+    }
+
+    private void DrawCornerAccents(Renderer r, int w, int h)
+    {
+        int accentLen = 35;
+        int accentW = 2;
+        int accentA = 45;
+        var ac = (200, 170, 60);  // gold
+        // Top-left
+        r.DrawRect(ac, (8, 8, accentLen, accentW), alpha: accentA);
+        r.DrawRect(ac, (8, 8, accentW, accentLen), alpha: accentA);
+        // Top-right
+        r.DrawRect(ac, (w - 8 - accentLen, 8, accentLen, accentW), alpha: accentA);
+        r.DrawRect(ac, (w - 10, 8, accentW, accentLen), alpha: accentA);
+        // Bottom-left
+        r.DrawRect(ac, (8, h - 10, accentLen, accentW), alpha: accentA);
+        r.DrawRect(ac, (8, h - 8 - accentLen, accentW, accentLen), alpha: accentA);
+        // Bottom-right
+        r.DrawRect(ac, (w - 8 - accentLen, h - 10, accentLen, accentW), alpha: accentA);
+        r.DrawRect(ac, (w - 10, h - 8 - accentLen, accentW, accentLen), alpha: accentA);
     }
 }
