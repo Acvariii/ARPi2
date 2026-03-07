@@ -37,6 +37,7 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
   const ctrlDraw = buttonById.get('ek_draw');
   const ctrlNope = buttonById.get('ek_nope');
   const ctrlFavorTargets = panelButtons.filter((b) => b.id.startsWith('favor_target:'));
+  const ctrlCatTargets = panelButtons.filter((b) => b.id.startsWith('cat_target:'));
 
   const sendClick = (id: string) => send({ type: 'click_button', id });
 
@@ -57,6 +58,12 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
     if (u === 'SHUF') return { emoji: '🔀', title: 'Shuffle', corner: 'SHUF', accent: '#448aff' };
     if (u === 'FUT') return { emoji: '🔮', title: 'Future', corner: 'FUT', accent: '#b388ff' };
     if (u === 'FAV') return { emoji: '🎁', title: 'Favor', corner: 'FAV', accent: '#ff80ab' };
+    if (u === 'TACO') return { emoji: '🌮', title: 'Tacocat', corner: 'TACO', accent: '#ffb300' };
+    if (u === 'CATER') return { emoji: '🍉', title: 'Catermelon', corner: 'CATER', accent: '#66bb6a' };
+    if (u === 'HAIRY') return { emoji: '🥔', title: 'Hairy P. Cat', corner: 'HAIRY', accent: '#a1887f' };
+    if (u === 'BEARD') return { emoji: '🐈', title: 'Beard Cat', corner: 'BEARD', accent: '#8d6e63' };
+    if (u === 'RAINBOW') return { emoji: '🌈', title: 'Rainbow Cat', corner: 'RAINBOW', accent: '#f06292' };
+    if (u.startsWith('STEAL')) return { emoji: '😼', title: t, corner: 'STEAL', accent: '#ffab00' };
 
     return { emoji: '😺', title: t || '—', corner: u || '—', accent: EK2_ACCENT };
   };
@@ -352,7 +359,7 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
       )}
 
       {/* ──── ACTIONS ──── */}
-      {(!snapshot.popup?.active && (!!ctrlFavorTargets.length || !!ctrlNope || !!ctrlDraw || !!ek.awaiting_favor_target)) && (
+      {(!snapshot.popup?.active && (!!ctrlFavorTargets.length || !!ctrlCatTargets.length || !!ctrlNope || !!ctrlDraw || !!ek.awaiting_favor_target || !!ek.awaiting_cat_steal)) && (
         <>
           <Typography
             variant="subtitle1"
@@ -391,6 +398,16 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
                   })
                 )}
 
+              {!!ctrlCatTargets.length &&
+                ctrlCatTargets.map((b) =>
+                  renderCardTile({
+                    key: b.id,
+                    text: `STEAL ${seatLabel(Number(String(b.id).split(':')[1] || -1))}`,
+                    enabled: !!b.enabled,
+                    onClick: () => sendClick(b.id),
+                  })
+                )}
+
               {ctrlNope &&
                 renderCardTile({
                   key: ctrlNope.id,
@@ -420,6 +437,21 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
                 }}
               >
                 🎁 Choose a player to Favor.
+              </Typography>
+            )}
+
+            {!!ek.awaiting_cat_steal && (
+              <Typography
+                variant="caption"
+                sx={{
+                  mt: 1,
+                  display: 'block',
+                  textAlign: 'center',
+                  color: '#ffab00',
+                  fontWeight: 700,
+                }}
+              >
+                😼 Choose a player to steal from!
               </Typography>
             )}
           </Paper>

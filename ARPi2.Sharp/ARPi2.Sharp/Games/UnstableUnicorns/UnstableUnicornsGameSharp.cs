@@ -120,7 +120,11 @@ public class UnstableUnicornsGameSharp : BaseGame
     private string _lastEvent = "";
     private double _lastEventAge = 999.0;
 
-    // PNG card art textures (loaded on demand from Content/Unstable Unicorns cards/)
+    // Video playback (intro + background)
+    private VideoPlayer? _introVideo;
+    private VideoPlayer? _bgVideo;
+
+    // PNG card art textures (loaded on demand from Content/UnstableUnicorns/)
     private readonly Dictionary<string, Texture2D?> _cardTextures = new();
     private string[]? _babyPngNames;
     private string[]? _basicPngNames;
@@ -150,6 +154,30 @@ public class UnstableUnicornsGameSharp : BaseGame
         _starfield = Starfield.ForTheme("unstable_unicorns", w, h);
         LoadCardSets(includeExpansions: true);
         RebuildButtons();
+    }
+
+    private void PlayIntroVideo()
+    {
+        string path = Path.Combine(
+            AppDomain.CurrentDomain.BaseDirectory, "Content", "UnstableUnicorns", "UU_Intro.mp4");
+        if (File.Exists(path))
+        {
+            _introVideo?.Dispose();
+            _introVideo = new VideoPlayer(Renderer.GraphicsDevice);
+            _introVideo.Play(path);
+        }
+    }
+
+    private void StartBackgroundVideo()
+    {
+        string path = Path.Combine(
+            AppDomain.CurrentDomain.BaseDirectory, "Content", "UnstableUnicorns", "UU_Background.mp4");
+        if (File.Exists(path))
+        {
+            _bgVideo?.Dispose();
+            _bgVideo = new VideoPlayer(Renderer.GraphicsDevice);
+            _bgVideo.Play(path, loop: true);
+        }
     }
 
     // ─── Helpers ───────────────────────────────────────────────
@@ -343,6 +371,11 @@ public class UnstableUnicornsGameSharp : BaseGame
         ClearReaction();
         BeginTurn();
         RebuildButtons();
+
+        // Play intro video (blocks UI until done)
+        PlayIntroVideo();
+        // Start looping background video
+        StartBackgroundVideo();
     }
 
     public void HandlePlayerQuit(int seat)
@@ -2570,6 +2603,21 @@ public class UnstableUnicornsGameSharp : BaseGame
 
     public override void Update(double dt)
     {
+        // Intro video blocks everything
+        if (_introVideo != null && _introVideo.IsPlaying)
+        {
+            _introVideo.Update(dt);
+            return;
+        }
+        if (_introVideo != null && _introVideo.IsFinished)
+        {
+            _introVideo.Dispose();
+            _introVideo = null;
+        }
+
+        // Background video keeps updating alongside game
+        _bgVideo?.Update(dt);
+
         float d = Math.Clamp((float)dt, 0f, 0.2f);
 
         _particles.Update(d);
@@ -2683,6 +2731,13 @@ public class UnstableUnicornsGameSharp : BaseGame
 
     public override void Draw(Renderer r, int width, int height, double dt)
     {
+        // Intro video blocks everything
+        if (_introVideo != null && _introVideo.IsPlaying)
+        {
+            _introVideo.Draw(r, width, height);
+            return;
+        }
+
         if (State == "player_select")
         {
             // ═══════════════════════════════════════════════════════════
@@ -2695,7 +2750,8 @@ public class UnstableUnicornsGameSharp : BaseGame
             _floatingIcons.Draw(r);
 
             // Title
-            RainbowTitle.Draw(r, "UNSTABLE UNICORNS", width);
+            r.DrawText("UNSTABLE UNICORNS", width / 2, 12, fontSize: 22,
+                color: (200, 140, 255), bold: true, anchorX: "center", anchorY: "top");
 
             // Subtitle
             r.DrawText("SELECT PLAYERS & SCAN TO JOIN", width / 2, 52, 13,
@@ -2725,7 +2781,12 @@ public class UnstableUnicornsGameSharp : BaseGame
 
         int shX = (int)_screenShakeX, shY = (int)_screenShakeY;
 
-        CardRendering.DrawGameBackground(r, width, height, "unstable_unicorns");
+        // Background video layer (behind everything)
+        if (_bgVideo != null && _bgVideo.IsPlaying)
+            _bgVideo.Draw(r, width, height);
+        else
+            CardRendering.DrawGameBackground(r, width, height, "unstable_unicorns");
+
         _ambient.Draw(r);
         _lightBeams.Draw(r, width, height);
         _starfield.Draw(r);
@@ -2737,7 +2798,8 @@ public class UnstableUnicornsGameSharp : BaseGame
         int cx = width / 2 + shX, cy = height / 2 + shY;
 
         // ─── Title ─────────────────────────────────────────────
-        RainbowTitle.Draw(r, "UNSTABLE UNICORNS", width);
+        r.DrawText("UNSTABLE UNICORNS", width / 2, 12, fontSize: 22,
+            color: (200, 140, 255), bold: true, anchorX: "center", anchorY: "top");
 
         // ─── HUD Bar — premium frosted dark-glass panel ──────
         var turn = CurrentTurnSeat;
@@ -2938,11 +3000,11 @@ public class UnstableUnicornsGameSharp : BaseGame
             }
 
             // Panel shadow
-            SoftShadow.Draw(r, zx + 3, zy + 4, zoneW, zoneH, layers: 4, maxAlpha: 80);
+            SoftShadow.Draw(r, zx + 3, zy + 4, zoneW, zoneH, layers: 4, maxAlpha: 50);
 
-            // Panel body — dark glass beveled
+            // Panel body — semi-transparent dark glass beveled
             var bg = isTurn ? (28, 18, 12) : (16, 12, 22);
-            BeveledRect.Draw(r, zx, zy, zoneW, zoneH, bg, bevelSize: 3);
+            BeveledRect.Draw(r, zx, zy, zoneW, zoneH, bg, bevelSize: 3, alpha: 160);
 
             // Subtle gradient inside
             r.DrawRect(pcol, (zx + 2, zy + 2, zoneW - 4, zoneH / 6), alpha: 8);
@@ -3201,10 +3263,10 @@ public class UnstableUnicornsGameSharp : BaseGame
         CardRendering.DrawUUCard(r, rect, c.Emoji, c.Name, c.Kind, rgb, c.Desc, illustration: tex);
     }
 
-    // ── PNG card art: load from Content/Unstable Unicorns cards/ on demand ──
+    // ── PNG card art: load from Content/UnstableUnicorns/ on demand ──
 
     private static readonly string CardArtRoot = Path.Combine(
-        AppDomain.CurrentDomain.BaseDirectory, "Content", "Unstable Unicorns cards");
+        AppDomain.CurrentDomain.BaseDirectory, "Content", "UnstableUnicorns");
 
     private Texture2D? GetCardTexture(UUCardDef c, int instanceIdx = 0)
     {

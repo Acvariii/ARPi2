@@ -199,7 +199,8 @@ public class GameServer
 
     /// <summary>
     /// Create and start an HttpListener on all interfaces (http://+:port/).
-    /// If that fails (needs admin/URL ACL on Windows), fall back to http://localhost:port/.
+    /// If that fails (needs admin/URL ACL on Windows), tries the LAN IP,
+    /// then falls back to http://localhost:port/.
     /// </summary>
     private static HttpListener CreateAndStartListener(int port, string label)
     {
@@ -213,9 +214,9 @@ public class GameServer
             Console.WriteLine($"{label} listening on {allPrefix}");
             return listener;
         }
-        catch (HttpListenerException)
+        catch (HttpListenerException ex)
         {
-            Console.WriteLine($"{label}: Cannot bind {allPrefix} (no admin rights).");
+            Console.WriteLine($"{label}: Cannot bind {allPrefix} — {ex.Message}");
         }
 
         // Attempt 2: try to auto-register URL ACL via elevated netsh
@@ -245,7 +246,28 @@ public class GameServer
             Console.WriteLine($"{label}: URL ACL registration was declined or failed.");
         }
 
-        // Attempt 3: localhost only (always works without admin)
+        // Attempt 3: try binding to the specific LAN IP (works without admin)
+        string? lanIp = GetLanIp();
+        if (lanIp != null)
+        {
+            string lanPrefix = $"http://{lanIp}:{port}/";
+            try
+            {
+                var listener = new HttpListener();
+                listener.Prefixes.Add(lanPrefix);
+                // Also add localhost so local connections work too
+                listener.Prefixes.Add($"http://localhost:{port}/");
+                listener.Start();
+                Console.WriteLine($"{label} listening on {lanPrefix} + localhost");
+                return listener;
+            }
+            catch (HttpListenerException ex)
+            {
+                Console.WriteLine($"{label}: Cannot bind {lanPrefix} — {ex.Message}");
+            }
+        }
+
+        // Attempt 4: localhost only (always works without admin)
         string localPrefix = $"http://localhost:{port}/";
         Console.WriteLine($"{label}: Falling back to {localPrefix} (localhost only).");
         Console.WriteLine($"{label}: To allow network access, run once as Administrator or execute:");
@@ -255,6 +277,20 @@ public class GameServer
         fallback.Start();
         Console.WriteLine($"{label} listening on {localPrefix}");
         return fallback;
+    }
+
+    /// <summary>
+    /// Detect the local LAN IP via UDP socket trick.
+    /// </summary>
+    private static string? GetLanIp()
+    {
+        try
+        {
+            using var s = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            s.Connect("8.8.8.8", 80);
+            return (s.LocalEndPoint as IPEndPoint)?.Address.ToString();
+        }
+        catch { return null; }
     }
 
     //  HTTP static file server

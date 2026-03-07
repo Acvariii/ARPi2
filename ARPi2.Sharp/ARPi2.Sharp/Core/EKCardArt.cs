@@ -39,6 +39,8 @@ public static class EKCardArt
             case "FUT":  DrawFUT(r, v, x, y, w, h, cx, cy); break;
             case "FAV":  DrawFAV(r, v, x, y, w, h, cx, cy); break;
             case "NOPE": DrawNOPE(r, v, x, y, w, h, cx, cy); break;
+            case "TACO": case "CATER": case "HAIRY": case "BEARD": case "RAINBOW":
+                DrawCatCard(r, v, x, y, w, h, cx, cy); break;
             default:     DrawGeneric(r, x, y, w, h, cx, cy); break;
         }
     }
@@ -75,6 +77,11 @@ public static class EKCardArt
             "FUT"  => (new SKColor(18,  5,   32),  new SKColor(35,  12,  60),  new SKColor(65,  25,  110), new SKColor(160, 80,  255), new SKColor(220, 180, 255)),
             "FAV"  => (new SKColor(28,  8,   18),  new SKColor(50,  16,  35),  new SKColor(90,  30,  60),  new SKColor(255, 130, 200), new SKColor(255, 200, 230)),
             "NOPE" => (new SKColor(18,  8,   8),   new SKColor(35,  16,  16),  new SKColor(65,  28,  28),  new SKColor(200, 50,  50),  new SKColor(255, 140, 140)),
+            "TACO" => (new SKColor(36,  24,  4),   new SKColor(60,  42,  10),  new SKColor(110, 80,  20),  new SKColor(255, 180, 50),  new SKColor(255, 220, 130)),
+            "CATER"=> (new SKColor(6,   28,  6),   new SKColor(12,  48,  12),  new SKColor(24,  88,  24),  new SKColor(100, 220, 80),  new SKColor(180, 255, 160)),
+            "HAIRY"=> (new SKColor(24,  18,  8),   new SKColor(44,  34,  16),  new SKColor(80,  60,  30),  new SKColor(180, 140, 80),  new SKColor(220, 195, 140)),
+            "BEARD"=> (new SKColor(20,  16,  8),   new SKColor(40,  30,  14),  new SKColor(72,  54,  26),  new SKColor(160, 120, 70),  new SKColor(210, 180, 120)),
+            "RAINBOW"=>(new SKColor(30, 8,   24),  new SKColor(55,  16,  42),  new SKColor(100, 30,  75),  new SKColor(255, 100, 200), new SKColor(255, 180, 230)),
             _      => (new SKColor(10,  14,  22),  new SKColor(20,  28,  42),  new SKColor(40,  55,  80),  new SKColor(100, 160, 240), new SKColor(180, 210, 255)),
         };
 
@@ -5191,6 +5198,70 @@ public static class EKCardArt
         // Dot pattern in untouched corners
         DrawDotPattern(r, x + w - s * 12 / 100, y + h - s * 12 / 100, s * 10 / 100, s * 10 / 100,
             (200, 40, 40), Math.Max(1, s * 1 / 100), 140, s * 4 / 100);
+    }
+
+    // ─── CAT CARDS (fallback if PNG not loaded) ────────────────
+    private static void DrawCatCard(Renderer r, int v, int x, int y, int w, int h, int cx, int cy)
+    {
+        int s = Math.Min(w, h);
+
+        // Cat face — simple stylized cat silhouette
+        int headR = s * 22 / 100;
+        int headY = cy - s * 5 / 100;
+
+        // Ears (triangles)
+        int earW = s * 12 / 100;
+        int earH = s * 16 / 100;
+        r.DrawRect((200, 160, 100), (cx - headR + earW / 4, headY - headR - earH / 2, earW, earH), alpha: 200);
+        r.DrawRect((200, 160, 100), (cx + headR - earW - earW / 4, headY - headR - earH / 2, earW, earH), alpha: 200);
+
+        // Head circle
+        r.DrawCircle((220, 180, 120), (cx, headY), headR, alpha: 220);
+        r.DrawCircle((200, 160, 100), (cx, headY), headR, width: 2, alpha: 180);
+
+        // Eyes — variant changes expression
+        int eyeOff = s * 8 / 100;
+        int eyeR = Math.Max(2, s * 4 / 100);
+        if (v == 0 || v == 2)
+        {
+            // Round eyes
+            r.DrawCircle((40, 40, 40), (cx - eyeOff, headY - s * 2 / 100), eyeR, alpha: 240);
+            r.DrawCircle((40, 40, 40), (cx + eyeOff, headY - s * 2 / 100), eyeR, alpha: 240);
+            r.DrawCircle((255, 255, 200), (cx - eyeOff + 1, headY - s * 2 / 100 - 1), Math.Max(1, eyeR / 3), alpha: 200);
+            r.DrawCircle((255, 255, 200), (cx + eyeOff + 1, headY - s * 2 / 100 - 1), Math.Max(1, eyeR / 3), alpha: 200);
+        }
+        else
+        {
+            // Slit eyes
+            r.DrawRect((40, 40, 40), (cx - eyeOff - eyeR, headY - s * 2 / 100 - 1, eyeR * 2, 3), alpha: 240);
+            r.DrawRect((40, 40, 40), (cx + eyeOff - eyeR, headY - s * 2 / 100 - 1, eyeR * 2, 3), alpha: 240);
+        }
+
+        // Nose
+        r.DrawCircle((180, 100, 100), (cx, headY + s * 4 / 100), Math.Max(1, s * 2 / 100), alpha: 200);
+
+        // Whiskers
+        int whiskerY = headY + s * 5 / 100;
+        r.DrawLine((160, 130, 80), (cx - s * 3 / 100, whiskerY), (cx - headR - s * 6 / 100, whiskerY - s * 2 / 100), width: 1, alpha: 160);
+        r.DrawLine((160, 130, 80), (cx - s * 3 / 100, whiskerY + 2), (cx - headR - s * 5 / 100, whiskerY + s * 3 / 100), width: 1, alpha: 140);
+        r.DrawLine((160, 130, 80), (cx + s * 3 / 100, whiskerY), (cx + headR + s * 6 / 100, whiskerY - s * 2 / 100), width: 1, alpha: 160);
+        r.DrawLine((160, 130, 80), (cx + s * 3 / 100, whiskerY + 2), (cx + headR + s * 5 / 100, whiskerY + s * 3 / 100), width: 1, alpha: 140);
+
+        // Mouth curve (simple)
+        r.DrawRect((120, 80, 80), (cx - s * 3 / 100, headY + s * 7 / 100, s * 6 / 100, 2), alpha: 140);
+
+        // Paw prints below — variant offset
+        int pawY = cy + s * 22 / 100;
+        for (int p = 0; p < 2; p++)
+        {
+            int px = cx + (p == 0 ? -1 : 1) * s * 12 / 100 + (v % 2) * s * 2 / 100;
+            r.DrawCircle((180, 150, 100), (px, pawY), Math.Max(2, s * 5 / 100), alpha: 140);
+            for (int t = 0; t < 3; t++)
+            {
+                int tx = px - s * 3 / 100 + t * s * 3 / 100;
+                r.DrawCircle((180, 150, 100), (tx, pawY - s * 6 / 100), Math.Max(1, s * 2 / 100), alpha: 130);
+            }
+        }
     }
 
     // ─── GENERIC (unknown card type) ───────────────────────────

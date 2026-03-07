@@ -18,7 +18,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="Content\Unstable Unicorns cards\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Content\UnstableUnicorns\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Content\ExplodingKittens\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Content\Monopoly\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

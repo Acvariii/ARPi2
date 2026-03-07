@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using ARPi2.Sharp.Core;
 
@@ -135,6 +136,9 @@ public sealed class MonopolyGameSharp : BaseGame
     private readonly SpotlightCone _spotlight = new() { Speed = 0.4f, Color = (255, 210, 90) };
     private bool _animPrevGameOver;
     private float _animFwTimer;
+
+    // ─── Video ─────────────────────────────────────────────────────────
+    private VideoPlayer? _introVideo;
 
     // ─── Clock ─────────────────────────────────────────────────────────
     private double _clock; // monotonic seconds since game start
@@ -273,6 +277,16 @@ public sealed class MonopolyGameSharp : BaseGame
         _currentPlayerIdx = 0;
         _phase = "roll"; _canRoll = true;
         State = "playing";
+        PlayIntroVideo();
+    }
+
+    private void PlayIntroVideo()
+    {
+        var dir = Path.GetDirectoryName(typeof(MonopolyGameSharp).Assembly.Location) ?? ".";
+        var mp4 = Path.Combine(dir, "Content", "Monopoly", "Monopoly_Intro.mp4");
+        if (!File.Exists(mp4)) return;
+        _introVideo = new VideoPlayer(Renderer.GraphicsDevice);
+        _introVideo.Play(mp4);
     }
 
     // ─── Helpers ───────────────────────────────────────────────────────
@@ -353,6 +367,10 @@ public sealed class MonopolyGameSharp : BaseGame
     // ═══════════════════════════════════════════════════════════════════════
     public override void Update(double dt)
     {
+        // ── Intro video blocks all gameplay ──
+        if (_introVideo != null && _introVideo.IsPlaying) { _introVideo.Update(dt); return; }
+        if (_introVideo != null && _introVideo.IsFinished) { _introVideo.Dispose(); _introVideo = null; }
+
         _clock += dt;
         float fdt = (float)dt;
 
@@ -2267,6 +2285,9 @@ public sealed class MonopolyGameSharp : BaseGame
     // ═══════════════════════════════════════════════════════════════════════
     public override void Draw(Renderer r, int width, int height, double dt)
     {
+        // ── Intro video blocks all rendering ──
+        if (_introVideo != null && _introVideo.IsPlaying) { _introVideo.Draw(r, width, height); return; }
+
         if (State == "player_select") { base.Draw(r, width, height, dt); return; }
         if (State == "winner") { DrawWinnerScreen(r, width, height); return; }
 

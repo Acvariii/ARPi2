@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using Microsoft.Xna.Framework.Graphics;
+using SkiaSharp;
 using ARPi2.Sharp.Core;
 using ARPi2.Sharp.Games.Blackjack;
 
@@ -13,7 +16,7 @@ public class EKCard
 {
     private static int _nextId;
 
-    /// <summary>Card kind: EK, DEF, ATK, SKIP, SHUF, FUT, FAV, NOPE</summary>
+    /// <summary>Card kind: EK, DEF, ATK, SKIP, SHUF, FUT, FAV, NOPE, TACO, CATER, HAIRY, BEARD, RAINBOW</summary>
     public string Kind { get; }
 
     /// <summary>Unique card instance ID — used to select illustration variant.</summary>
@@ -52,6 +55,13 @@ public class ExplodingKittensGameSharp : BaseGame
     // Favor target selection
     private bool _awaitingFavorTarget;
     private int? _favorActor;
+
+    // Cat card pair steal
+    private static readonly HashSet<string> CatKinds = new() { "TACO", "CATER", "HAIRY", "BEARD", "RAINBOW" };
+    private static bool IsCatCard(string kind) => CatKinds.Contains(kind);
+    private bool _awaitingCatStealTarget;
+    private int? _catStealActor;
+    private string? _catStealKind;
 
     // Nope window
     private bool _nopeActive;
@@ -101,6 +111,23 @@ public class ExplodingKittensGameSharp : BaseGame
     private readonly FireEdge _fireEdge = new();
     private readonly CardBreathEffect _cardBreath = new();
 
+    // Video playback (defuse / explode)
+    private VideoPlayer? _activeVideo;
+
+    // PNG card art cache (cat cards)
+    private static readonly string EKCardArtRoot = Path.Combine(
+        AppDomain.CurrentDomain.BaseDirectory, "Content", "ExplodingKittens", "Exploding Kittens cards");
+    private readonly Dictionary<string, Texture2D?> _cardTextures = new();
+
+    private static readonly Dictionary<string, string> CatPngNames = new()
+    {
+        ["TACO"] = "Tacocat.png",
+        ["CATER"] = "Catermelon.png",
+        ["HAIRY"] = "Hairy Potato Cat.png",
+        ["BEARD"] = "Beard Cat.png",
+        ["RAINBOW"] = "Rainbow-Ralphing Cat.png",
+    };
+
     public ExplodingKittensGameSharp(int w, int h, Renderer renderer) : base(w, h, renderer)
     {
         _ambient = AmbientSystem.ForTheme("exploding_kittens", w, h);
@@ -130,6 +157,9 @@ public class ExplodingKittensGameSharp : BaseGame
         _pendingDraws = 1;
         _awaitingFavorTarget = false;
         _favorActor = null;
+        _awaitingCatStealTarget = false;
+        _catStealActor = null;
+        _catStealKind = null;
         ClearNope();
         _winner = null;
 
@@ -163,6 +193,7 @@ public class ExplodingKittensGameSharp : BaseGame
         NoteEvent("Exploding Kittens: start");
         State = "playing";
         RebuildButtons();
+        PlayVideo("EK_Intro.mp4");
     }
 
     // ─── Handle player quit ────────────────────────────────────
@@ -317,6 +348,23 @@ public class ExplodingKittensGameSharp : BaseGame
             return;
         }
 
+        // Cat card steal target selection
+        if (_awaitingCatStealTarget)
+        {
+            if (seat != _catStealActor) return;
+            if (buttonId.StartsWith("cat_target:"))
+            {
+                if (!int.TryParse(buttonId.AsSpan(11), out int target)) return;
+                if (!ActivePlayers.Contains(target) || target == seat) return;
+                ExecuteCatSteal(seat, target);
+                _awaitingCatStealTarget = false;
+                _catStealActor = null;
+                _catStealKind = null;
+                RebuildButtons();
+            }
+            return;
+        }
+
         // Only current player can act
         if (seat != CurrentTurnSeat) return;
 
@@ -332,6 +380,45 @@ public class ExplodingKittensGameSharp : BaseGame
             var hand = _hands.GetValueOrDefault(seat);
             if (hand == null || cardIdx < 0 || cardIdx >= hand.Count) return;
             var card = hand[cardIdx];
+
+            // Cat cards: need a pair (2 of same kind) to play
+            if (IsCatCard(card.Kind))
+            {
+                int sameCount = hand.Count(c => c.Kind == card.Kind);
+                if (sameCount < 2) return;
+
+                // Remove 2 of this kind from hand, discard both
+                var removed = new List<EKCard>();
+                for (int i = hand.Count - 1; i >= 0 && removed.Count < 2; i--)
+                {
+                    if (hand[i].Kind == card.Kind)
+                    {
+                        removed.Add(hand[i]);
+                        hand.RemoveAt(i);
+                    }
+                }
+                foreach (var rc in removed) _discardPile.Add(rc);
+                QueuePlayAnim(seat, card);
+
+                // Cat card animation
+                try
+                {
+                    int cx = ScreenW / 2, cy = ScreenH / 2;
+                    var acol = CatCardColor(card.Kind);
+                    string catLabel = CatCardLabel(card.Kind);
+                    _particles.EmitSparkle(cx, cy, acol, 16);
+                    _flashes.Add(new ScreenFlash(acol, 35, 0.3f));
+                    _textPops.Add(new TextPopAnim(catLabel, cx, cy - 40, acol, fontSize: 28));
+                    _pulseRings.Add(new PulseRing(cx, cy, acol, maxRadius: 70, duration: 0.6f));
+                }
+                catch { }
+
+                // Cat steal goes through nope window
+                PlayAction(seat, card);
+                RebuildButtons();
+                return;
+            }
+
             if (card.Kind is not ("ATK" or "SKIP" or "SHUF" or "FUT" or "FAV")) return;
 
             // Remove from hand, discard
@@ -396,7 +483,14 @@ public class ExplodingKittensGameSharp : BaseGame
             else if (!isTurn)
                 playable = false;
             else
-                playable = c.Kind is "ATK" or "SKIP" or "SHUF" or "FUT" or "FAV";
+            {
+                if (c.Kind is "ATK" or "SKIP" or "SHUF" or "FUT" or "FAV")
+                    playable = true;
+                else if (IsCatCard(c.Kind))
+                    playable = hand.Count(h => h.Kind == c.Kind) >= 2;
+                else
+                    playable = false;
+            }
 
             return (Dictionary<string, object?>)new Dictionary<string, object?>
             {
@@ -420,6 +514,7 @@ public class ExplodingKittensGameSharp : BaseGame
             ["hand_counts"] = counts,
             ["your_hand"] = yourHand,
             ["awaiting_favor_target"] = _awaitingFavorTarget && _favorActor == seat,
+            ["awaiting_cat_steal"] = _awaitingCatStealTarget && _catStealActor == seat,
             ["nope_active"] = _nopeActive,
             ["nope_count"] = _nopeCount,
             ["winner"] = _winner,
@@ -465,7 +560,18 @@ public class ExplodingKittensGameSharp : BaseGame
             ("ATK", 4), ("SKIP", 4), ("SHUF", 4),
             ("FUT", 5), ("FAV", 4), ("NOPE", 5),
         };
+
+        // Cat cards (played in pairs to steal)
+        (string kind, int count)[] cats =
+        {
+            ("TACO", 4), ("CATER", 4), ("HAIRY", 4),
+            ("BEARD", 4), ("RAINBOW", 4),
+        };
         foreach (var (kind, count) in actions)
+            for (int i = 0; i < count; i++)
+                deck.Add(new EKCard(kind));
+
+        foreach (var (kind, count) in cats)
             for (int i = 0; i < count; i++)
                 deck.Add(new EKCard(kind));
 
@@ -562,6 +668,9 @@ public class ExplodingKittensGameSharp : BaseGame
                 NoteEvent($"{PlayerName(seat)} defused!");
                 try
                 {
+                    // Play defuse video (blocks all UI until finished)
+                    PlayVideo("Defuse.mp4");
+
                     int cx = ScreenW / 2, cy = ScreenH / 2;
                     _flashes.Add(new ScreenFlash((60, 200, 100), 60, 0.4f));
                     _flashes.Add(new ScreenFlash((180, 255, 180), 30, 0.15f));
@@ -605,6 +714,9 @@ public class ExplodingKittensGameSharp : BaseGame
 
         NoteEvent($"{PlayerName(seat)} player exploded");
 
+        // Play explode video (blocks all UI until finished)
+        PlayVideo("Explode.mp4");
+
         // Explosion animations
         try
         {
@@ -645,6 +757,9 @@ public class ExplodingKittensGameSharp : BaseGame
         ClearNope();
         _awaitingFavorTarget = false;
         _favorActor = null;
+        _awaitingCatStealTarget = false;
+        _catStealActor = null;
+        _catStealKind = null;
         RebuildButtons();
     }
 
@@ -652,9 +767,12 @@ public class ExplodingKittensGameSharp : BaseGame
     {
         if (_winner != null) return;
         if (_pendingDraws > 0) return;
-        // Clear any lingering favor state before advancing turn
+        // Clear any lingering state before advancing turn
         _awaitingFavorTarget = false;
         _favorActor = null;
+        _awaitingCatStealTarget = false;
+        _catStealActor = null;
+        _catStealKind = null;
         AdvanceIndex(1);
         _pendingDraws = 1;
     }
@@ -665,13 +783,36 @@ public class ExplodingKittensGameSharp : BaseGame
         _currentPlayerIdx = (_currentPlayerIdx + steps) % ActivePlayers.Count;
     }
 
+    /// <summary>
+    /// Play a video from Content/ExplodingKittens/. Blocks all game UI until done.
+    /// </summary>
+    private void PlayVideo(string filename)
+    {
+        string videoPath = Path.Combine(
+            AppDomain.CurrentDomain.BaseDirectory, "Content", "ExplodingKittens", filename);
+        if (File.Exists(videoPath))
+        {
+            _activeVideo?.Dispose();
+            _activeVideo = new VideoPlayer(Renderer.GraphicsDevice);
+            _activeVideo.Play(videoPath);
+        }
+    }
+
     // ─── Internals: action cards ───────────────────────────────
     private void PlayAction(int seat, EKCard card)
     {
         NoteEvent($"{PlayerName(seat)} played {card.Kind}");
 
-        // All action cards are noppable
-        if (card.Kind is "ATK" or "SKIP" or "SHUF" or "FUT" or "FAV")
+        // All action cards (and cat card steals) are nopeable
+        if (IsCatCard(card.Kind))
+        {
+            OpenNopeWindow(seat, "CAT_STEAL", new Dictionary<string, object>
+            {
+                ["actor"] = seat,
+                ["catKind"] = card.Kind,
+            });
+        }
+        else if (card.Kind is "ATK" or "SKIP" or "SHUF" or "FUT" or "FAV")
             OpenNopeWindow(seat, card.Kind, new Dictionary<string, object>());
         else
             ApplyAction(card.Kind, new Dictionary<string, object>());
@@ -756,6 +897,16 @@ public class ExplodingKittensGameSharp : BaseGame
                 _pendingDraws = 2;
                 NoteEvent("Attack!");
                 break;
+
+            case "CAT_STEAL":
+                // Cat card pair played — enter target selection mode
+                int actor = payload.TryGetValue("actor", out var a) ? (int)a : seat.Value;
+                string catKind = payload.TryGetValue("catKind", out var ck) ? (string)ck : "";
+                _awaitingCatStealTarget = true;
+                _catStealActor = actor;
+                _catStealKind = catKind;
+                NoteEvent("Choose a player to steal from");
+                break;
         }
     }
 
@@ -774,6 +925,42 @@ public class ExplodingKittensGameSharp : BaseGame
         _hands[actor].Add(take);
         NoteEvent($"Favor: {PlayerName(actor)} took a card");
     }
+
+    private void ExecuteCatSteal(int actor, int target)
+    {
+        var tHand = _hands.GetValueOrDefault(target);
+        if (tHand == null || tHand.Count == 0)
+        {
+            NoteEvent("Steal: no cards to take");
+            return;
+        }
+        int takeIdx = Rng.Next(tHand.Count);
+        var take = tHand[takeIdx];
+        tHand.RemoveAt(takeIdx);
+        if (!_hands.ContainsKey(actor)) _hands[actor] = new List<EKCard>();
+        _hands[actor].Add(take);
+        NoteEvent($"{PlayerName(actor)} stole a card from {PlayerName(target)}!");
+    }
+
+    private static (int, int, int) CatCardColor(string kind) => kind switch
+    {
+        "TACO" => (255, 180, 50),
+        "CATER" => (100, 210, 80),
+        "HAIRY" => (180, 140, 80),
+        "BEARD" => (160, 120, 70),
+        "RAINBOW" => (255, 100, 200),
+        _ => (200, 200, 200),
+    };
+
+    private static string CatCardLabel(string kind) => kind switch
+    {
+        "TACO" => "\U0001f32e TACOCAT",
+        "CATER" => "\U0001f349 CATERMELON",
+        "HAIRY" => "\U0001f954 HAIRY POTATO CAT",
+        "BEARD" => "\U0001f408 BEARD CAT",
+        "RAINBOW" => "\U0001f308 RAINBOW CAT",
+        _ => kind,
+    };
 
     // ─── Web UI buttons ────────────────────────────────────────
     private void RebuildButtons()
@@ -817,8 +1004,19 @@ public class ExplodingKittensGameSharp : BaseGame
             return btns;
         }
 
+        // Cat steal targeting: only actor gets target buttons
+        if (_awaitingCatStealTarget && seat == _catStealActor)
+        {
+            foreach (var t in ActivePlayers)
+            {
+                if (t == seat) continue;
+                btns[$"cat_target:{t}"] = ($"Steal: {PlayerName(t)}", true);
+            }
+            return btns;
+        }
+
         bool isTurn = seat == CurrentTurnSeat;
-        bool canDraw = isTurn && _pendingDraws > 0 && !_nopeActive && !_awaitingFavorTarget;
+        bool canDraw = isTurn && _pendingDraws > 0 && !_nopeActive && !_awaitingFavorTarget && !_awaitingCatStealTarget;
         btns["ek_draw"] = ("Draw", canDraw);
         return btns;
     }
@@ -832,6 +1030,18 @@ public class ExplodingKittensGameSharp : BaseGame
     // ─── Update / Draw ─────────────────────────────────────────
     public override void Update(double dt)
     {
+        // If a video is playing, only update the video — block everything else
+        if (_activeVideo != null && _activeVideo.IsPlaying)
+        {
+            _activeVideo.Update(dt);
+            return;
+        }
+        if (_activeVideo != null && _activeVideo.IsFinished)
+        {
+            _activeVideo.Dispose();
+            _activeVideo = null;
+        }
+
         float d = Math.Clamp((float)dt, 0f, 0.2f);
         if (_lastEventAge < 999.0) _lastEventAge += d;
 
@@ -982,6 +1192,13 @@ public class ExplodingKittensGameSharp : BaseGame
 
     public override void Draw(Renderer r, int width, int height, double dt)
     {
+        // Video playback: draw fullscreen and block all other rendering
+        if (_activeVideo != null && _activeVideo.IsPlaying)
+        {
+            _activeVideo.Draw(r, width, height);
+            return;
+        }
+
         if (State == "player_select")
         {
             // ═══════════════════════════════════════════════════════════
@@ -1493,7 +1710,30 @@ public class ExplodingKittensGameSharp : BaseGame
     private void DrawCardFace(Renderer r, (int x, int y, int w, int h) rect, string text, (int, int, int) faceColor, int variant = -1)
     {
         string t = (text ?? "").Trim().ToUpperInvariant();
-        CardRendering.DrawEKCard(r, rect, t, fixedVariant: variant);
+        Texture2D? tex = GetCatCardTexture(t);
+        CardRendering.DrawEKCard(r, rect, t, fixedVariant: variant, illustration: tex);
+    }
+
+    private Texture2D? GetCatCardTexture(string kind)
+    {
+        if (!CatPngNames.TryGetValue(kind, out var pngName)) return null;
+
+        if (_cardTextures.TryGetValue(kind, out var cached)) return cached;
+
+        Texture2D? tex = null;
+        string pngPath = Path.Combine(EKCardArtRoot, pngName);
+        if (File.Exists(pngPath))
+        {
+            try
+            {
+                using var bmp = SKBitmap.Decode(pngPath);
+                if (bmp != null)
+                    tex = Renderer.TextureFromSkia(bmp);
+            }
+            catch { /* fall back to procedural art */ }
+        }
+        _cardTextures[kind] = tex;
+        return tex;
     }
 
     private void DrawDiscard(Renderer r, (int x, int y, int w, int h) rect)

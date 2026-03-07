@@ -261,7 +261,8 @@ public static class CardRendering
     public static void DrawEKCard(Renderer r,
         (int x, int y, int w, int h) rect,
         string cardKind,
-        int fixedVariant = -1)
+        int fixedVariant = -1,
+        Texture2D? illustration = null)
     {
         int x2 = rect.x, y2 = rect.y, w2 = rect.w, h2 = rect.h;
         int cx = x2 + w2 / 2, cy = y2 + h2 / 2;
@@ -277,6 +278,11 @@ public static class CardRendering
             "FUT"  => ("\ud83d\udd2e", "FUTURE",    (160, 90, 255),  (24, 8, 48),    (35, 14, 65)),
             "FAV"  => ("\ud83c\udf81", "FAVOR",     (255, 120, 190), (42, 12, 30),   (58, 18, 42)),
             "NOPE" => ("\ud83d\udeab", "NOPE!",     (180, 40, 40),   (26, 12, 12),   (38, 16, 16)),
+            "TACO" => ("\U0001f32e", "TACOCAT",   (255, 180, 50),  (42, 30, 6),    (58, 42, 10)),
+            "CATER" => ("\U0001f349", "CATERMELON",(100, 210, 80),  (8, 36, 6),     (14, 50, 12)),
+            "HAIRY" => ("\U0001f954", "HAIRY P.C.",(180, 140, 80),  (32, 24, 12),   (44, 34, 18)),
+            "BEARD" => ("\U0001f408", "BEARD CAT", (160, 120, 70),  (28, 20, 10),   (40, 30, 16)),
+            "RAINBOW"=>("\U0001f308","RAINBOW C.", (255, 100, 200), (40, 12, 32),   (55, 18, 42)),
             _      => ("\ud83d\ude3a", cardKind,     (90, 160, 235),  (10, 18, 34),   (16, 24, 44)),
         };
 
@@ -355,8 +361,33 @@ public static class CardRendering
         r.DrawRect((0, 0, 0), (illArea_x, illArea_y, illArea_w, Math.Max(1, illArea_h / 8)), alpha: 16);
         r.DrawRect((0, 0, 0), (illArea_x, illArea_y + illArea_h - Math.Max(1, illArea_h / 8), illArea_w, Math.Max(1, illArea_h / 8)), alpha: 22);
 
-        // Draw the rich procedural illustration
-        EKCardArt.DrawIllustration(r, cardKind, variant, (illArea_x, illArea_y, illArea_w, illArea_h));
+        // Draw the rich procedural illustration (or PNG if provided)
+        r.PushClip(new Rectangle(illArea_x, illArea_y, illArea_w, illArea_h));
+        if (illustration != null)
+        {
+            // Scale PNG to fit illustration area (cover, center-crop)
+            float srcAspect = (float)illustration.Width / illustration.Height;
+            float dstAspect = (float)illArea_w / illArea_h;
+            int drawW, drawH;
+            if (srcAspect > dstAspect)
+            {
+                drawH = illArea_h;
+                drawW = (int)(illArea_h * srcAspect);
+            }
+            else
+            {
+                drawW = illArea_w;
+                drawH = (int)(illArea_w / srcAspect);
+            }
+            int drawX = illArea_x + (illArea_w - drawW) / 2;
+            int drawY = illArea_y + (illArea_h - drawH) / 2;
+            r.DrawTexture(illustration, new Rectangle(drawX, drawY, drawW, drawH));
+        }
+        else
+        {
+            EKCardArt.DrawIllustration(r, cardKind, variant, (illArea_x, illArea_y, illArea_w, illArea_h));
+        }
+        r.PopClip();
 
         // Illustration frame — thin accent border with corner dots
         r.DrawRect(accent, (illArea_x, illArea_y, illArea_w, illArea_h), width: 1, alpha: 55);

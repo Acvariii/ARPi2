@@ -228,6 +228,7 @@ export type Snapshot = {
     hand_counts?: Record<string, number>;
     your_hand?: Array<{ idx: number; text: string; playable: boolean }>;
     awaiting_favor_target?: boolean;
+    awaiting_cat_steal?: boolean;
     nope_active?: boolean;
     nope_count?: number;
     winner?: number | null;
