@@ -139,6 +139,7 @@ public sealed class MonopolyGameSharp : BaseGame
 
     // ─── Video ─────────────────────────────────────────────────────────
     private VideoPlayer? _introVideo;
+    private VideoPlayer? _bgVideo;
 
     // ─── Clock ─────────────────────────────────────────────────────────
     private double _clock; // monotonic seconds since game start
@@ -278,15 +279,31 @@ public sealed class MonopolyGameSharp : BaseGame
         _phase = "roll"; _canRoll = true;
         State = "playing";
         PlayIntroVideo();
+        StartBackgroundVideo();
     }
 
     private void PlayIntroVideo()
     {
-        var dir = Path.GetDirectoryName(typeof(MonopolyGameSharp).Assembly.Location) ?? ".";
-        var mp4 = Path.Combine(dir, "Content", "Monopoly", "Monopoly_Intro.mp4");
-        if (!File.Exists(mp4)) return;
-        _introVideo = new VideoPlayer(Renderer.GraphicsDevice);
-        _introVideo.Play(mp4);
+        string path = Path.Combine(
+            AppDomain.CurrentDomain.BaseDirectory, "Content", "Monopoly", "Monopoly_Intro.mp4");
+        if (File.Exists(path))
+        {
+            _introVideo?.Dispose();
+            _introVideo = new VideoPlayer(Renderer.GraphicsDevice);
+            _introVideo.Play(path);
+        }
+    }
+
+    private void StartBackgroundVideo()
+    {
+        string path = Path.Combine(
+            AppDomain.CurrentDomain.BaseDirectory, "Content", "Monopoly", "Monopoly_Background.mp4");
+        if (File.Exists(path))
+        {
+            _bgVideo?.Dispose();
+            _bgVideo = new VideoPlayer(Renderer.GraphicsDevice);
+            _bgVideo.Play(path, loop: true);
+        }
     }
 
     // ─── Helpers ───────────────────────────────────────────────────────
@@ -370,6 +387,9 @@ public sealed class MonopolyGameSharp : BaseGame
         // ── Intro video blocks all gameplay ──
         if (_introVideo != null && _introVideo.IsPlaying) { _introVideo.Update(dt); return; }
         if (_introVideo != null && _introVideo.IsFinished) { _introVideo.Dispose(); _introVideo = null; }
+
+        // Background video keeps ticking alongside game
+        _bgVideo?.Update(dt);
 
         _clock += dt;
         float fdt = (float)dt;
@@ -2288,13 +2308,54 @@ public sealed class MonopolyGameSharp : BaseGame
         // ── Intro video blocks all rendering ──
         if (_introVideo != null && _introVideo.IsPlaying) { _introVideo.Draw(r, width, height); return; }
 
-        if (State == "player_select") { base.Draw(r, width, height, dt); return; }
+        if (State == "player_select")
+        {
+            // ═══════════════════════════════════════════════════════════
+            //  LOBBY — premium themed lobby with QR code
+            // ═══════════════════════════════════════════════════════════
+            CardRendering.DrawGameBackground(r, width, height, "monopoly");
+            _ambient.Draw(r);
+            _lightBeams.Draw(r, width, height);
+            _starfield.Draw(r);
+            _floatingIcons.Draw(r);
+
+            // Title — embossed Monopoly banner
+            int titleY = 18;
+            r.DrawText("MONOPOLY", width / 2 + 2, titleY + 2, 28, (80, 20, 0),
+                bold: true, anchorX: "center", anchorY: "top", alpha: 120);
+            r.DrawText("MONOPOLY", width / 2, titleY, 28, (255, 220, 80),
+                bold: true, anchorX: "center", anchorY: "top");
+
+            // Subtitle
+            r.DrawText("SELECT PLAYERS & SCAN TO JOIN", width / 2, 60, 13,
+                (220, 200, 140), anchorX: "center", anchorY: "center", bold: true);
+
+            // Player selection circles
+            SelectionUI.Draw(r);
+
+            // QR Code panel
+            int qrSize = Math.Clamp(Math.Min(width, height) * 18 / 100, 100, 200);
+            int qrX = width - qrSize / 2 - 60;
+            int qrY = height / 2;
+            QRCodeRenderer.DrawQRPanel(r, qrX, qrY, qrSize,
+                title: "📱 SCAN TO JOIN",
+                accentColor: (200, 170, 60));
+
+            _particles.Draw(r);
+            _waveBand.Draw(r, width, height);
+            _vignette.Draw(r, width, height);
+            return;
+        }
+
         if (State == "winner") { DrawWinnerScreen(r, width, height); return; }
 
         if (BoardOnlyMode)
         {
             // Full-screen board, no panels
-            CardRendering.DrawGameBackground(r, width, height, "monopoly");
+            if (_bgVideo != null && _bgVideo.IsPlaying)
+                _bgVideo.Draw(r, width, height);
+            else
+                CardRendering.DrawGameBackground(r, width, height, "monopoly");
             _ambient.Draw(r);
             _lightBeams.Draw(r, width, height);
             _starfield.Draw(r);
@@ -2320,7 +2381,10 @@ public sealed class MonopolyGameSharp : BaseGame
         }
 
         // ── Background layers ──
-        CardRendering.DrawGameBackground(r, width, height, "monopoly");
+        if (_bgVideo != null && _bgVideo.IsPlaying)
+            _bgVideo.Draw(r, width, height);
+        else
+            CardRendering.DrawGameBackground(r, width, height, "monopoly");
         _ambient.Draw(r);
         _lightBeams.Draw(r, width, height);
         _starfield.Draw(r);
@@ -2386,18 +2450,74 @@ public sealed class MonopolyGameSharp : BaseGame
             var player = _players[idx];
             var panel = _panels[idx];
             bool isCurrent = idx == currIdx;
-            panel.DrawBackground(r, isCurrent);
+            var pcol = GameConfig.PlayerColors[idx];
+            var (rx, ry, rw, rh) = panel.Rect;
 
-            // ── Player name with token emoji ──
+            // ── Panel shadow — multi-layer ──
+            SoftShadow.Draw(r, rx + 3, ry + 4, rw, rh, layers: 4, maxAlpha: 50);
+
+            // ── Panel body — semi-transparent dark glass beveled ──
+            var bg = isCurrent ? (28, 22, 14) : (14, 16, 22);
+            BeveledRect.Draw(r, rx, ry, rw, rh, bg, bevelSize: 3, alpha: 170);
+
+            // Subtle gradient inside
+            r.DrawRect(pcol, (rx + 2, ry + 2, rw - 4, rh / 6), alpha: 8);
+            r.DrawRect((0, 0, 0), (rx + 2, ry + rh - rh / 6, rw - 4, rh / 6), alpha: 12);
+
+            // Top accent band — player color
+            r.DrawRect(pcol, (rx, ry, rw, 5), alpha: 160);
+            r.DrawRect(pcol, (rx + 2, ry + 5, rw - 4, 2), alpha: 50);
+            r.DrawRect(pcol, (rx + 4, ry + 7, rw - 8, 1), alpha: 20);
+
+            // Border — layered with 3D depth
+            var outline = isCurrent ? (255, 210, 60) : (100, 100, 120);
+            r.DrawRect(outline, (rx, ry, rw, rh), width: isCurrent ? 2 : 1, alpha: 200);
+
+            // Turn glow
+            if (isCurrent)
+            {
+                int glowAlpha = (int)(12 + 10 * Math.Sin(_clock * 4));
+                r.DrawRect(pcol, (rx + 2, ry + 2, rw - 4, rh - 4), alpha: glowAlpha);
+                r.DrawRect(pcol, (rx, ry, rw, rh), width: 3, alpha: 120);
+            }
+
+            // ── Player name pill — beveled and polished ──
             string emoji = idx < TokenEmojis.Length ? TokenEmojis[idx] : "●";
-            panel.DrawTextOriented(r, $"{emoji} {SeatLabel(idx)}", 0.5f, 0.08f, 14, (255, 255, 255));
+            var nameCol = isCurrent ? (255, 220, 80) : pcol;
+            string pName = $"{emoji} {SeatLabel(idx)}";
+            int pillW = Math.Max(72, pName.Length * 8 + 24);
+            int pillH = 22;
+            int pillX = rx + 6;
+            int pillY = ry + 10;
 
-            // ── Balance ──
+            r.DrawRect((0, 0, 0), (pillX + 2, pillY + 2, pillW, pillH), alpha: 80);
+            var namePillBg = isCurrent ? (34, 28, 14) : (12, 14, 20);
+            BeveledRect.Draw(r, pillX, pillY, pillW, pillH, namePillBg, bevelSize: 2);
+            r.DrawRect(outline, (pillX, pillY, pillW, pillH), width: 1, alpha: 70);
+            r.DrawRect((255, 255, 255), (pillX + 2, pillY + 1, pillW - 4, 1), alpha: 12);
+
+            // Player color dot
+            r.DrawCircle(pcol, (pillX + 11, pillY + pillH / 2), 5, alpha: 220);
+            r.DrawCircle((255, 255, 255), (pillX + 10, pillY + pillH / 2 - 1), 2, alpha: 30);
+
+            // Name text — shadowed
+            string marker = isCurrent ? " ★" : "";
+            r.DrawText($"{pName}{marker}", pillX + 20 + 1, pillY + pillH / 2 + 1, 11, (0, 0, 0),
+                anchorX: "left", anchorY: "center", bold: isCurrent, alpha: 80);
+            r.DrawText($"{pName}{marker}", pillX + 20, pillY + pillH / 2, 11, nameCol,
+                anchorX: "left", anchorY: "center", bold: isCurrent);
+
+            // ── Balance — large, embossed ──
             string jailInd = player.InJail ? " ⛓" : player.GetOutOfJailCards > 0 ? " 🔑" : "";
             string moneyText = $"${player.Money}{jailInd}";
-            panel.DrawTextOriented(r, moneyText, 0.5f, 0.24f, 22, (255, 255, 220));
+            int mFs = 20;
+            int mY = ry + rh * 28 / 100;
+            r.DrawText(moneyText, rx + rw / 2 + 1, mY + 1, mFs, (0, 0, 0),
+                anchorX: "center", anchorY: "center", bold: true, alpha: 100);
+            r.DrawText(moneyText, rx + rw / 2, mY, mFs, (255, 255, 220),
+                anchorX: "center", anchorY: "center", bold: true);
 
-            // ── Property / house summary line ──
+            // ── Property / house stats badge ──
             int propCount = player.Properties.Count;
             int totalHouses = player.Properties
                 .Where(pi => pi >= 0 && pi < _properties.Count)
@@ -2406,8 +2526,21 @@ public sealed class MonopolyGameSharp : BaseGame
                 .Where(pi => pi >= 0 && pi < _properties.Count)
                 .Count(pi => _properties[pi].Houses == 5);
             int houses = totalHouses - hotels * 5;
-            string statLine = $"🏠{houses} 🏨{hotels} 📜{propCount}";
-            panel.DrawTextOriented(r, statLine, 0.5f, 0.40f, 11, (200, 200, 200));
+
+            int badgeX = rx + rw - 58;
+            int badgeY = ry + 12;
+            int badgeW = 50;
+            int badgeH = 20;
+            r.DrawRect((0, 0, 0), (badgeX + 1, badgeY + 1, badgeW, badgeH), alpha: 60);
+            BeveledRect.Draw(r, badgeX, badgeY, badgeW, badgeH, (8, 30, 8), bevelSize: 2, alpha: 180);
+            r.DrawRect((80, 180, 80), (badgeX, badgeY, badgeW, badgeH), width: 1, alpha: 60);
+            r.DrawText($"📜{propCount}", badgeX + badgeW / 2, badgeY + badgeH / 2, 10,
+                (180, 230, 160), anchorX: "center", anchorY: "center");
+
+            // stat line below badge
+            string statLine = $"🏠{houses} 🏨{hotels}";
+            r.DrawText(statLine, rx + rw / 2, ry + rh * 42 / 100, 10, (180, 190, 170),
+                anchorX: "center", anchorY: "center");
 
             // ── Net worth ──
             int netWorth = player.Money
@@ -2415,7 +2548,8 @@ public sealed class MonopolyGameSharp : BaseGame
                     .Where(pi => pi >= 0 && pi < _properties.Count)
                     .Sum(pi => _properties[pi].IsMortgaged ? _properties[pi].Data.Price / 2 : _properties[pi].Data.Price)
                 + houses * 50 + hotels * 250;
-            panel.DrawTextOriented(r, $"Net: ${netWorth}", 0.5f, 0.52f, 10, (170, 220, 170));
+            r.DrawText($"Net: ${netWorth}", rx + rw / 2, ry + rh * 52 / 100, 10,
+                (140, 200, 140), anchorX: "center", anchorY: "center");
 
             // Buttons
             if (_buttons.TryGetValue(idx, out var btns))
@@ -2433,9 +2567,7 @@ public sealed class MonopolyGameSharp : BaseGame
         int corner = bw / 11;
 
         // ── Deep shadow stack ──
-        r.DrawRect((0, 0, 0), (bx + 8, by + 8, bw, bh), alpha: 50);
-        r.DrawRect((0, 0, 0), (bx + 5, by + 5, bw, bh), alpha: 80);
-        r.DrawRect((0, 0, 0), (bx + 2, by + 2, bw, bh), alpha: 40);
+        SoftShadow.Draw(r, bx + 4, by + 5, bw, bh, layers: 5, maxAlpha: 90);
 
         // ── Board base — rich green felt ──
         r.DrawRect((195, 225, 195), (bx, by, bw, bh));
@@ -2658,36 +2790,52 @@ public sealed class MonopolyGameSharp : BaseGame
         r.DrawRect((160, 140, 80), (ix, iy, iw, ih), width: 2, alpha: 70);
         r.DrawRect((200, 175, 80), (ix + 3, iy + 3, iw - 6, ih - 6), width: 1, alpha: 35);
 
-        // Red banner background for title
+        // Red banner background for title — beveled
         int bannerW = iw * 65 / 100, bannerH = Math.Max(24, ih / 8);
         int bannerX = cx - bannerW / 2, bannerY = cy - ih * 28 / 100;
-        r.DrawRect((200, 30, 30), (bannerX, bannerY, bannerW, bannerH));
+        SoftShadow.Draw(r, bannerX + 2, bannerY + 3, bannerW, bannerH, layers: 3, maxAlpha: 60);
+        BeveledRect.Draw(r, bannerX, bannerY, bannerW, bannerH, (180, 20, 20), bevelSize: 3);
         r.DrawRect((230, 60, 60), (bannerX, bannerY, bannerW, 3), alpha: 120);
         r.DrawRect((150, 10, 10), (bannerX, bannerY + bannerH - 2, bannerW, 2), alpha: 100);
-        r.DrawRect((120, 20, 20), (bannerX, bannerY, bannerW, bannerH), width: 1, alpha: 180);
+        r.DrawRect((255, 60, 60), (bannerX, bannerY, bannerW, bannerH), width: 1, alpha: 80);
 
-        // "MONOPOLY" title — sized to fit inside the banner
+        // "MONOPOLY" title — sized to fit inside the banner, embossed
         int titleFs = Math.Max(10, Math.Min(bannerH * 55 / 100, bannerW / 8));
-        r.DrawText("MONOPOLY", cx + 1, bannerY + bannerH / 2 + 1, titleFs, (100, 0, 0), bold: true, anchorX: "center", anchorY: "center", alpha: 100);
-        r.DrawText("MONOPOLY", cx, bannerY + bannerH / 2, titleFs, (255, 255, 255), bold: true, anchorX: "center", anchorY: "center");
+        r.DrawText("MONOPOLY", cx + 1, bannerY + bannerH / 2 + 1, titleFs, (80, 0, 0),
+            bold: true, anchorX: "center", anchorY: "center", alpha: 120);
+        r.DrawText("MONOPOLY", cx, bannerY + bannerH / 2, titleFs, (255, 255, 240),
+            bold: true, anchorX: "center", anchorY: "center");
 
-        // Decorative lines above and below banner
+        // Decorative gold lines above and below banner
         int lineW = bannerW * 80 / 100;
-        r.DrawRect((160, 140, 80), (cx - lineW / 2, bannerY - 5, lineW, 1), alpha: 80);
-        r.DrawRect((160, 140, 80), (cx - lineW / 2, bannerY + bannerH + 4, lineW, 1), alpha: 80);
+        r.DrawRect((200, 175, 60), (cx - lineW / 2, bannerY - 5, lineW, 1), alpha: 80);
+        r.DrawRect((200, 175, 60), (cx - lineW / 2, bannerY + bannerH + 4, lineW, 1), alpha: 80);
 
-        // Current turn display
+        // Current turn display — premium pill
         if (State == "playing" && ActivePlayers.Count > 0)
         {
-            int turnY = cy + ih * 25 / 100;
             int seat = CurrentSeat;
             var turnColor = GameConfig.PlayerColors[seat];
-            // Small pulsing dot indicator (not a large glow)
+            string turnText = $"{SeatLabel(seat)}'s Turn";
+            int turnFs = Math.Max(9, ih / 14);
+            int pillW2 = Math.Max(80, turnText.Length * (turnFs - 2) + 30);
+            int pillH2 = turnFs + 10;
+            int pillX2 = cx - pillW2 / 2;
+            int turnY = cy + ih * 25 / 100 - pillH2 / 2;
+
+            r.DrawRect((0, 0, 0), (pillX2 + 2, turnY + 2, pillW2, pillH2), alpha: 50);
+            BeveledRect.Draw(r, pillX2, turnY, pillW2, pillH2, (20, 18, 14), bevelSize: 2, alpha: 180);
+            r.DrawRect(turnColor, (pillX2, turnY, pillW2, 3), alpha: 120);
+            r.DrawRect(turnColor, (pillX2, turnY, pillW2, pillH2), width: 1, alpha: 60);
+
+            // Pulsing dot
             double pulse = 0.6 + 0.4 * Math.Sin(_clock * 3);
             int dotR = Math.Max(3, ih / 30);
-            int dotX = cx - iw * 18 / 100;
-            r.DrawCircle(turnColor, (dotX, turnY), dotR, alpha: (int)(200 * pulse));
-            r.DrawText($"{SeatLabel(seat)}'s Turn", cx, turnY, Math.Max(9, ih / 14), turnColor, bold: true, anchorX: "center", anchorY: "center");
+            int dotX = pillX2 + 10;
+            r.DrawCircle(turnColor, (dotX, turnY + pillH2 / 2), dotR, alpha: (int)(200 * pulse));
+
+            r.DrawText(turnText, cx + 4, turnY + pillH2 / 2, turnFs, turnColor,
+                bold: true, anchorX: "center", anchorY: "center");
         }
     }
 
@@ -2806,8 +2954,8 @@ public sealed class MonopolyGameSharp : BaseGame
 
         // Shadow
         r.DrawRect((0, 0, 0), (x2 + 4, y2 + 4, bw2, bh2), alpha: Math.Max(1, (int)(80 * alpha)));
-        // Background
-        r.DrawRect(bgColor, (x2, y2, bw2, bh2), alpha: bgAlpha);
+        // Background — beveled
+        BeveledRect.Draw(r, x2, y2, bw2, bh2, bgColor, bevelSize: 3, alpha: bgAlpha);
         // Top accent
         r.DrawRect(titleColor, (x2, y2, bw2, 3), alpha: mainAlpha);
         // Border
@@ -3133,31 +3281,98 @@ public sealed class MonopolyGameSharp : BaseGame
     // ═══════════════════════════════════════════════════════════════════════
     private void DrawWinnerScreen(Renderer r, int w, int h)
     {
-        r.DrawRect((10, 10, 18), (0, 0, w, h), alpha: 230);
-        r.DrawText("MONOPOLY", w / 2, 50, 48, (255, 220, 80), bold: true, anchorX: "center", anchorY: "center");
+        // Background video or fallback
+        if (_bgVideo != null && _bgVideo.IsPlaying)
+            _bgVideo.Draw(r, w, h);
+        else
+            CardRendering.DrawGameBackground(r, w, h, "monopoly");
 
-        if (_winnerIdx is not int wi) return;
+        // Dim overlay
+        r.DrawRect((0, 0, 0), (0, 0, w, h), alpha: 160);
+
+        // Ambient glow rings
         int cx = w / 2, cy = h / 2;
-        int bw2 = Math.Min(800, (int)(w * 0.7)), bh2 = 360;
-        int bx = cx - bw2 / 2, by = cy - bh2 / 2;
+        r.DrawCircle((255, 200, 60), (cx, cy), Math.Min(w, h) * 35 / 100, alpha: 6);
+        r.DrawCircle((255, 220, 80), (cx, cy), Math.Min(w, h) * 22 / 100, alpha: 8);
+
+        // Title
+        r.DrawText("MONOPOLY", w / 2 + 2, 42, 42, (80, 20, 0),
+            bold: true, anchorX: "center", anchorY: "center", alpha: 120);
+        r.DrawText("MONOPOLY", w / 2, 40, 42, (255, 220, 80),
+            bold: true, anchorX: "center", anchorY: "center");
+
+        if (_winnerIdx is not int wi) { DrawForegroundAnimations(r, w, h); return; }
         var wc = GameConfig.PlayerColors[wi];
 
-        // Shadow + bg
-        r.DrawRect((0, 0, 0), (bx + 6, by + 6, bw2, bh2), alpha: 100);
-        r.DrawRect(wc, (bx, by, bw2, bh2));
-        // Accent header band
-        r.DrawRect((255, 215, 0), (bx, by, bw2, 5), alpha: 200);
-        r.DrawRect((0, 0, 0), (bx + 8, by + 8, bw2 - 16, bh2 - 16), alpha: 100);
-        r.DrawRect((255, 215, 0), (bx, by, bw2, bh2), width: 4);
-        // Inset frame
-        int ins = 12;
-        r.DrawRect((255, 215, 0), (bx + ins, by + ins, bw2 - 2 * ins, bh2 - 2 * ins), width: 1, alpha: 25);
-        r.DrawCircle(wc, (cx, cy), (int)(Math.Min(bw2, bh2) * 0.28), alpha: 25);
+        int bw2 = Math.Min(660, w * 55 / 100), bh2 = 260;
+        int bx = cx - bw2 / 2, by = cy - bh2 / 2;
 
-        r.DrawText($"{SeatLabel(wi)} WINS!", cx + 3, cy - 47, 56, (0, 0, 0), bold: true, anchorX: "center", anchorY: "center", alpha: 120);
-        r.DrawText($"{SeatLabel(wi)} WINS!", cx, cy - 50, 56, (255, 255, 255), bold: true, anchorX: "center", anchorY: "center");
-        r.DrawText("🏆 MONOPOLY CHAMPION 🏆", cx, cy + 20, 36, (255, 255, 200), bold: true, anchorX: "center", anchorY: "center");
-        r.DrawText($"💰 Final Balance: ${_players[wi].Money}", cx, cy + 80, 26, (255, 255, 255), anchorX: "center", anchorY: "center");
+        // Panel shadow — deep multi-layer
+        r.DrawRect((0, 0, 0), (bx + 12, by + 12, bw2, bh2), alpha: 100);
+        r.DrawRect((0, 0, 0), (bx + 8, by + 8, bw2, bh2), alpha: 60);
+        r.DrawRect((0, 0, 0), (bx + 4, by + 4, bw2, bh2), alpha: 40);
+
+        // Panel background — dark beveled
+        BeveledRect.Draw(r, bx, by, bw2, bh2, (18, 14, 10), bevelSize: 4);
+
+        // Gold accent double border
+        r.DrawRect((255, 210, 60), (bx, by, bw2, bh2), width: 3, alpha: 220);
+        r.DrawRect((200, 170, 40), (bx + 5, by + 5, bw2 - 10, bh2 - 10), width: 1, alpha: 80);
+        r.DrawRect((255, 220, 80), (bx, by, bw2, 4), alpha: 180);
+        r.DrawRect((200, 180, 60), (bx + 1, by + 4, bw2 - 2, 2), alpha: 60);
+
+        // Inner glow
+        r.DrawCircle((255, 210, 60), (cx, cy), Math.Min(bw2, bh2) * 40 / 100, alpha: 10);
+        r.DrawCircle((200, 170, 40), (cx, cy), Math.Min(bw2, bh2) * 25 / 100, alpha: 8);
+
+        // Trophy emoji with halo
+        r.DrawCircle((255, 210, 60), (cx, by + 55), 24, alpha: 14);
+        r.DrawText("🏆", cx + 2, by + 55 + 2, 52, (0, 0, 0),
+            anchorX: "center", anchorY: "center", alpha: 80);
+        r.DrawText("🏆", cx, by + 55, 52, (255, 220, 80),
+            anchorX: "center", anchorY: "center");
+
+        // Winner name — large, embossed
+        int nameFs = 36;
+        r.DrawText(SeatLabel(wi), cx + 2, by + 115 + 2, nameFs, (0, 0, 0),
+            anchorX: "center", anchorY: "center", bold: true, alpha: 140);
+        r.DrawText(SeatLabel(wi), cx - 1, by + 115 - 1, nameFs, (255, 255, 240),
+            anchorX: "center", anchorY: "center", bold: true, alpha: 80);
+        r.DrawText(SeatLabel(wi), cx, by + 115, nameFs, (255, 245, 200),
+            anchorX: "center", anchorY: "center", bold: true);
+
+        // Subtitle
+        r.DrawCircle((255, 210, 60), (cx, by + 155), 40, alpha: 6);
+        r.DrawText("🏦 MONOPOLY CHAMPION! 🏦", cx + 1, by + 158 + 1, 20, (0, 0, 0),
+            anchorX: "center", anchorY: "center", alpha: 80);
+        r.DrawText("🏦 MONOPOLY CHAMPION! 🏦", cx, by + 158, 20, (255, 220, 120),
+            anchorX: "center", anchorY: "center");
+
+        // Final balance
+        r.DrawText($"💰 Final Balance: ${_players[wi].Money}", cx, by + 195, 18,
+            (220, 220, 200), anchorX: "center", anchorY: "center");
+
+        // Decorative separators
+        int lineW = bw2 * 60 / 100;
+        r.DrawLine((255, 210, 60), (cx - lineW / 2, by + 88), (cx + lineW / 2, by + 88), width: 1, alpha: 40);
+        r.DrawLine((255, 210, 60), (cx - lineW / 2, by + 178), (cx + lineW / 2, by + 178), width: 1, alpha: 35);
+
+        // Corner ornaments
+        for (int ci = 0; ci < 4; ci++)
+        {
+            int ccx = ci < 2 ? bx + 10 : bx + bw2 - 10;
+            int ccy = ci % 2 == 0 ? by + 10 : by + bh2 - 10;
+            r.DrawCircle((255, 210, 60), (ccx, ccy), 8, width: 1, alpha: 35);
+            r.DrawCircle((255, 220, 80), (ccx, ccy), 4, alpha: 25);
+        }
+
+        // Bottom token emoji row
+        r.DrawText("🎩", cx - 40, by + bh2 - 22, 20, (220, 200, 140),
+            anchorX: "center", anchorY: "center", alpha: 120);
+        r.DrawText("💰", cx, by + bh2 - 22, 20, (220, 200, 140),
+            anchorX: "center", anchorY: "center", alpha: 120);
+        r.DrawText("🏠", cx + 40, by + bh2 - 22, 20, (220, 200, 140),
+            anchorX: "center", anchorY: "center", alpha: 120);
 
         DrawForegroundAnimations(r, w, h);
     }

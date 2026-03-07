@@ -123,7 +123,9 @@ public sealed class VideoPlayer : IDisposable
         if (_cur == null) { _finished = true; return; }
 
         _started = true;
-        _fadePhase = FadePhase.FadeIn;
+        // Looping background videos skip fade-in (instant full alpha);
+        // non-looping (intro) videos use the fade-in envelope.
+        _fadePhase = loop ? FadePhase.Playing : FadePhase.FadeIn;
         _fadeTimer = 0;
     }
 
@@ -209,6 +211,8 @@ public sealed class VideoPlayer : IDisposable
             _fadePhase = FadePhase.FadeOut;
             _fadeTimer = 0;
         }
+
+        // Looping videos stay in Playing phase (never fade out)
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -239,14 +243,17 @@ public sealed class VideoPlayer : IDisposable
         int drawH = (int)(_videoHeight * scale);
         var dest = new Rectangle((screenW - drawW) / 2, (screenH - drawH) / 2, drawW, drawH);
 
-        r.DrawRect((0, 0, 0), (0, 0, screenW, screenH), alpha: alpha);
+        // Only draw the darkening background rect for non-looping (intro) videos
+        if (!_looping)
+            r.DrawRect((0, 0, 0), (0, 0, screenW, screenH), alpha: alpha);
 
-        // Cross-fade: old fading out, new fading in
+        // Cross-fade: draw outgoing at full alpha, incoming on top at increasing alpha
+        // This avoids the brightness dip that (1-t) + t causes at mid-transition.
         if (_crossFading && _next?.Tex != null && _next.FrameIdx > 0)
         {
             double t = Math.Clamp(_crossFadeTimer / CrossFadeDuration, 0, 1);
-            r.DrawTexture(_cur.Tex, dest, alpha: (int)(alpha * (1.0 - t)));
-            r.DrawTexture(_next.Tex, dest, alpha: (int)(alpha * t));
+            r.DrawTexture(_cur.Tex, dest, alpha: alpha);           // old stays full
+            r.DrawTexture(_next.Tex, dest, alpha: (int)(alpha * t)); // new fades in on top
         }
         else
         {

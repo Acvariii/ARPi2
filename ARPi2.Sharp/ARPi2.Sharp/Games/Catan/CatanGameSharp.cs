@@ -1,6 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
+using SkiaSharp;
 using ARPi2.Sharp.Core;
 
 namespace ARPi2.Sharp.Games.Catan;
@@ -193,6 +197,22 @@ public class CatanGameSharp : BaseGame
     private int? _animPrevWinner;
     private double _animFwTimer;
 
+    // ── Premium visual systems ──────────────────────────────────
+    private readonly SpotlightCone _spotlight = new() { Speed = 0.4f, Color = (255, 200, 80) };
+    private readonly FireEdge _fireEdge = new() { Speed = 1.0f, FlameCount = 24, MaxFlameH = 28, Alpha = 35 };
+    private readonly CardBreathEffect _boardBreath = new() { Speed = 0.8f, Amplitude = 0.012f };
+    private float _screenShakeX, _screenShakeY, _screenShakeTimer;
+    private float _eventToastAlpha;
+    private double _eventToastTime;
+    private string _eventToastText = "";
+
+    // ── Background video ───────────────────────────────────────
+    private VideoPlayer? _bgVideo;
+
+    // ── Tile textures (hex-clipped PNGs) ───────────────────────
+    private readonly Dictionary<string, Texture2D?> _tileTextures = new();
+    private bool _tileTexturesLoaded;
+
     // ── Constructor ────────────────────────────────────────────
     public CatanGameSharp(int w, int h, Renderer renderer) : base(w, h, renderer)
     {
@@ -208,6 +228,116 @@ public class CatanGameSharp : BaseGame
             _knightsPlayed[i] = 0;
         }
         _bank = NewBankDict();
+
+        // Start background video right away (plays in lobby too)
+        StartBackgroundVideo();
+    }
+
+    // ── Background video ───────────────────────────────────────
+    private void StartBackgroundVideo()
+    {
+        string path = Path.Combine(
+            AppDomain.CurrentDomain.BaseDirectory, "Content", "Catan", "Catan_Background.mp4");
+        if (File.Exists(path))
+        {
+            _bgVideo?.Dispose();
+            _bgVideo = new VideoPlayer(Renderer.GraphicsDevice);
+            _bgVideo.Play(path, loop: true);
+        }
+    }
+
+    // ── Tile texture loading (hex-clipped via SkiaSharp) ──────
+    private static readonly string TileArtRoot = Path.Combine(
+        AppDomain.CurrentDomain.BaseDirectory, "Content", "Catan", "Tiles");
+
+    /// <summary>Map tile kind → PNG filename (without extension).</summary>
+    private static readonly Dictionary<string, string> TileKindToPng = new()
+    {
+        ["wood"] = "wood", ["brick"] = "brick", ["sheep"] = "sheep",
+        ["wheat"] = "wheat", ["ore"] = "ore", ["desert"] = "desert",
+        ["water"] = "water", ["gold"] = "gold", ["volcano"] = "volcano",
+    };
+
+    private static readonly Dictionary<string, string> PortKindToPng = new()
+    {
+        ["any"] = "port_any", ["wood"] = "port_wood", ["brick"] = "port_brick",
+        ["sheep"] = "port_sheep", ["wheat"] = "port_wheat", ["ore"] = "port_ore",
+    };
+
+    private void LoadTileTextures()
+    {
+        if (_tileTexturesLoaded) return;
+        _tileTexturesLoaded = true;
+
+        // Load all tile kind textures
+        foreach (var (kind, pngName) in TileKindToPng)
+            LoadOneTileTexture(kind, pngName);
+
+        // Load all port textures
+        foreach (var (kind, pngName) in PortKindToPng)
+            LoadOneTileTexture("port_" + kind, pngName);
+    }
+
+    private void LoadOneTileTexture(string key, string pngName)
+    {
+        string path = Path.Combine(TileArtRoot, pngName + ".png");
+        if (!File.Exists(path)) return;
+        try
+        {
+            using var srcBmp = SKBitmap.Decode(path);
+            if (srcBmp == null) return;
+
+            // Create a hex-clipped version: render source into a square bitmap
+            // with a pointy-top hex clip path so corners are transparent.
+            int texSize = srcBmp.Width; // 1024
+            using var hexBmp = new SKBitmap(new SKImageInfo(texSize, texSize, SKColorType.Rgba8888, SKAlphaType.Unpremul));
+            using var canvas = new SKCanvas(hexBmp);
+            canvas.Clear(SKColors.Transparent);
+
+            // Build pointy-top hex path
+            float cx = texSize / 2f, cy = texSize / 2f;
+            float radius = texSize / 2f;
+            var hexPath = new SKPath();
+            for (int i = 0; i < 6; i++)
+            {
+                float ang = MathF.PI / 180f * (60 * i - 30); // pointy-top, same as HexPoints
+                float hx = cx + radius * MathF.Cos(ang);
+                float hy = cy + radius * MathF.Sin(ang);
+                if (i == 0) hexPath.MoveTo(hx, hy);
+                else hexPath.LineTo(hx, hy);
+            }
+            hexPath.Close();
+
+            canvas.ClipPath(hexPath, SKClipOperation.Intersect, antialias: true);
+
+            // Draw source image scaled to fill
+            var srcRect = new SKRect(0, 0, srcBmp.Width, srcBmp.Height);
+            var dstRect = new SKRect(0, 0, texSize, texSize);
+            using var paint = new SKPaint { IsAntialias = true, FilterQuality = SKFilterQuality.High };
+            canvas.DrawBitmap(srcBmp, srcRect, dstRect, paint);
+            canvas.Flush();
+
+            _tileTextures[key] = Renderer.TextureFromSkia(hexBmp);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Catan: Failed to load tile texture '{key}': {ex.Message}");
+        }
+    }
+
+    /// <summary>Get the pre-clipped hex texture for a tile, or null if none.</summary>
+    private Texture2D? GetTileTexture(HexTile tile, bool isPort, string portKind = "")
+    {
+        // Port tiles on water get the port texture
+        if (isPort && PortKindToPng.ContainsKey(portKind))
+        {
+            if (_tileTextures.TryGetValue("port_" + portKind, out var ptex))
+                return ptex;
+        }
+        // Regular tile texture
+        if (_tileTextures.TryGetValue(tile.Kind, out var tex))
+            return tex;
+        return null;
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -296,6 +426,10 @@ public class CatanGameSharp : BaseGame
         _p2pGet = null;
 
         RefreshButtons();
+
+        // Load tile textures and start background video
+        LoadTileTextures();
+        StartBackgroundVideo();
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -840,6 +974,9 @@ public class CatanGameSharp : BaseGame
 
     public override void Update(double dt)
     {
+        // Background video keeps updating alongside game
+        _bgVideo?.Update(dt);
+
         float d = Math.Clamp((float)dt, 0f, 0.2f);
 
         // Animations
@@ -855,6 +992,29 @@ public class CatanGameSharp : BaseGame
         _floatingIcons.Update(d, ScreenW, ScreenH);
         _waveBand.Update(d);
         _heatShimmer.Update(d);
+        _spotlight.Update(d);
+        _fireEdge.Update(d);
+        _boardBreath.Update(d);
+
+        // Screen shake decay
+        if (_screenShakeTimer > 0)
+        {
+            _screenShakeTimer -= d;
+            float intensity = Math.Max(0, _screenShakeTimer) * 12f;
+            _screenShakeX = (Rng.NextSingle() - 0.5f) * intensity;
+            _screenShakeY = (Rng.NextSingle() - 0.5f) * intensity;
+        }
+        else { _screenShakeX = 0; _screenShakeY = 0; }
+
+        // Event toast fade
+        if (!string.IsNullOrEmpty(_eventToastText))
+        {
+            double age = _totalElapsed - _eventToastTime;
+            if (age < 0.4) _eventToastAlpha = Math.Min(1f, (float)(age / 0.4));
+            else if (age > 4.0) _eventToastAlpha = Math.Max(0f, 1f - (float)((age - 4.0) / 0.6));
+            else _eventToastAlpha = 1f;
+            if (age > 4.6) _eventToastText = "";
+        }
 
         // Turn-change pulse
         var currTurn = _currentTurnSeat;
@@ -908,6 +1068,7 @@ public class CatanGameSharp : BaseGame
             _flashes.Add(new ScreenFlash((200, 80, 255), 40, 0.6f));
             _textPops.Add(new TextPopAnim("ROBBER!", fcx, fcy - 50, (200, 80, 255), fontSize: 32));
             _particles.EmitSparkle(fcx, fcy, (200, 80, 255), 20);
+            ShakeScreen(0.5f);
         }
         else
         {
@@ -934,33 +1095,121 @@ public class CatanGameSharp : BaseGame
     public override void Draw(Renderer r, int width, int height, double dt)
     {
         _totalElapsed += dt;
-        if (State == "player_select") { base.Draw(r, width, height, dt); return; }
 
-        CardRendering.DrawGameBackground(r, width, height, "catan");
+        // Auto-detect _lastEvent changes for toast
+        if (_lastEvent != _prevLastEvent && !string.IsNullOrEmpty(_lastEvent))
+        {
+            _eventToastText = _lastEvent;
+            _eventToastTime = _totalElapsed;
+            _eventToastAlpha = 0f;
+        }
+        _prevLastEvent = _lastEvent;
+
+        if (State == "player_select")
+        {
+            // ── Themed lobby ──
+            if (_bgVideo != null && _bgVideo.IsPlaying)
+                _bgVideo.Draw(r, width, height);
+            else
+                CardRendering.DrawGameBackground(r, width, height, "catan");
+            _ambient.Draw(r);
+            _lightBeams.Draw(r, width, height);
+            _starfield.Draw(r);
+
+            // Warm gold title with glow
+            int titleY = height * 12 / 100;
+            r.DrawText("CATAN", width / 2, titleY + 3, 52, (0, 0, 0), anchorX: "center", anchorY: "center", bold: true); // shadow
+            r.DrawText("CATAN", width / 2, titleY, 52, (255, 200, 60), anchorX: "center", anchorY: "center", bold: true);
+            // Glow halo behind title
+            r.DrawCircle((255, 200, 60), (width / 2, titleY), 80, alpha: 12);
+            r.DrawCircle((255, 180, 40), (width / 2, titleY), 55, alpha: 18);
+
+            // Subtitle
+            r.DrawText("Settlers of the Island", width / 2, titleY + 38, 18, (210, 195, 140), anchorX: "center", anchorY: "center");
+
+            // QR code panel
+            int qrPanelW = Math.Min(320, width * 40 / 100), qrPanelH = 180;
+            int qpx = width / 2 - qrPanelW / 2, qpy = height / 2 - qrPanelH / 2 + 20;
+            SoftShadow.Draw(r, qpx, qpy, qrPanelW, qrPanelH, layers: 5, maxAlpha: 60);
+            BeveledRect.Draw(r, qpx, qpy, qrPanelW, qrPanelH, (28, 32, 22), bevelSize: 4, alpha: 220);
+            r.DrawRect((255, 200, 60), (qpx, qpy, qrPanelW, 4), alpha: 180);
+            r.DrawText("📱 Scan to join", width / 2, qpy + 20, 16, (230, 215, 160), anchorX: "center", anchorY: "center");
+
+            // Delegate to base for actual QR/player select content
+            base.Draw(r, width, height, dt);
+            return;
+        }
+
+        // ── In-game rendering ──
+        // Screen shake offset
+        float shX = _screenShakeX, shY = _screenShakeY;
+
+        // Background video layer (behind everything)
+        if (_bgVideo != null && _bgVideo.IsPlaying)
+            _bgVideo.Draw(r, width, height);
+        else
+            CardRendering.DrawGameBackground(r, width, height, "catan");
         _ambient.Draw(r);
         _lightBeams.Draw(r, width, height);
         _starfield.Draw(r);
         _floatingIcons.Draw(r);
-        RainbowTitle.Draw(r, "CATAN", width);
+        _fireEdge.Draw(r, width, height);
 
-        // ── Subtitle status bar ──
-        string subtitle = State == "playing"
-            ? $"🌾 Expansion: {_expansionMode}  |  Players: {ActivePlayers.Count}"
-            : "Select players in Web UI";
+        // ── Premium gold title (not RainbowTitle) ──
+        int titleYi = 8;
+        // Title shadow
+        r.DrawText("CATAN", width / 2 + 2 + (int)shX, titleYi + 3 + (int)shY, 36, (0, 0, 0), anchorX: "center", anchorY: "top", bold: true);
+        // Title glow halo
+        r.DrawCircle((255, 200, 60), (width / 2 + (int)shX, titleYi + 16 + (int)shY), 65, alpha: 8);
+        // Main title text
+        r.DrawText("CATAN", width / 2 + (int)shX, titleYi + (int)shY, 36, (255, 215, 80), anchorX: "center", anchorY: "top", bold: true);
+
+        // ── Premium HUD panel (vertical, top-right) ──
         {
-            int sw = width - 32, sh = 28, sx = 16, sy = 48;
-            r.DrawRect((0, 0, 0), (sx + 2, sy + 2, sw, sh), alpha: 50);
-            r.DrawRect((18, 22, 16), (sx, sy, sw, sh), alpha: 200);
-            r.DrawRect((120, 160, 60), (sx, sy, sw, 3), alpha: 80);
-            r.DrawRect((90, 130, 50), (sx, sy, sw, sh), width: 1, alpha: 150);
-            r.DrawText(subtitle, sx + 12, sy + sh / 2, 13, (210, 220, 190), anchorX: "left", anchorY: "center");
+            int panelW = 140, panelX = width - panelW - 10;
+            int panelY = 50 + (int)shY;
+            string[] segLabels;
+            if (State == "playing")
+            {
+                string turnLabel = _currentTurnSeat is int cts ? SeatLabel(cts) : "—";
+                // Prettify phase and expansion names for display
+                static string Prettify(string s) =>
+                    string.Join(' ', s.Split('_').Select(w =>
+                        w.Length > 0 ? char.ToUpper(w[0]) + w[1..] : w));
+                segLabels = new[]
+                {
+                    $"🗺️ {Prettify(_expansionMode)}",
+                    $"👥 {ActivePlayers.Count} players",
+                    $"🎯 {turnLabel}",
+                    $"📋 {Prettify(_phase)}",
+                };
+            }
+            else
+            {
+                segLabels = new[] { "🗺️ Catan", "📱 Web UI", "👥 Waiting", "🎲 Ready" };
+            }
+            int rowH = 24;
+            int panelH = segLabels.Length * rowH + 10;
+            // Shadow + glass panel
+            r.DrawRect((0, 0, 0), (panelX + 3, panelY + 3, panelW, panelH), alpha: 50);
+            BeveledRect.Draw(r, panelX + (int)shX, panelY, panelW, panelH, (18, 22, 14), bevelSize: 2, alpha: 210);
+            // Gold accent on left edge
+            r.DrawRect((255, 200, 60), (panelX + (int)shX, panelY, 3, panelH), alpha: 100);
+            r.DrawRect((120, 100, 50), (panelX + (int)shX, panelY, panelW, panelH), width: 1, alpha: 120);
+            for (int si = 0; si < segLabels.Length; si++)
+            {
+                int ry = panelY + 5 + si * rowH;
+                if (si > 0)
+                    r.DrawRect((180, 160, 80), (panelX + 8 + (int)shX, ry - 1, panelW - 16, 1), alpha: 40);
+                r.DrawText(segLabels[si], panelX + 10 + (int)shX, ry + rowH / 2, 11, (210, 200, 160), anchorX: "left", anchorY: "center");
+            }
         }
 
         if (State != "playing") return;
 
         RecomputeLayout(width, height);
 
-        int headerH = 54;
+        int headerH = 82; // more space for premium HUD
         int cy0 = (headerH + (height - headerH) / 2);
         int cx0 = width / 2;
         float size = _hexSize;
@@ -968,16 +1217,42 @@ public class CatanGameSharp : BaseGame
         // Sort tiles: water first
         var sortedTiles = _tiles.OrderBy(t => t.Kind == "water" ? 0 : 1).ToList();
 
-        // Compute draw offset from center
+        // Compute draw offset from center (include screen shake)
         var centers = _tiles.Select(t => AxialToPixel(t.Q, t.R, size)).ToList();
         if (centers.Count == 0) return;
         float minX = centers.Min(c => c.x), maxX = centers.Max(c => c.x);
         float minY = centers.Min(c => c.y), maxY = centers.Max(c => c.y);
-        float offX = cx0 - (minX + maxX) / 2f;
-        float offY = cy0 - (minY + maxY) / 2f;
+        float offX = cx0 - (minX + maxX) / 2f + shX;
+        float offY = cy0 - (minY + maxY) / 2f + shY;
         _drawOffX = offX;
         _drawOffY = offY;
         _drawSize = size;
+
+        // (breathing glow removed — was causing a visible rectangle over the background video)
+
+        // ── Corner accents (L-shaped lines) ──
+        {
+            int cornerLen = 30;
+            int m = 8; // margin from board edge
+            int lx = (int)(cx0 - (maxX - minX) * size / 2f) - m;
+            int rx = (int)(cx0 + (maxX - minX) * size / 2f) + m;
+            int ty = (int)(cy0 - (maxY - minY) * size / 2f) - m;
+            int by = (int)(cy0 + (maxY - minY) * size / 2f) + m;
+            var accentCol = (200, 170, 80);
+            int accentA = 50;
+            // Top-left
+            r.DrawRect(accentCol, (lx + (int)shX, ty + (int)shY, cornerLen, 2), alpha: accentA);
+            r.DrawRect(accentCol, (lx + (int)shX, ty + (int)shY, 2, cornerLen), alpha: accentA);
+            // Top-right
+            r.DrawRect(accentCol, (rx - cornerLen + (int)shX, ty + (int)shY, cornerLen, 2), alpha: accentA);
+            r.DrawRect(accentCol, (rx - 2 + (int)shX, ty + (int)shY, 2, cornerLen), alpha: accentA);
+            // Bottom-left
+            r.DrawRect(accentCol, (lx + (int)shX, by - 2 + (int)shY, cornerLen, 2), alpha: accentA);
+            r.DrawRect(accentCol, (lx + (int)shX, by - cornerLen + (int)shY, 2, cornerLen), alpha: accentA);
+            // Bottom-right
+            r.DrawRect(accentCol, (rx - cornerLen + (int)shX, by - 2 + (int)shY, cornerLen, 2), alpha: accentA);
+            r.DrawRect(accentCol, (rx - 2 + (int)shX, by - cornerLen + (int)shY, 2, cornerLen), alpha: accentA);
+        }
 
         // Port lookup
         var portByCoord = new Dictionary<(int, int), string>();
@@ -995,37 +1270,71 @@ public class CatanGameSharp : BaseGame
 
             int alpha = t.Kind != "water" ? 235 : 190;
             var outerHex = HexPoints(tcx, tcy, size * 0.95f);
-            var innerHex = HexPoints(tcx, tcy, size * 0.85f);
-            r.DrawPolygon(dark, outerHex, alpha: alpha);
-            r.DrawPolygon(light, innerHex, alpha: alpha);
-            r.DrawPolygon((15, 18, 22), outerHex, width: 2, alpha: 200);
 
             bool isPort = t.Kind == "water" && portByCoord.ContainsKey((t.Q, t.R));
-            string label = KindEmoji.GetValueOrDefault(t.Kind, "?");
-            if (!isPort || t.Kind != "water")
+            string portKind = isPort ? portByCoord[(t.Q, t.R)] : "";
+
+            // Try to draw tile texture (pre-clipped to hex shape)
+            var tileTex = GetTileTexture(t, isPort, portKind);
+            if (tileTex != null)
             {
-                // Draw emoji above the number circle (shifted up)
-                int emojiY = t.Number != null ? (int)(tcy - size * 0.22) : (int)tcy;
-                int emojiFs = Math.Max(12, (int)(size * 0.38));
-                r.DrawText(label, (int)tcx, emojiY, emojiFs,
-                    (255, 255, 255), anchorX: "center", anchorY: "center");
+                // Texture is square with hex-clipped alpha — draw it as a square
+                // whose side equals the full hex diameter (2 * outerSize) so the
+                // hex inside covers every pixel of the actual hex shape.
+                float outerSize = size * 0.95f;
+                float side = outerSize * 2f; // diameter = full extent of hex
+                int destX = (int)(tcx - side / 2f);
+                int destY = (int)(tcy - side / 2f);
+                int destS = (int)MathF.Ceiling(side);
+                r.DrawTexture(tileTex, new Rectangle(destX, destY, destS, destS), alpha: alpha);
+            }
+            else
+            {
+                // Fallback: solid color polygons
+                var innerHex = HexPoints(tcx, tcy, size * 0.85f);
+                r.DrawPolygon(dark, outerHex, alpha: alpha);
+                r.DrawPolygon(light, innerHex, alpha: alpha);
             }
 
+            // Hex border — thick dark border between hexes
+            r.DrawPolygon((8, 10, 14), outerHex, width: 6, alpha: 240);
+
+            // Number circle centered in the hex (no emoji)
             if (t.Number is int num && t.Kind is not "water" and not "desert" and not "volcano")
             {
-                int numY = (int)(tcy + size * 0.25);
-                r.DrawCircle((245, 235, 210), ((int)tcx, numY), Math.Max(10, (int)(size * 0.26)), alpha: 220);
-                r.DrawText(num.ToString(), (int)tcx, numY, Math.Max(12, (int)(size * 0.32)),
-                    (30, 30, 30), anchorX: "center", anchorY: "center");
+                int circR = Math.Max(12, (int)(size * 0.30));
+                r.DrawCircle((0, 0, 0), ((int)tcx, (int)tcy), circR + 2, alpha: 120); // shadow
+                r.DrawCircle((245, 235, 210), ((int)tcx, (int)tcy), circR, alpha: 235);
+                // Red highlight for 6 and 8
+                var numCol = (num == 6 || num == 8) ? (180, 30, 30) : (30, 30, 30);
+                int numFs = Math.Max(14, (int)(size * 0.38));
+                r.DrawText(num.ToString(), (int)tcx, (int)tcy, numFs,
+                    numCol, anchorX: "center", anchorY: "center", bold: true);
             }
 
-            if (isPort)
+            // Port tiles: no emoji overlay (the port tile texture is self-explanatory)
+        }
+
+        // Pre-compute vertex positions scaled to match hex border (0.95) so indicators/roads/buildings
+        // align exactly with the drawn hex borders rather than extending beyond them.
+        var svx = new float[_vertices.Count];
+        var svy = new float[_vertices.Count];
+        for (int vi = 0; vi < _vertices.Count; vi++)
+        {
+            var vv = _vertices[vi];
+            float ccx = 0, ccy = 0;
+            int nn = vv.AdjacentTiles.Count;
+            if (nn > 0)
             {
-                string pk = portByCoord[(t.Q, t.R)];
-                string portLabel = PortEmoji.GetValueOrDefault(pk, "⚓");
-                r.DrawText(portLabel, (int)tcx, (int)(tcy - size * 0.05), Math.Max(12, (int)(size * 0.35)),
-                    (255, 255, 255), anchorX: "center", anchorY: "center");
+                foreach (int ti in vv.AdjacentTiles)
+                {
+                    var cc = AxialToPixel(_tiles[ti].Q, _tiles[ti].R, 1.0f);
+                    ccx += cc.x; ccy += cc.y;
+                }
+                ccx /= nn; ccy /= nn;
             }
+            svx[vi] = (ccx + (vv.X - ccx) * 0.95f) * size + offX;
+            svy[vi] = (ccy + (vv.Y - ccy) * 0.95f) * size + offY;
         }
 
         // Draw vertex/edge indicators so players can see clickable intersections
@@ -1035,24 +1344,42 @@ public class CatanGameSharp : BaseGame
         {
             foreach (var v in _vertices)
             {
-                float vx = v.X * size + offX, vy = v.Y * size + offY;
-                // Pulsing alpha for visibility
-                int pulseAlpha = 40 + (int)(25 * MathF.Sin((float)(_totalElapsed * 3.0 + v.Id * 0.5)));
-                r.DrawCircle((255, 255, 255), ((int)vx, (int)vy), Math.Max(4, (int)(size * 0.12)), alpha: pulseAlpha);
+                // Skip vertices that already have a building
+                if (_buildings.ContainsKey(v.Id)) continue;
+                float vx = svx[v.Id], vy = svy[v.Id];
+                int pulseAlpha = 100 + (int)(80 * MathF.Sin((float)(_totalElapsed * 3.0 + v.Id * 0.5)));
+                int dotR = Math.Max(6, (int)(size * 0.16));
+                // Dark outline + bright pulsing circle
+                r.DrawCircle((0, 0, 0), ((int)vx, (int)vy), dotR + 2, alpha: pulseAlpha * 60 / 255);
+                r.DrawCircle((255, 220, 80), ((int)vx, (int)vy), dotR, alpha: pulseAlpha);
+                r.DrawCircle((255, 255, 200), ((int)vx, (int)vy), dotR / 2, alpha: pulseAlpha * 80 / 255);
             }
         }
         if (showEdges)
         {
             foreach (var e in _edges)
             {
+                // Skip edges that already have a road
+                if (_roads.ContainsKey(e.Id)) continue;
                 if (e.A < 0 || e.A >= _vertices.Count || e.B < 0 || e.B >= _vertices.Count) continue;
                 var va = _vertices[e.A];
                 var vb = _vertices[e.B];
-                float ax2 = va.X * size + offX, ay2 = va.Y * size + offY;
-                float bx2 = vb.X * size + offX, by2 = vb.Y * size + offY;
-                float mx = (ax2 + bx2) / 2, my = (ay2 + by2) / 2;
-                int pulseAlpha = 30 + (int)(20 * MathF.Sin((float)(_totalElapsed * 3.0 + e.Id * 0.5)));
-                r.DrawCircle((220, 180, 100), ((int)mx, (int)my), Math.Max(3, (int)(size * 0.08)), alpha: pulseAlpha);
+                float ax2 = svx[e.A], ay2 = svy[e.A];
+                float bx2 = svx[e.B], by2 = svy[e.B];
+                int pulseAlpha = 120 + (int)(80 * MathF.Sin((float)(_totalElapsed * 3.0 + e.Id * 0.5)));
+                // Dark outline for contrast
+                int outW = Math.Max(6, (int)(size * 0.20));
+                r.DrawLine((0, 0, 0), ((int)ax2, (int)ay2), ((int)bx2, (int)by2), width: outW + 2, alpha: pulseAlpha * 50 / 255);
+                // Bright gold line
+                r.DrawLine((255, 210, 60), ((int)ax2, (int)ay2), ((int)bx2, (int)by2), width: outW, alpha: pulseAlpha);
+                // Inner bright highlight
+                r.DrawLine((255, 240, 140), ((int)ax2, (int)ay2), ((int)bx2, (int)by2), width: Math.Max(2, outW / 2), alpha: pulseAlpha * 60 / 255);
+                // Endpoint dots
+                int dotR = Math.Max(4, (int)(size * 0.10));
+                r.DrawCircle((0, 0, 0), ((int)ax2, (int)ay2), dotR + 2, alpha: pulseAlpha * 40 / 255);
+                r.DrawCircle((255, 220, 80), ((int)ax2, (int)ay2), dotR, alpha: pulseAlpha);
+                r.DrawCircle((0, 0, 0), ((int)bx2, (int)by2), dotR + 2, alpha: pulseAlpha * 40 / 255);
+                r.DrawCircle((255, 220, 80), ((int)bx2, (int)by2), dotR, alpha: pulseAlpha);
             }
         }
 
@@ -1062,10 +1389,8 @@ public class CatanGameSharp : BaseGame
             if (eid < 0 || eid >= _edges.Count) continue;
             var e = _edges[eid];
             if (e.A < 0 || e.A >= _vertices.Count || e.B < 0 || e.B >= _vertices.Count) continue;
-            var va = _vertices[e.A];
-            var vb = _vertices[e.B];
-            float ax = va.X * size + offX, ay = va.Y * size + offY;
-            float bx = vb.X * size + offX, by = vb.Y * size + offY;
+            float ax = svx[e.A], ay = svy[e.A];
+            float bx = svx[e.B], by = svy[e.B];
             var roadCol = PlayerPalette[owner % PlayerPalette.Length];
             r.DrawLine(roadCol, ((int)ax, (int)ay), ((int)bx, (int)by), width: Math.Max(3, (int)(size * 0.12)));
         }
@@ -1074,8 +1399,7 @@ public class CatanGameSharp : BaseGame
         foreach (var (vid, b) in _buildings)
         {
             if (vid < 0 || vid >= _vertices.Count) continue;
-            var v = _vertices[vid];
-            float bx = v.X * size + offX, by = v.Y * size + offY;
+            float bx = svx[vid], by = svy[vid];
             var bCol = PlayerPalette[b.Owner % PlayerPalette.Length];
 
             // Colored halo behind the emoji
@@ -1112,94 +1436,215 @@ public class CatanGameSharp : BaseGame
             }
         }
 
-        // Dice display (animated)
+        // Dice display (animated) — bottom-right corner
         if (_diceAnim.Visible)
         {
-            _diceAnim.Draw(r, width - 100, 80, _lastRoll is int lr2 ? $"= {lr2}" : "");
+            _diceAnim.Draw(r, width - 100, height - 80, _lastRoll is int lr2 ? $"= {lr2}" : "");
         }
 
-        // ── Event line ──
-        if (!string.IsNullOrEmpty(_lastEvent))
+        // ── Premium event toast (fade in/out) ──
+        if (!string.IsNullOrEmpty(_eventToastText) && _eventToastAlpha > 0.01f)
         {
-            int ew = Math.Max(240, _lastEvent.Length * 8 + 32);
-            int esh = 28;
-            r.DrawRect((0, 0, 0), (14, 84, ew, esh), alpha: 50);
-            r.DrawRect((16, 20, 14), (12, 82, ew, esh), alpha: 190);
-            r.DrawRect((100, 160, 80), (12, 82, ew, 3), alpha: 70);
-            r.DrawRect((80, 130, 60), (12, 82, ew, esh), width: 1, alpha: 130);
-            r.DrawText($"📢 {_lastEvent}", 22, 82 + esh / 2, 11, (200, 215, 200), anchorX: "left", anchorY: "center");
+            int toastAlpha = (int)(220 * _eventToastAlpha);
+            int textAlpha = (int)(255 * _eventToastAlpha);
+            int ew = Math.Max(280, _eventToastText.Length * 8 + 48);
+            int esh = 34;
+            int etx = 12 + (int)shX, ety = 84 + (int)shY;
+            // Shadow
+            r.DrawRect((0, 0, 0), (etx + 3, ety + 3, ew, esh), alpha: (int)(50 * _eventToastAlpha));
+            // Dark glass bg
+            r.DrawRect((14, 18, 10), (etx, ety, ew, esh), alpha: toastAlpha);
+            // Gold accent line
+            r.DrawRect((255, 200, 60), (etx, ety, ew, 3), alpha: (int)(100 * _eventToastAlpha));
+            // Border
+            r.DrawRect((120, 100, 50), (etx, ety, ew, esh), width: 1, alpha: (int)(80 * _eventToastAlpha));
+            // Icon glow
+            r.DrawCircle((255, 200, 60), (etx + 16, ety + esh / 2), 10, alpha: (int)(15 * _eventToastAlpha));
+            // Text
+            r.DrawText($"📢 {_eventToastText}", etx + 12, ety + esh / 2, 12, (230, 220, 180), anchorX: "left", anchorY: "center", alpha: textAlpha);
         }
 
-        // Seat info
-        DrawSeatInfo(r, width, height);
+        // Seat info (premium)
+        DrawSeatInfo(r, width, height, shX, shY);
 
-        // ── Winner overlay ──
+        // ── Spotlight on active player ──
+        if (_currentTurnSeat is int spotSeat)
+        {
+            // Calculate position of active player's panel
+            int spotIdx = ActivePlayers.IndexOf(spotSeat);
+            if (spotIdx >= 0)
+            {
+                int spotY = 120 + spotIdx * 72;
+                _spotlight.DrawAt(r, 14 + 90, spotY + 36, width, height, radius: 60);
+            }
+        }
+
+        // ── Cinematic winner overlay ──
         if (_winner is int wi)
         {
-            r.DrawRect((0, 0, 0), (0, 0, width, height), alpha: 150);
-            int bw = Math.Min(600, width * 55 / 100), bh = 160;
+            // Full-screen dim with vignette edges
+            r.DrawRect((0, 0, 0), (0, 0, width, height), alpha: 170);
+            // Extra dim at edges (vignette effect)
+            r.DrawRect((0, 0, 0), (0, 0, width, height / 5), alpha: 40);
+            r.DrawRect((0, 0, 0), (0, height * 4 / 5, width, height / 5), alpha: 40);
+
+            // Radial burst lines
+            int burstCx = width / 2, burstCy = height / 2;
+            for (int i = 0; i < 16; i++)
+            {
+                float angle = i * MathF.PI * 2f / 16f + (float)(_totalElapsed * 0.2f);
+                int x1 = burstCx + (int)(40 * MathF.Cos(angle));
+                int y1 = burstCy + (int)(40 * MathF.Sin(angle));
+                int x2 = burstCx + (int)(Math.Max(width, height) * 0.5f * MathF.Cos(angle));
+                int y2 = burstCy + (int)(Math.Max(width, height) * 0.5f * MathF.Sin(angle));
+                r.DrawLine((255, 215, 80), (x1, y1), (x2, y2), alpha: 12);
+            }
+
+            // Main beveled panel
+            int bw = Math.Min(600, width * 55 / 100), bh = 200;
             int bxc = width / 2 - bw / 2, byc = height / 2 - bh / 2;
-            r.DrawRect((0, 0, 0), (bxc + 3, byc + 3, bw, bh), alpha: 60);
-            r.DrawRect((10, 10, 18), (bxc, byc, bw, bh), alpha: 230);
-            r.DrawRect((255, 215, 0), (bxc, byc, bw, 4), alpha: 200);
-            r.DrawRect((255, 215, 0), (bxc, byc, bw, bh), width: 3, alpha: 200);
-            int ins = 6;
-            r.DrawRect((255, 215, 0), (bxc + ins, byc + ins, bw - 2 * ins, bh - 2 * ins), width: 1, alpha: 25);
-            r.DrawText($"🏆 Winner: {SeatLabel(wi)}", width / 2, height / 2, 36, (255, 240, 180), anchorX: "center", anchorY: "center", bold: true);
+            SoftShadow.Draw(r, bxc, byc, bw, bh, layers: 6, maxAlpha: 90);
+            BeveledRect.Draw(r, bxc, byc, bw, bh, (18, 22, 14), bevelSize: 5, alpha: 240);
+            // Gold accent line
+            r.DrawRect((255, 215, 80), (bxc, byc, bw, 5), alpha: 220);
+            r.DrawRect((255, 215, 80), (bxc, byc, bw, bh), width: 2, alpha: 180);
+
+            // Trophy emoji with halo
+            int trophyY = byc + 50;
+            r.DrawCircle((255, 215, 80), (width / 2, trophyY), 30, alpha: 20);
+            r.DrawCircle((255, 200, 60), (width / 2, trophyY), 18, alpha: 25);
+            r.DrawText("🏆", width / 2, trophyY, 40, (255, 255, 255), anchorX: "center", anchorY: "center");
+
+            // Winner name (embossed look)
+            int nameY = byc + 100;
+            r.DrawText(SeatLabel(wi), width / 2 + 1, nameY + 2, 32, (0, 0, 0), anchorX: "center", anchorY: "center", bold: true);
+            r.DrawText(SeatLabel(wi), width / 2, nameY, 32, (255, 240, 180), anchorX: "center", anchorY: "center", bold: true);
+
+            // Subtitle
+            r.DrawText("Victory! 10+ points", width / 2, nameY + 36, 16, (200, 190, 150), anchorX: "center", anchorY: "center");
+
+            // Decorative separator lines
+            int sepY = byc + bh - 40;
+            int sepW = bw * 60 / 100;
+            r.DrawRect((255, 215, 80), (width / 2 - sepW / 2, sepY, sepW, 1), alpha: 50);
+            // Corner ornaments
+            int orn = 8;
+            r.DrawRect((255, 215, 80), (bxc + 8, byc + 8, orn, 2), alpha: 70);
+            r.DrawRect((255, 215, 80), (bxc + 8, byc + 8, 2, orn), alpha: 70);
+            r.DrawRect((255, 215, 80), (bxc + bw - 8 - orn, byc + 8, orn, 2), alpha: 70);
+            r.DrawRect((255, 215, 80), (bxc + bw - 10, byc + 8, 2, orn), alpha: 70);
+            r.DrawRect((255, 215, 80), (bxc + 8, byc + bh - 10, orn, 2), alpha: 70);
+            r.DrawRect((255, 215, 80), (bxc + 8, byc + bh - 8 - orn, 2, orn), alpha: 70);
+            r.DrawRect((255, 215, 80), (bxc + bw - 8 - orn, byc + bh - 10, orn, 2), alpha: 70);
+            r.DrawRect((255, 215, 80), (bxc + bw - 10, byc + bh - 8 - orn, 2, orn), alpha: 70);
+
+            // Emoji row
+            string emRow = "🌾🏰🌲🏠⛏️";
+            r.DrawText(emRow, width / 2, byc + bh - 18, 14, (200, 190, 150), anchorX: "center", anchorY: "center");
         }
 
-        // Footer
-        r.DrawText($"Map radius: {_mapRadius}  |  Ports: {_ports.Count}", width - 16, height - 16,
-            11, (190, 190, 190), anchorX: "right", anchorY: "bottom");
+        // Footer (premium style)
+        {
+            int ftY = height - 22;
+            r.DrawRect((0, 0, 0), (0, height - 24, width, 24), alpha: 60);
+            r.DrawRect((255, 200, 60), (0, height - 24, width, 1), alpha: 25);
+            r.DrawText($"Map: {_mapRadius}r  |  Ports: {_ports.Count}  |  Dev deck: {_devDeck.Count}",
+                width - 16, ftY + (int)shY, 10, (170, 165, 140), anchorX: "right", anchorY: "center");
+        }
 
-        // Animations
+        // Animation layers
         _particles.Draw(r);
         foreach (var pr in _pulseRings) pr.Draw(r);
         foreach (var fl in _flashes) fl.Draw(r, width, height);
         foreach (var tp in _textPops) tp.Draw(r);
-        _waveBand.Draw(r, width, height);
-        _heatShimmer.Draw(r, width, height);
-        _vignette.Draw(r, width, height);
+        // (vignette, waveBand, heatShimmer removed — they draw visible rectangles over the background video)
     }
 
-    private void DrawSeatInfo(Renderer r, int w, int h)
+    private void DrawSeatInfo(Renderer r, int w, int h, float shX, float shY)
     {
-        int panelW = 150, panelH = 48;
+        int panelW = 180, panelH = 62;
         int y = 120;
         foreach (var seat in ActivePlayers)
         {
             var pcol = GameConfig.PlayerColors[seat % GameConfig.PlayerColors.Length];
             bool isTurn = _currentTurnSeat == seat;
-            var nameCol = isTurn ? (255, 240, 100) : pcol;
             int vp = VpFor(seat);
-            var border = isTurn ? pcol : (100, 100, 110);
+            int px = 10 + (int)shX, py = y + (int)shY;
 
-            // Turn glow
+            // ── Turn glow aura (3 nested rect layers + corner spots) ──
             if (isTurn)
-                r.DrawRect(border, (10, y - 4, panelW + 8, panelH + 8), width: 2, alpha: 45);
+            {
+                float glowPulse = 0.7f + 0.3f * MathF.Sin((float)(_totalElapsed * 2.5));
+                int glowA = (int)(35 * glowPulse);
+                r.DrawRect(pcol, (px - 6, py - 6, panelW + 12, panelH + 12), alpha: glowA);
+                r.DrawRect(pcol, (px - 4, py - 4, panelW + 8, panelH + 8), alpha: (int)(glowA * 1.2f));
+                r.DrawRect(pcol, (px - 2, py - 2, panelW + 4, panelH + 4), alpha: (int)(glowA * 1.5f));
+                // Corner glow spots
+                int cs = 4;
+                r.DrawCircle(pcol, (px - 2, py - 2), cs, alpha: (int)(25 * glowPulse));
+                r.DrawCircle(pcol, (px + panelW + 2, py - 2), cs, alpha: (int)(25 * glowPulse));
+                r.DrawCircle(pcol, (px - 2, py + panelH + 2), cs, alpha: (int)(25 * glowPulse));
+                r.DrawCircle(pcol, (px + panelW + 2, py + panelH + 2), cs, alpha: (int)(25 * glowPulse));
+            }
 
-            // Panel bg
-            r.DrawRect((0, 0, 0), (16, y + 2, panelW, panelH), alpha: 50);
-            r.DrawRect((16, 18, 24), (14, y, panelW, panelH), alpha: 195);
-            r.DrawRect(pcol, (14, y, panelW, 3), alpha: 80);
-            r.DrawRect(border, (14, y, panelW, panelH), width: isTurn ? 2 : 1, alpha: 170);
-            int ins = 3;
-            r.DrawRect(border, (14 + ins, y + ins, panelW - 2 * ins, panelH - 2 * ins), width: 1, alpha: 16);
+            // ── Soft shadow ──
+            SoftShadow.Draw(r, px, py, panelW, panelH, layers: 3, maxAlpha: 50);
 
-            // Color dot + name
-            r.DrawCircle(pcol, (24, y + 14), 4, alpha: 200);
-            r.DrawText(PlayerName(seat), 34, y + 8, 11, nameCol, anchorX: "left", anchorY: "top", bold: isTurn);
+            // ── Beveled panel ──
+            BeveledRect.Draw(r, px, py, panelW, panelH, (22, 26, 18), bevelSize: 3, alpha: isTurn ? 230 : 195);
 
-            // VP badge + resource count
-            string info = $"🏆 VP:{vp}";
+            // ── Player color accent band (3 layers fading) ──
+            r.DrawRect(pcol, (px, py, panelW, 4), alpha: 120);
+            r.DrawRect(pcol, (px, py + 4, panelW, 2), alpha: 60);
+            r.DrawRect(pcol, (px, py + 6, panelW, 1), alpha: 25);
+
+            // ── Border ──
+            var borderCol = isTurn ? pcol : (90, 90, 80);
+            r.DrawRect(borderCol, (px, py, panelW, panelH), width: isTurn ? 2 : 1, alpha: 150);
+
+            // ── Name pill (beveled sub-panel) ──
+            int pillW = panelW - 16, pillH = 18;
+            int pillX = px + 8, pillY = py + 10;
+            BeveledRect.Draw(r, pillX, pillY, pillW, pillH, (30, 34, 26), bevelSize: 2, alpha: 180);
+            // Color dot in name pill
+            r.DrawCircle((0, 0, 0), (pillX + 10, pillY + pillH / 2), 5, alpha: 200);
+            r.DrawCircle(pcol, (pillX + 10, pillY + pillH / 2), 4, alpha: 230);
+            // Player name
+            var nameCol = isTurn ? (255, 240, 100) : (220, 215, 190);
+            r.DrawText(PlayerName(seat), pillX + 20, pillY + pillH / 2, 12, nameCol, anchorX: "left", anchorY: "center", bold: isTurn);
+
+            // ── VP badge (embossed) ──
+            int badgeW = 48, badgeH = 18;
+            int badgeX = px + panelW - badgeW - 8, badgeY = py + 10;
+            BeveledRect.Draw(r, badgeX, badgeY, badgeW, badgeH, (40, 38, 28), bevelSize: 2, alpha: 200);
+            r.DrawText($"🏆{vp}", badgeX + badgeW / 2, badgeY + badgeH / 2, 11, (255, 230, 130), anchorX: "center", anchorY: "center", bold: true);
+
+            // ── Resource row (individual emoji per resource) ──
+            int resY = py + 34;
+            int resX = px + 8;
             if (_res.TryGetValue(seat, out var res))
             {
-                int total = res.Values.Sum();
-                info += $"  🃏 {total}";
+                string[] resKeys = { "wood", "brick", "sheep", "wheat", "ore" };
+                string[] resEmoji = { "🌲", "🧱", "🐑", "🌾", "⛏️" };
+                for (int ri = 0; ri < resKeys.Length; ri++)
+                {
+                    int cnt = res.GetValueOrDefault(resKeys[ri]);
+                    r.DrawText(resEmoji[ri], resX + ri * 32, resY + 10, 10, (255, 255, 255), anchorX: "center", anchorY: "center");
+                    r.DrawText(cnt.ToString(), resX + ri * 32 + 12, resY + 10, 9, (190, 185, 160), anchorX: "center", anchorY: "center");
+                }
             }
-            r.DrawText(info, 24, y + 28, 10, (180, 190, 170), anchorX: "left", anchorY: "top");
 
-            y += panelH + 6;
+            // Awards badges
+            int awardX = px + panelW - 8;
+            if (_largestArmyHolder == seat)
+            {
+                r.DrawText("⚔️", awardX, resY + 10, 10, (255, 255, 255), anchorX: "right", anchorY: "center");
+                awardX -= 18;
+            }
+            if (_longestRoadHolder == seat)
+                r.DrawText("🛤️", awardX, resY + 10, 10, (255, 255, 255), anchorX: "right", anchorY: "center");
+
+            y += panelH + 10;
         }
     }
 
@@ -1210,6 +1655,10 @@ public class CatanGameSharp : BaseGame
     private string SeatLabel(int seat) => PlayerName(seat);
     private bool IsMyTurn(int seat) => _currentTurnSeat is int ct && ct == seat;
     private static bool IsResource(string? s) => s is "wood" or "brick" or "sheep" or "wheat" or "ore";
+
+    private void SetEvent(string msg) { _lastEvent = msg; _eventToastText = msg; _eventToastTime = _totalElapsed; _eventToastAlpha = 0f; }
+    private void ShakeScreen(float duration = 0.4f) { _screenShakeTimer = duration; }
+    private string _prevLastEvent = "";
 
     private static Dictionary<string, int> NewResDict() =>
         new() { ["wood"] = 0, ["brick"] = 0, ["sheep"] = 0, ["wheat"] = 0, ["ore"] = 0 };

@@ -21,6 +21,7 @@
     <None Include="Content\UnstableUnicorns\**\*" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Content\ExplodingKittens\**\*" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Content\Monopoly\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Content\Catan\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
