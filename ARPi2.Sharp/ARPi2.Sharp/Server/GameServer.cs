@@ -280,18 +280,9 @@ public class GameServer
     }
 
     /// <summary>
-    /// Detect the local LAN IP via UDP socket trick.
+    /// Detect the local LAN IP, preferring physical adapters.
     /// </summary>
-    private static string? GetLanIp()
-    {
-        try
-        {
-            using var s = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-            s.Connect("8.8.8.8", 80);
-            return (s.LocalEndPoint as IPEndPoint)?.Address.ToString();
-        }
-        catch { return null; }
-    }
+    private static string? GetLanIp() => QRCodeRenderer.FindBestLanIp();
 
     //  HTTP static file server
     // ═══════════════════════════════════════════════════════════════
@@ -1103,15 +1094,9 @@ public class GameServer
             return _connectLinesCache;
 
         var lines = new List<string>();
-        try
-        {
-            using var s = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-            s.Connect("8.8.8.8", 80);
-            string? localIp = (s.LocalEndPoint as IPEndPoint)?.Address.ToString();
-            if (!string.IsNullOrEmpty(localIp))
-                lines.Add($"Local Web UI:  http://{localIp}:{GameConfig.HttpPort}");
-        }
-        catch { }
+        string? lanIp = QRCodeRenderer.FindBestLanIp();
+        if (!string.IsNullOrEmpty(lanIp))
+            lines.Add($"Local Web UI:  http://{lanIp}:{GameConfig.HttpPort}");
         if (lines.Count == 0)
             lines.Add($"Web UI:  http://0.0.0.0:{GameConfig.HttpPort}");
 

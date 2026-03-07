@@ -26,19 +26,83 @@ public static class QRCodeRenderer
 
     /// <summary>
     /// Detect the local LAN IP and build the join URL.
+    /// Prefers physical adapters with common LAN prefixes (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
+    /// over virtual/VPN/Docker interfaces that can report misleading IPs.
     /// </summary>
     public static string GetJoinUrl()
     {
+        string? bestIp = FindBestLanIp();
+        if (!string.IsNullOrEmpty(bestIp))
+            return $"http://{bestIp}:{GameConfig.HttpPort}";
+        return $"http://localhost:{GameConfig.HttpPort}";
+    }
+
+    /// <summary>
+    /// Enumerate network interfaces and pick the best LAN IPv4 address.
+    /// Skips loopback, virtual adapters (Hyper-V, Docker, WSL, VPN tunnels),
+    /// and prefers 192.168.x.x over 10.x.x.x to avoid Docker/VPN ranges.
+    /// </summary>
+    public static string? FindBestLanIp()
+    {
+        // Virtual adapter keywords to deprioritise
+        var virtualKeywords = new[] { "virtual", "hyper-v", "docker", "vethernet", "wsl", "vmware", "vmnet", "vbox", "tap-", "tun" };
+
+        string? best = null;
+        int bestScore = -1;
+
         try
         {
-            using var s = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-            s.Connect("8.8.8.8", 80);
-            string? localIp = (s.LocalEndPoint as IPEndPoint)?.Address.ToString();
-            if (!string.IsNullOrEmpty(localIp))
-                return $"http://{localIp}:{GameConfig.HttpPort}";
+            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.OperationalStatus != OperationalStatus.Up) continue;
+                if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
+
+                string niName = ni.Name.ToLowerInvariant();
+                string niDesc = ni.Description.ToLowerInvariant();
+                bool isVirtual = virtualKeywords.Any(k => niName.Contains(k) || niDesc.Contains(k));
+
+                foreach (var addr in ni.GetIPProperties().UnicastAddresses)
+                {
+                    if (addr.Address.AddressFamily != AddressFamily.InterNetwork) continue;
+                    string ip = addr.Address.ToString();
+                    if (ip.StartsWith("127.") || ip.StartsWith("169.254.")) continue;
+                    if (ip.StartsWith("25.")) continue; // Hamachi — handled separately
+
+                    // Score: higher = better.  Physical 192.168.x.x is best.
+                    int score = 0;
+                    if (ip.StartsWith("192.168.")) score = 100;
+                    else if (ip.StartsWith("172.")) score = 50;   // could be LAN (172.16-31)
+                    else if (ip.StartsWith("10.")) score = 30;    // could be LAN or Docker
+
+                    if (isVirtual) score -= 200; // strongly deprioritise virtual adapters
+
+                    // Prefer Wi-Fi / Ethernet types
+                    if (ni.NetworkInterfaceType is NetworkInterfaceType.Wireless80211 or NetworkInterfaceType.Ethernet)
+                        score += 10;
+
+                    if (score > bestScore)
+                    {
+                        bestScore = score;
+                        best = ip;
+                    }
+                }
+            }
         }
         catch { }
-        return $"http://localhost:{GameConfig.HttpPort}";
+
+        // Fallback: UDP connect trick (may still pick a virtual adapter, but better than nothing)
+        if (best == null)
+        {
+            try
+            {
+                using var s = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+                s.Connect("8.8.8.8", 80);
+                best = (s.LocalEndPoint as IPEndPoint)?.Address.ToString();
+            }
+            catch { }
+        }
+
+        return best;
     }
 
     /// <summary>

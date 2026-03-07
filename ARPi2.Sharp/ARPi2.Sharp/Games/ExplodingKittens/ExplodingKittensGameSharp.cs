@@ -121,11 +121,21 @@ public class ExplodingKittensGameSharp : BaseGame
 
     private static readonly Dictionary<string, string> CatPngNames = new()
     {
+        // Cat cards
         ["TACO"] = "Tacocat.png",
         ["CATER"] = "Catermelon.png",
         ["HAIRY"] = "Hairy Potato Cat.png",
         ["BEARD"] = "Beard Cat.png",
         ["RAINBOW"] = "Rainbow-Ralphing Cat.png",
+        // Action / special cards
+        ["ATK"] = "Attack.png",
+        ["DEF"] = "Defuse.png",
+        ["EK"] = "Exploding Kitten.png",
+        ["FAV"] = "Favor.png",
+        ["NOPE"] = "Nope.png",
+        ["FUT"] = "See The Future.png",
+        ["SHUF"] = "Shuffle.png",
+        ["SKIP"] = "Skip.png",
     };
 
     public ExplodingKittensGameSharp(int w, int h, Renderer renderer) : base(w, h, renderer)
@@ -472,11 +482,15 @@ public class ExplodingKittensGameSharp : BaseGame
 
         bool isTurn = seat == CurrentTurnSeat && _winner == null;
         bool canNope = _nopeActive && seat != _nopeActor && HasCard(seat, "NOPE");
+        // Block hand interaction during special phases
+        bool blocked = _awaitingCatStealTarget || _awaitingFavorTarget || (_nopeActive && seat == _nopeActor);
 
         var yourHand = hand.Select((c, i) =>
         {
             bool playable;
             if (_winner != null)
+                playable = false;
+            else if (blocked)
                 playable = false;
             else if (canNope)
                 playable = c.Kind == "NOPE";

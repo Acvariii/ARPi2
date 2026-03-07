@@ -312,53 +312,7 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
         </Stack>
       </Paper>
 
-      {/* ──── YOUR HAND ──── */}
-      <Typography
-        variant="subtitle1"
-        gutterBottom
-        align="center"
-        sx={{ fontWeight: 800, color: EK2_GOLD, letterSpacing: '0.1em', fontSize: '0.95rem' }}
-      >
-        YOUR HAND
-      </Typography>
-
-      {(ek.your_hand || []).length ? (
-        <Paper
-          variant="outlined"
-          sx={{
-            p: 1.25,
-            mb: 2,
-            bgcolor: alpha(EK2_PANEL, 0.9),
-            borderColor: typeof mySeat === 'number' && mySeat >= 0 ? playerColors[mySeat % playerColors.length] : alpha(EK2_ORANGE, 0.3),
-            borderWidth: 2,
-          }}
-        >
-          <Box
-            sx={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(78px, 78px))',
-              gap: 1,
-              alignItems: 'start',
-              justifyContent: 'center',
-            }}
-          >
-            {(ek.your_hand || []).map((c) =>
-              renderCardTile({
-                key: c.idx,
-                text: c.text,
-                enabled: !!c.playable,
-                onClick: c.playable ? () => sendClick(`ek_play:${c.idx}`) : undefined,
-              })
-            )}
-          </Box>
-        </Paper>
-      ) : (
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2, fontStyle: 'italic' }} align="center">
-          No cards yet.
-        </Typography>
-      )}
-
-      {/* ──── ACTIONS ──── */}
+      {/* ──── ACTIONS (steal / favor / nope / draw) ──── */}
       {(!snapshot.popup?.active && (!!ctrlFavorTargets.length || !!ctrlCatTargets.length || !!ctrlNope || !!ctrlDraw || !!ek.awaiting_favor_target || !!ek.awaiting_cat_steal)) && (
         <>
           <Typography
@@ -375,7 +329,9 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
               p: 1.25,
               mb: 2,
               bgcolor: alpha(EK2_PANEL, 0.9),
-              borderColor: alpha(EK2_ORANGE, 0.3),
+              borderColor: (!!ctrlCatTargets.length || !!ek.awaiting_cat_steal) ? '#ffab00'
+                : (!!ctrlFavorTargets.length || !!ek.awaiting_favor_target) ? '#ff80ab'
+                  : alpha(EK2_ORANGE, 0.3),
               borderWidth: 2,
             }}
           >
@@ -456,6 +412,52 @@ export default function ExplodingKittensPanel({ snapshot, seatLabel, send, playe
             )}
           </Paper>
         </>
+      )}
+
+      {/* ──── YOUR HAND ──── */}
+      <Typography
+        variant="subtitle1"
+        gutterBottom
+        align="center"
+        sx={{ fontWeight: 800, color: EK2_GOLD, letterSpacing: '0.1em', fontSize: '0.95rem' }}
+      >
+        YOUR HAND
+      </Typography>
+
+      {(ek.your_hand || []).length ? (
+        <Paper
+          variant="outlined"
+          sx={{
+            p: 1.25,
+            mb: 2,
+            bgcolor: alpha(EK2_PANEL, 0.9),
+            borderColor: typeof mySeat === 'number' && mySeat >= 0 ? playerColors[mySeat % playerColors.length] : alpha(EK2_ORANGE, 0.3),
+            borderWidth: 2,
+          }}
+        >
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(78px, 78px))',
+              gap: 1,
+              alignItems: 'start',
+              justifyContent: 'center',
+            }}
+          >
+            {(ek.your_hand || []).map((c) =>
+              renderCardTile({
+                key: c.idx,
+                text: c.text,
+                enabled: !!c.playable,
+                onClick: c.playable ? () => sendClick(`ek_play:${c.idx}`) : undefined,
+              })
+            )}
+          </Box>
+        </Paper>
+      ) : (
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2, fontStyle: 'italic' }} align="center">
+          No cards yet.
+        </Typography>
       )}
 
       {/* ──── PLAYERS ──── */}
