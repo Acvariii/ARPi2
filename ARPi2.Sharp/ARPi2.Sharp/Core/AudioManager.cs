@@ -17,7 +17,7 @@ public class AudioManager : IDisposable
     private WaveOutEvent? _bgPlayer;
     private AudioFileReader? _bgReader;
     private string? _bgTrack;
-    private float _bgVolume = 0.35f;
+    private float _bgVolume = 1.0f;
     private float _sfxVolume = 0.5f;
     private bool _musicMuted;
 
@@ -103,7 +103,7 @@ public class AudioManager : IDisposable
 
         try
         {
-            _bgReader = new AudioFileReader(path) { Volume = _bgVolume };
+            _bgReader = new AudioFileReader(path) { Volume = EffectiveVolume };
             var loop = new LoopStream(_bgReader);
             _bgPlayer = new WaveOutEvent();
             _bgPlayer.Init(loop);

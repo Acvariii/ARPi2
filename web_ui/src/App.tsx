@@ -370,7 +370,7 @@ export default function App(): React.ReactElement {
   const audio = snapshot?.audio ?? null;
   // Always show audio controls when there is a snapshot (use safe defaults)
   const showAudio = !!snapshot;
-  const audioVolume = audio?.volume ?? 35;
+  const audioVolume = audio?.volume ?? 100;
   const audioMuted = audio?.music_muted ?? false;
   const audioVotedMute = audio?.you_voted_mute ?? false;
   const audioMuteVotes = audio?.mute_votes ?? 0;
