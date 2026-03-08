@@ -4,6 +4,7 @@
         "npx tsc": true,
         "dotnet add": true,
         "ForEach-Object": true,
-        "Group-Object": true
+        "Group-Object": true,
+        "npm run build": true
     }
 }

@@ -86,7 +86,8 @@ public static class CardRendering
     public static void DrawUnoCard(Renderer r,
         (int x, int y, int w, int h) rect,
         string? color, string value,
-        (int R, int G, int B) faceRgb)
+        (int R, int G, int B) faceRgb,
+        Texture2D? illustration = null)
     {
         int x2 = rect.x, y2 = rect.y, w2 = rect.w, h2 = rect.h;
         int cx = x2 + w2 / 2, cy = y2 + h2 / 2;
@@ -94,6 +95,15 @@ public static class CardRendering
 
         // Card shadow
         r.DrawRect((0, 0, 0), (x2 + 3, y2 + 3, w2, h2), alpha: 60);
+
+        // If we have a PNG card image, render it instead of procedural art
+        if (illustration != null)
+        {
+            r.DrawTexture(illustration, new Rectangle(x2, y2, w2, h2));
+            // Card border
+            r.DrawRect((20, 20, 25), (x2, y2, w2, h2), width: 2, alpha: 220);
+            return;
+        }
 
         if (isWild)
         {

@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using Microsoft.Xna.Framework.Graphics;
+using SkiaSharp;
 using ARPi2.Sharp.Core;
 
 namespace ARPi2.Sharp.Games.Uno;
@@ -76,10 +79,71 @@ public class UnoGameSharp : BaseGame
     private int? _animPrevWinner;
     private double _animFwTimer;
 
+    // PNG card art cache
+    private static readonly string UnoCardArtRoot = Path.Combine(
+        AppDomain.CurrentDomain.BaseDirectory, "Content", "Uno", "Cards");
+    private readonly Dictionary<string, Texture2D?> _cardTextures = new();
+
+    private static readonly Dictionary<string, string> ColorNames = new()
+    {
+        ["R"] = "red", ["G"] = "green", ["B"] = "blue", ["Y"] = "yellow",
+    };
+
+    private static readonly Dictionary<string, string> ValueNames = new()
+    {
+        ["0"] = "zero", ["1"] = "one", ["2"] = "two", ["3"] = "three", ["4"] = "four",
+        ["5"] = "five", ["6"] = "six", ["7"] = "seven", ["8"] = "eight", ["9"] = "nine",
+        ["skip"] = "skip", ["reverse"] = "reverse", ["draw2"] = "draw_two",
+        ["wild"] = "wild", ["wild_draw4"] = "wild_draw_four",
+    };
+
     public UnoGameSharp(int w, int h, Renderer renderer) : base(w, h, renderer)
     {
         _ambient = AmbientSystem.ForTheme("uno", w, h);
         _starfield = Starfield.ForTheme("uno", w, h);
+    }
+
+    // ─── PNG card art loader ───────────────────────────────────
+    private Texture2D? GetCardTexture(UnoCard card)
+    {
+        // Build a cache key from color + value
+        string key = card.Value is "wild" or "wild_draw4"
+            ? card.Value
+            : $"{card.Color}_{card.Value}";
+
+        if (_cardTextures.TryGetValue(key, out var cached)) return cached;
+
+        // Build filename
+        string? filename = null;
+        if (card.Value is "wild" or "wild_draw4")
+        {
+            if (ValueNames.TryGetValue(card.Value, out var vn))
+                filename = $"{vn}.png";
+        }
+        else if (card.Color != null)
+        {
+            if (ColorNames.TryGetValue(card.Color, out var cn) &&
+                ValueNames.TryGetValue(card.Value, out var vn))
+                filename = $"{cn}_{vn}.png";
+        }
+
+        Texture2D? tex = null;
+        if (filename != null)
+        {
+            string pngPath = Path.Combine(UnoCardArtRoot, filename);
+            if (File.Exists(pngPath))
+            {
+                try
+                {
+                    using var bmp = SKBitmap.Decode(pngPath);
+                    if (bmp != null)
+                        tex = Renderer.TextureFromSkia(bmp);
+                }
+                catch { /* fall back to procedural art */ }
+            }
+        }
+        _cardTextures[key] = tex;
+        return tex;
     }
 
     // ─── Top card & current turn ───────────────────────────────
@@ -785,7 +849,8 @@ public class UnoGameSharp : BaseGame
         if (TopCard != null)
         {
             var faceCol = TopCard.Value is "wild" or "wild_draw4" ? (120, 120, 120) : ColorRgb(TopCard.Color);
-            CardRendering.DrawUnoCard(r, discRect, TopCard.Color, TopCard.Value, faceCol);
+            var cardTex = GetCardTexture(TopCard);
+            CardRendering.DrawUnoCard(r, discRect, TopCard.Color, TopCard.Value, faceCol, illustration: cardTex);
         }
         else
         {

@@ -9,6 +9,7 @@ import {
   Stack,
   Typography,
 } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import type { Snapshot } from '../../types';
 import GameBanner from '../../components/GameBanner';
 
@@ -60,6 +61,15 @@ function getColor(prop: { idx: number; color?: string | null; group?: string | n
 
 /* ─── Token emojis matching the C# backend ──────────────────────── */
 const TOKEN_EMOJIS = ['🎩', '🚗', '🐕', '👢', '🚢', '🔔', '🎲', '⭐'];
+
+/* ─── Monopoly premium theme ───────────────────────────────────── */
+const M_RED = '#B71C1C';
+const M_GOLD = '#8B6914';
+const M_GREEN = '#1B5E20';
+const M_DARK = '#fff';
+const M_PANEL = '#fff';
+const M_ACCENT = '#5D4215';
+const M_BORDER = '#C8B898';
 
 /* ─── Dice face component ───────────────────────────────────────── */
 const DICE_DOTS: Record<number, [number, number][]> = {
@@ -539,6 +549,7 @@ export default function MonopolyPanel({ snapshot, seatLabel, send, playerColors 
   const turnSeat = typeof mono.current_turn_seat === 'number' ? mono.current_turn_seat : null;
   const popup = snapshot.popup;
   const popupActive = !!popup?.active;
+  const actionPrompt = mono.action_prompt as { type?: string; property_name?: string; price?: number; player_money?: number; current_bid?: number; min_bid?: number; high_bidder?: string | null } | null;
 
   /* ── Sorted players (current turn first, then by index) ── */
   const sortedPlayers = useMemo(() => {
@@ -566,8 +577,8 @@ export default function MonopolyPanel({ snapshot, seatLabel, send, playerColors 
 
       {/* ── Free Parking Pot ── */}
       {(mono.free_parking_pot ?? 0) > 0 && (
-        <Paper variant="outlined" sx={{ p: 0.75, textAlign: 'center', bgcolor: '#1B5E2018', borderColor: '#4CAF50' }}>
-          <Typography variant="caption" sx={{ fontWeight: 700, color: '#4CAF50' }}>
+        <Paper variant="outlined" sx={{ p: 0.75, textAlign: 'center', bgcolor: alpha(M_GREEN, 0.12), borderColor: alpha(M_GREEN, 0.5) }}>
+          <Typography variant="caption" sx={{ fontWeight: 700, color: '#2E7D32' }}>
             🅿️ Free Parking Pot: <b>${(mono.free_parking_pot ?? 0).toLocaleString()}</b>
           </Typography>
         </Paper>
@@ -578,9 +589,20 @@ export default function MonopolyPanel({ snapshot, seatLabel, send, playerColors 
         variant="outlined"
         sx={{
           p: 1.25,
-          borderColor: turnSeat !== null ? playerColors[turnSeat % playerColors.length] : '#555',
+          borderColor: turnSeat !== null ? playerColors[turnSeat % playerColors.length] : alpha(M_BORDER, 0.5),
           borderWidth: 2,
-          bgcolor: turnSeat !== null ? `${playerColors[turnSeat % playerColors.length]}15` : 'background.paper',
+          bgcolor: M_PANEL,
+          position: 'relative',
+          overflow: 'hidden',
+          '&::before': {
+            content: '""',
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 3,
+            background: `linear-gradient(90deg, ${M_RED}, ${M_GOLD}, ${M_RED})`,
+          },
         }}
       >
         <Stack direction="row" justifyContent="center" alignItems="center" spacing={2}>
@@ -607,31 +629,179 @@ export default function MonopolyPanel({ snapshot, seatLabel, send, playerColors 
       )}
 
       {/* ── Action buttons (only when no popup) ── */}
-      {!!snapshot.panel_buttons?.length && !popupActive && (
-        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-          {snapshot.panel_buttons.map((b, bIdx) => (
-            <Button
-              key={b.id}
-              variant="contained"
-              size="medium"
-              disabled={!b.enabled}
-              onClick={() => send({ type: 'click_button', id: b.id })}
-              sx={{
-                flex: '1 1 auto',
-                minWidth: 100,
-                fontWeight: 700,
-                fontSize: '0.85rem',
-                borderRadius: 2,
-                textTransform: 'none',
-                animation: `bounceIn 0.35s ease-out ${bIdx * 0.05}s both`,
-              }}
-            >
-              {b.id === 'action' && '🎲 '}{b.id === 'trade' && '🤝 '}{b.id === 'build' && '🏗️ '}{b.id === 'mortgage' && '📜 '}
-              {b.text || b.id}
-            </Button>
-          ))}
-        </Stack>
-      )}
+      {!!snapshot.panel_buttons?.length && !popupActive && (() => {
+        const hasPopupBtns = snapshot.panel_buttons.some(b => b.id.startsWith('popup_'));
+        if (hasPopupBtns && actionPrompt?.type === 'buy') {
+          /* ── Buy prompt: "Property Available!" with price + Buy/Pass ── */
+          const buyBtn = snapshot.panel_buttons.find(b => b.id === 'popup_0');
+          const passBtn = snapshot.panel_buttons.find(b => b.id === 'popup_1');
+          return (
+            <Paper variant="outlined" sx={{ p: 1.5, bgcolor: M_PANEL, borderColor: '#4CAF50', borderWidth: 2 }}>
+              <Typography variant="h6" align="center" sx={{ fontWeight: 900, mb: 0.5, color: '#2E7D32' }}>
+                🏠 Property Available!
+              </Typography>
+              <Typography align="center" sx={{ fontWeight: 700, fontSize: '1rem', color: '#333', mb: 0.25 }}>
+                {actionPrompt.property_name}
+              </Typography>
+              <Typography align="center" sx={{ fontWeight: 800, fontSize: '1.1rem', color: M_GOLD, mb: 1 }}>
+                💰 ${actionPrompt.price}
+              </Typography>
+              <Stack direction="row" spacing={1.5} justifyContent="center">
+                {buyBtn && (
+                  <Button
+                    variant="contained"
+                    size="large"
+                    disabled={!buyBtn.enabled}
+                    onClick={() => send({ type: 'click_button', id: buyBtn.id })}
+                    sx={{ fontWeight: 900, minWidth: 120, bgcolor: '#4CAF50', '&:hover': { bgcolor: '#388E3C' } }}
+                  >
+                    {buyBtn.text || 'Buy'}
+                  </Button>
+                )}
+                {passBtn && (
+                  <Button
+                    variant="contained"
+                    size="large"
+                    disabled={!passBtn.enabled}
+                    onClick={() => send({ type: 'click_button', id: passBtn.id })}
+                    sx={{ fontWeight: 900, minWidth: 120, bgcolor: '#D32F2F', '&:hover': { bgcolor: '#B71C1C' } }}
+                  >
+                    {passBtn.text || 'Pass'}
+                  </Button>
+                )}
+              </Stack>
+            </Paper>
+          );
+        }
+        if (hasPopupBtns && actionPrompt?.type === 'auction') {
+          /* ── Auction prompt: property name, bid info, Bid/Pass ── */
+          const bidBtn = snapshot.panel_buttons.find(b => b.id === 'popup_0');
+          const passBtn = snapshot.panel_buttons.find(b => b.id === 'popup_1');
+          return (
+            <Paper variant="outlined" sx={{ p: 1.5, bgcolor: M_PANEL, borderColor: '#FF9800', borderWidth: 2 }}>
+              <Typography variant="h6" align="center" sx={{ fontWeight: 900, mb: 0.5, color: '#E65100' }}>
+                🔨 Auction
+              </Typography>
+              <Typography align="center" sx={{ fontWeight: 700, fontSize: '1rem', color: '#333', mb: 0.25 }}>
+                {actionPrompt.property_name}
+              </Typography>
+              {actionPrompt.current_bid != null && actionPrompt.current_bid > 0 ? (
+                <Typography align="center" sx={{ fontWeight: 700, fontSize: '0.9rem', color: '#555', mb: 0.25 }}>
+                  High bid: ${actionPrompt.current_bid}{actionPrompt.high_bidder ? ` (${actionPrompt.high_bidder})` : ''}
+                </Typography>
+              ) : (
+                <Typography align="center" sx={{ fontWeight: 700, fontSize: '0.9rem', color: '#999', mb: 0.25 }}>
+                  No bids yet
+                </Typography>
+              )}
+              <Typography align="center" sx={{ fontWeight: 800, fontSize: '1rem', color: M_GOLD, mb: 1 }}>
+                Min bid: ${actionPrompt.min_bid}
+              </Typography>
+              <Stack direction="row" spacing={1.5} justifyContent="center">
+                {bidBtn && (
+                  <Button
+                    variant="contained"
+                    size="large"
+                    disabled={!bidBtn.enabled}
+                    onClick={() => send({ type: 'click_button', id: bidBtn.id })}
+                    sx={{ fontWeight: 900, minWidth: 120, bgcolor: '#4CAF50', '&:hover': { bgcolor: '#388E3C' } }}
+                  >
+                    {bidBtn.text || 'Bid'}
+                  </Button>
+                )}
+                {passBtn && (
+                  <Button
+                    variant="contained"
+                    size="large"
+                    disabled={!passBtn.enabled}
+                    onClick={() => send({ type: 'click_button', id: passBtn.id })}
+                    sx={{ fontWeight: 900, minWidth: 120, bgcolor: '#D32F2F', '&:hover': { bgcolor: '#B71C1C' } }}
+                  >
+                    {passBtn.text || 'Pass'}
+                  </Button>
+                )}
+              </Stack>
+            </Paper>
+          );
+        }
+        if (hasPopupBtns) {
+          /* ── Fallback for other popup buttons ── */
+          const buyBtn = snapshot.panel_buttons.find(b => b.id === 'popup_0');
+          const passBtn = snapshot.panel_buttons.find(b => b.id === 'popup_1');
+          return (
+            <Paper variant="outlined" sx={{ p: 1.5, bgcolor: M_PANEL, borderColor: '#4CAF50', borderWidth: 2 }}>
+              <Typography variant="h6" align="center" sx={{ fontWeight: 900, mb: 1.5, color: '#2E7D32' }}>
+                🏠 Property Available!
+              </Typography>
+              <Stack direction="row" spacing={1.5} justifyContent="center">
+                {buyBtn && (
+                  <Button
+                    variant="contained"
+                    size="large"
+                    disabled={!buyBtn.enabled}
+                    onClick={() => send({ type: 'click_button', id: buyBtn.id })}
+                    sx={{ fontWeight: 900, minWidth: 120, bgcolor: '#4CAF50', '&:hover': { bgcolor: '#388E3C' } }}
+                  >
+                    {buyBtn.text || 'Buy'}
+                  </Button>
+                )}
+                {passBtn && (
+                  <Button
+                    variant="contained"
+                    size="large"
+                    disabled={!passBtn.enabled}
+                    onClick={() => send({ type: 'click_button', id: passBtn.id })}
+                    sx={{ fontWeight: 900, minWidth: 120, bgcolor: '#D32F2F', '&:hover': { bgcolor: '#B71C1C' } }}
+                  >
+                    {passBtn.text || 'Pass'}
+                  </Button>
+                )}
+              </Stack>
+            </Paper>
+          );
+        }
+        /* ── Normal: Roll / Deeds / Trade in one row ── */
+        return (
+          <Paper variant="outlined" sx={{ p: 1, bgcolor: M_PANEL, borderColor: alpha(M_BORDER, 0.6) }}>
+            <Stack direction="row" spacing={1} justifyContent="center">
+              {snapshot.panel_buttons.map((b) => {
+                const isRoll = b.id === 'action';
+                return (
+                  <Button
+                    key={b.id}
+                    variant={isRoll ? 'contained' : 'outlined'}
+                    size="medium"
+                    disabled={!b.enabled}
+                    onClick={() => send({ type: 'click_button', id: b.id })}
+                    sx={{
+                      flex: 1,
+                      minHeight: 40,
+                      fontWeight: 800,
+                      fontSize: '0.85rem',
+                      borderRadius: 2,
+                      textTransform: 'none',
+                      bgcolor: isRoll ? M_RED : 'transparent',
+                      color: isRoll ? '#fff' : '#3E2723',
+                      borderColor: isRoll ? M_RED : alpha(M_BORDER, 0.8),
+                      '&:hover': {
+                        bgcolor: isRoll ? '#D32F2F' : alpha('#D7CCC8', 0.5),
+                        borderColor: '#8D6E63',
+                      },
+                      '&.Mui-disabled': {
+                        color: alpha('#999', 0.5),
+                        borderColor: alpha(M_BORDER, 0.3),
+                      },
+                    }}
+                  >
+                    {b.id === 'action' && '🎲 '}{b.id === 'props' && '📜 '}{b.id === 'build' && '🤝 '}
+                    {b.text || b.id}
+                  </Button>
+                );
+              })}
+            </Stack>
+          </Paper>
+        );
+      })()}
 
       {/* ── Players ── */}
       {sortedPlayers.length > 0 && (
@@ -649,8 +819,8 @@ export default function MonopolyPanel({ snapshot, seatLabel, send, playerColors 
 
             if (isBankrupt) {
               return (
-                <Paper key={p.player_idx} variant="outlined" sx={{ p: 1, opacity: 0.5, borderColor: '#555' }}>
-                  <Typography variant="body2" sx={{ fontWeight: 700, textDecoration: 'line-through' }}>
+                <Paper key={p.player_idx} variant="outlined" sx={{ p: 1, opacity: 0.4, bgcolor: M_PANEL, borderColor: alpha('#555', 0.4) }}>
+                  <Typography variant="body2" sx={{ fontWeight: 700, textDecoration: 'line-through', color: '#777' }}>
                     {emoji} {seatLabel(p.player_idx)} — BANKRUPT 💸
                   </Typography>
                 </Paper>
@@ -663,11 +833,23 @@ export default function MonopolyPanel({ snapshot, seatLabel, send, playerColors 
                 variant="outlined"
                 sx={{
                   p: 1.5,
-                  borderColor: isTurn ? color : `${color}66`,
+                  borderColor: isTurn ? color : alpha(color, 0.3),
                   borderWidth: isTurn ? 2 : 1,
-                  bgcolor: isTurn ? `${color}15` : 'background.paper',
+                  bgcolor: M_PANEL,
+                  position: 'relative',
+                  overflow: 'hidden',
                   animation: isTurn ? 'turnGlow 2s ease-in-out infinite' : `fadeInUp 0.3s ease-out ${p.player_idx * 0.07}s both`,
                   transition: 'all 0.3s ease',
+                  '&::before': {
+                    content: '""',
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: 4,
+                    height: '100%',
+                    bgcolor: color,
+                    opacity: isTurn ? 1 : 0.5,
+                  },
                 }}
               >
                 {/* Header row */}
@@ -700,7 +882,7 @@ export default function MonopolyPanel({ snapshot, seatLabel, send, playerColors 
                   <Box sx={{ textAlign: 'right', ml: 1, flexShrink: 0 }}>
                     <Typography variant="h6" sx={{
                       fontWeight: 900,
-                      color: '#66BB6A',
+                      color: '#1B5E20',
                       lineHeight: 1.1,
                       fontFamily: 'monospace',
                     }}>
@@ -755,8 +937,8 @@ export default function MonopolyPanel({ snapshot, seatLabel, send, playerColors 
                       value={Math.min(100, (netWorth / Math.max(1, ...sortedPlayers.map(sp => sp.net_worth ?? sp.money))) * 100)}
                       sx={{
                         height: 4, borderRadius: 2,
-                        bgcolor: '#333',
-                        '& .MuiLinearProgress-bar': { bgcolor: color, borderRadius: 2 },
+                        bgcolor: alpha(M_BORDER, 0.4),
+                        '& .MuiLinearProgress-bar': { bgcolor: color, borderRadius: 2, boxShadow: `0 0 6px ${alpha(color, 0.4)}` },
                       }}
                     />
                   </Box>
@@ -769,8 +951,8 @@ export default function MonopolyPanel({ snapshot, seatLabel, send, playerColors 
 
       {/* ── History ── */}
       {!!snapshot.history?.length && (
-        <Paper variant="outlined" sx={{ p: 1.25, maxHeight: 200, overflow: 'auto', borderColor: '#444' }}>
-          <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 800, color: 'text.secondary' }}>
+        <Paper variant="outlined" sx={{ p: 1.25, maxHeight: 200, overflow: 'auto', bgcolor: M_PANEL, borderColor: alpha(M_BORDER, 0.5) }}>
+          <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 800, color: '#5D4037' }}>
             📋 Game Log
           </Typography>
           <Stack spacing={0.25}>
