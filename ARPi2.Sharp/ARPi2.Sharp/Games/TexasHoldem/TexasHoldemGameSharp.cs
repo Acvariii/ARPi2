@@ -848,7 +848,7 @@ public class TexasHoldemGameSharp : BaseGame
     //  Player quit
     // ════════════════════════════════════════════════════════════
 
-    public void HandlePlayerQuit(int seat)
+    public override void HandlePlayerQuit(int seat)
     {
         if (State == "player_select") return;
         if (!ActivePlayers.Contains(seat)) return;

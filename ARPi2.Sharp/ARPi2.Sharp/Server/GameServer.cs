@@ -419,6 +419,8 @@ public class GameServer
         catch { }
         finally
         {
+            // Notify game before removing state
+            int dcSeat = _uiClientSeat.GetValueOrDefault(id, -1);
             _uiClients.TryRemove(id, out _);
             _uiClientSeat.TryRemove(id, out _);
             _uiClientName.TryRemove(id, out _);
@@ -427,6 +429,11 @@ public class GameServer
             _uiClientEndGame.TryRemove(id, out _);
             _audio.RemoveVoter(id);
             Console.WriteLine($"UI client disconnected: {id}");
+            if (dcSeat >= 0)
+            {
+                NotifyGamePlayerQuit(dcSeat);
+            }
+            MaybeEndGame();
         }
     }
 
@@ -646,8 +653,13 @@ public class GameServer
         _uiClientReady[clientId] = false;
         _uiClientVote.TryRemove(clientId, out _);
         _uiClientEndGame[clientId] = false;
-        if (seat >= 0) LogHistory($"{PlayerDisplayName(seat)} quit");
+        if (seat >= 0)
+        {
+            LogHistory($"{PlayerDisplayName(seat)} quit");
+            NotifyGamePlayerQuit(seat);
+        }
         SyncPlayerSelectFromSeats();
+        MaybeEndGame();
     }
 
     private void HandleGameSpecific(string clientId, string type, JsonElement root, string rawJson)
@@ -857,12 +869,35 @@ public class GameServer
         var required = _uiClientSeat
             .Where(kv => kv.Value >= 0 && _uiClients.ContainsKey(kv.Key))
             .Select(kv => kv.Key).ToList();
-        if (required.Count == 0) return;
+        // If no seated clients remain, return to lobby immediately
+        if (required.Count == 0)
+        {
+            _app.State = "menu";
+            ResetLobby();
+            LogHistory("Game ended — no players remain");
+            return;
+        }
         if (required.All(cid => _uiClientEndGame.GetValueOrDefault(cid, false)))
         {
             _app.State = "menu";
             ResetLobby();
             LogHistory("Game ended by vote");
+        }
+    }
+
+    /// <summary>Notify the active game that a player has quit/disconnected.</summary>
+    private void NotifyGamePlayerQuit(int seat)
+    {
+        if (_app.State == "menu") return;
+        var game = _app.GetActiveGame();
+        if (game == null) return;
+        try
+        {
+            game.HandlePlayerQuit(seat);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"HandlePlayerQuit error (seat {seat}): {ex.Message}");
         }
     }
 

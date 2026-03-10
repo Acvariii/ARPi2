@@ -205,7 +205,7 @@ public class UnoGameSharp : BaseGame
     }
 
     // ─── Handle player quit ────────────────────────────────────
-    public void HandlePlayerQuit(int seat)
+    public override void HandlePlayerQuit(int seat)
     {
         if (State != "playing" || _winner != null) return;
         if (!ActivePlayers.Contains(seat)) return;
@@ -415,10 +415,10 @@ public class UnoGameSharp : BaseGame
                     catch { }
                 }
 
-                // Apply effects
-                ApplyCardEffect(card, playedBy: playerIdx);
+                // Apply effects (returns true if turn was already advanced)
+                bool turnHandled = ApplyCardEffect(card, playedBy: playerIdx);
 
-                if (!_awaitingColorChoice)
+                if (!_awaitingColorChoice && !turnHandled)
                     EndTurn();
 
                 _drewThisTurn = false;
@@ -616,28 +616,49 @@ public class UnoGameSharp : BaseGame
         return hand.Any(c => IsPlayable(c));
     }
 
-    private void ApplyCardEffect(UnoCard card, int? playedBy)
+    /// <summary>
+    /// Apply the effect of a played card (reverse, skip, draw2, wild_draw4).
+    /// Returns true if the turn index was already advanced (caller should NOT call EndTurn).
+    /// Returns false for normal cards (caller should call EndTurn).
+    /// When playedBy is null (starting card flip), effects apply from index 0.
+    /// </summary>
+    private bool ApplyCardEffect(UnoCard card, int? playedBy)
     {
         int cx = ScreenW / 2, cy = ScreenH / 2;
 
         if (card.Value == "reverse")
         {
             if (ActivePlayers.Count == 2)
-                AdvanceIndex(1); // acts like skip in 2-player
-            else
-                _direction *= -1;
-
-            try
             {
-                string arrow = _direction >= 0 ? "→" : "←";
-                _textPops.Add(new TextPopAnim($"🔄 REVERSE {arrow}", cx, cy - 30, (255, 175, 60), fontSize: 28));
-                _flashes.Add(new ScreenFlash((255, 175, 60), 45, 0.35f));
-                _particles.EmitSparkle(cx, cy, (255, 175, 60), 16);
+                // In 2-player, reverse acts like skip — advance past next player
+                AdvanceIndex(1);
+                try
+                {
+                    string arrow = _direction >= 0 ? "→" : "←";
+                    _textPops.Add(new TextPopAnim($"🔄 REVERSE {arrow}", cx, cy - 30, (255, 175, 60), fontSize: 28));
+                    _flashes.Add(new ScreenFlash((255, 175, 60), 45, 0.35f));
+                    _particles.EmitSparkle(cx, cy, (255, 175, 60), 16);
+                }
+                catch { }
+                return playedBy != null; // turn already advanced when played by a player
             }
-            catch { }
+            else
+            {
+                _direction *= -1;
+                try
+                {
+                    string arrow = _direction >= 0 ? "→" : "←";
+                    _textPops.Add(new TextPopAnim($"🔄 REVERSE {arrow}", cx, cy - 30, (255, 175, 60), fontSize: 28));
+                    _flashes.Add(new ScreenFlash((255, 175, 60), 45, 0.35f));
+                    _particles.EmitSparkle(cx, cy, (255, 175, 60), 16);
+                }
+                catch { }
+                return false; // direction changed, but EndTurn still needed to advance to next player
+            }
         }
         else if (card.Value == "skip")
         {
+            // Skip the next player — advance by 1 (over the skipped player)
             AdvanceIndex(1);
             try
             {
@@ -645,17 +666,19 @@ public class UnoGameSharp : BaseGame
                 _flashes.Add(new ScreenFlash((230, 80, 80), 45, 0.35f));
             }
             catch { }
+            return playedBy != null; // turn already advanced when played by a player
         }
         else if (card.Value == "draw2")
         {
+            // Next player draws 2 and is skipped
             AdvanceIndex(1);
             int? victim = CurrentTurnSeat;
             if (victim is int v)
             {
                 NoteEvent($"{PlayerName(v)} drew +2");
                 DrawToHand(v, 2);
-                AdvanceIndex(1);
             }
+            AdvanceIndex(1); // skip past victim
             try
             {
                 _textPops.Add(new TextPopAnim("+2 Cards! 🃏", cx, cy - 30, (80, 160, 235), fontSize: 28));
@@ -663,17 +686,19 @@ public class UnoGameSharp : BaseGame
                 _particles.EmitSparkle(cx, cy, (80, 160, 235), 16);
             }
             catch { }
+            return playedBy != null; // turn already advanced when played by a player
         }
         else if (card.Value == "wild_draw4")
         {
+            // Next player draws 4 and is skipped
             AdvanceIndex(1);
             int? victim = CurrentTurnSeat;
             if (victim is int v)
             {
                 NoteEvent($"{PlayerName(v)} drew +4");
                 DrawToHand(v, 4);
-                AdvanceIndex(1);
             }
+            AdvanceIndex(1); // skip past victim
             try
             {
                 _textPops.Add(new TextPopAnim("+4 Cards! 🃏", cx, cy - 30, (200, 90, 220), fontSize: 28));
@@ -681,7 +706,10 @@ public class UnoGameSharp : BaseGame
                 _particles.EmitSparkle(cx, cy, (200, 90, 220), 22);
             }
             catch { }
+            return playedBy != null; // turn already advanced when played by a player
         }
+
+        return false; // normal card — EndTurn should still be called
     }
 
     private void RebuildButtons()

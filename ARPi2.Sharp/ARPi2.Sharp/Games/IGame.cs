@@ -40,6 +40,9 @@ public interface IGame
     /// <summary>Handle a game-specific message from the web UI (e.g. blackjack_bet, uno_play_card).</summary>
     void HandleMessage(int playerIdx, string type, string json);
 
+    /// <summary>Notify the game that a player disconnected or quit mid-game.</summary>
+    void HandlePlayerQuit(int seat);
+
     /// <summary>Get game-specific state for web UI JSON broadcast (legacy, non-per-player).</summary>
     Dictionary<string, object?> GetWebUIState();
 
@@ -136,6 +139,8 @@ public abstract class BaseGame : IGame
     public virtual void HandleClick(int playerIdx, string buttonId) { }
 
     public virtual void HandleMessage(int playerIdx, string type, string json) { }
+
+    public virtual void HandlePlayerQuit(int seat) { }
 
     public virtual Dictionary<string, object?> GetWebUIState() => new()
     {

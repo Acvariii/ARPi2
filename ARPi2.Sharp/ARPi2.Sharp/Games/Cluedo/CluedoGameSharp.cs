@@ -597,7 +597,7 @@ public class CluedoGameSharp : BaseGame
 
     // ── Handle player quit ─────────────────────────────────────
 
-    public void HandlePlayerQuit(int seat)
+    public override void HandlePlayerQuit(int seat)
     {
         if (State != "playing") return;
         if (_winner != null) return;

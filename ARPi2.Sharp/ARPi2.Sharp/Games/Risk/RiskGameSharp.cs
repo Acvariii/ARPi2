@@ -1202,7 +1202,7 @@ public class RiskGameSharp : BaseGame
     }
 
     // ── Player quit ────────────────────────────────────────────
-    public void HandlePlayerQuit(int seat)
+    public override void HandlePlayerQuit(int seat)
     {
         if (State != "playing" || _winner != null) return;
         if (!ActivePlayers.Contains(seat)) return;

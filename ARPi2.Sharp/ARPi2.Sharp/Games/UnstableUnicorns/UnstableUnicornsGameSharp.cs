@@ -378,7 +378,7 @@ public class UnstableUnicornsGameSharp : BaseGame
         StartBackgroundVideo();
     }
 
-    public void HandlePlayerQuit(int seat)
+    public override void HandlePlayerQuit(int seat)
     {
         if (!ActivePlayers.Contains(seat)) return;
         ActivePlayers = ActivePlayers.Where(p => p != seat).ToList();
