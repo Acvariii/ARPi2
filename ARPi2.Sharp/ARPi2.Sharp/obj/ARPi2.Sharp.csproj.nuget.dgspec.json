@@ -63,9 +63,9 @@
               "target": "Package",
               "version": "[3.8.2.1105, )"
             },
-            "NAudio": {
+            "NLayer": {
               "target": "Package",
-              "version": "[2.2.1, )"
+              "version": "[1.16.0, )"
             },
             "QRCoder": {
               "target": "Package",

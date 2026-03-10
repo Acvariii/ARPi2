@@ -1,21 +1,25 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using NAudio.Wave;
+using System.Linq;
+using Microsoft.Xna.Framework.Audio;
+using NLayer;
 
 namespace ARPi2.Sharp.Core;
 
 /// <summary>
-/// Central audio manager for background music and sound effects.
-/// Mirrors the Python server's audio handling (per-game BG music + one-shot SFX).
+/// Cross-platform audio manager for background music and sound effects.
+/// Uses NLayer (managed MP3 decoder) + MonoGame SoundEffect (SDL2/OpenAL output).
+/// Works on Windows, Linux x64, and Raspberry Pi (ARM64).
 /// </summary>
 public class AudioManager : IDisposable
 {
     private readonly string _soundsDir;
+    private bool _audioAvailable = true;
 
     // Background music
-    private WaveOutEvent? _bgPlayer;
-    private AudioFileReader? _bgReader;
+    private SoundEffectInstance? _bgInstance;
+    private SoundEffect? _bgEffect;
     private string? _bgTrack;
     private float _bgVolume = 1.0f;
     private float _sfxVolume = 0.5f;
@@ -24,8 +28,8 @@ public class AudioManager : IDisposable
     // Per-client volume overrides (0.0–1.0)
     private readonly Dictionary<string, float> _clientVolumes = new();
 
-    // SFX cache
-    private readonly Dictionary<string, byte[]> _sfxCache = new();
+    // SFX cache (decoded SoundEffects, ready to play)
+    private readonly Dictionary<string, SoundEffect> _sfxCache = new();
 
     // Mute voting
     private readonly Dictionary<string, bool> _muteVotes = new();
@@ -52,7 +56,6 @@ public class AudioManager : IDisposable
         // Default: look for sounds/ directory relative to the project root
         if (string.IsNullOrEmpty(soundsDir))
         {
-            // Walk up from executable to find sounds/ directory
             var dir = AppDomain.CurrentDomain.BaseDirectory;
             for (int i = 0; i < 8; i++)
             {
@@ -73,6 +76,51 @@ public class AudioManager : IDisposable
             _soundsDir = soundsDir;
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  MP3 → SoundEffect decoder (NLayer — pure managed, cross-platform)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// <summary>Decode an MP3 file to a MonoGame SoundEffect (16-bit PCM).</summary>
+    private SoundEffect? DecodeMp3(string path)
+    {
+        if (!_audioAvailable) return null;
+        try
+        {
+            using var mpegFile = new MpegFile(path);
+            int sampleRate = mpegFile.SampleRate;
+            int channels = mpegFile.Channels;
+
+            // Read float samples in chunks → convert to 16-bit PCM
+            var floatBuf = new float[16384];
+            using var pcmStream = new MemoryStream();
+            int samplesRead;
+            while ((samplesRead = mpegFile.ReadSamples(floatBuf, 0, floatBuf.Length)) > 0)
+            {
+                for (int i = 0; i < samplesRead; i++)
+                {
+                    short s = (short)(Math.Clamp(floatBuf[i], -1f, 1f) * 32767);
+                    pcmStream.WriteByte((byte)(s & 0xFF));
+                    pcmStream.WriteByte((byte)((s >> 8) & 0xFF));
+                }
+            }
+
+            var pcmData = pcmStream.ToArray();
+            if (pcmData.Length == 0) return null;
+
+            return new SoundEffect(pcmData, sampleRate,
+                channels == 1 ? AudioChannels.Mono : AudioChannels.Stereo);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[Audio] Failed to decode '{path}': {ex.Message}");
+            return null;
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Background music
+    // ═══════════════════════════════════════════════════════════════════════
 
     /// <summary>Get the desired background track for a given game state.</summary>
     public string? DesiredTrackForState(string state)
@@ -103,11 +151,18 @@ public class AudioManager : IDisposable
 
         try
         {
-            _bgReader = new AudioFileReader(path) { Volume = EffectiveVolume };
-            var loop = new LoopStream(_bgReader);
-            _bgPlayer = new WaveOutEvent();
-            _bgPlayer.Init(loop);
-            _bgPlayer.Play();
+            _bgEffect = DecodeMp3(path);
+            if (_bgEffect == null) return;
+
+            _bgInstance = _bgEffect.CreateInstance();
+            _bgInstance.IsLooped = true;
+            _bgInstance.Volume = EffectiveVolume;
+            _bgInstance.Play();
+        }
+        catch (NoAudioHardwareException)
+        {
+            _audioAvailable = false;
+            System.Diagnostics.Debug.WriteLine("[Audio] No audio hardware available — audio disabled.");
         }
         catch (Exception ex)
         {
@@ -120,42 +175,53 @@ public class AudioManager : IDisposable
     {
         try
         {
-            _bgPlayer?.Stop();
-            _bgPlayer?.Dispose();
-            _bgReader?.Dispose();
+            _bgInstance?.Stop();
+            _bgInstance?.Dispose();
+            _bgEffect?.Dispose();
         }
         catch { }
-        _bgPlayer = null;
-        _bgReader = null;
+        _bgInstance = null;
+        _bgEffect = null;
         _bgTrack = null;
     }
 
-    /// <summary>Play a one-shot sound effect.</summary>
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Sound effects (one-shot, supports overlapping)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// <summary>Play a one-shot sound effect. Decoded SFX are cached for reuse.</summary>
     public void PlaySfx(string filename)
     {
-        if (_musicMuted) return;
+        if (_musicMuted || !_audioAvailable) return;
 
         var path = Path.Combine(_soundsDir, filename);
         if (!File.Exists(path)) return;
 
         try
         {
-            // Each SFX gets its own player for overlapping sounds
-            var reader = new AudioFileReader(path) { Volume = Math.Min(0.5f, EffectiveVolume) };
-            var player = new WaveOutEvent();
-            player.Init(reader);
-            player.PlaybackStopped += (s, e) =>
+            if (!_sfxCache.TryGetValue(filename, out var sfx))
             {
-                player.Dispose();
-                reader.Dispose();
-            };
-            player.Play();
+                sfx = DecodeMp3(path);
+                if (sfx == null) return;
+                _sfxCache[filename] = sfx;
+            }
+
+            // Play() is fire-and-forget; MonoGame manages the pooled instance lifecycle
+            sfx.Play(Math.Min(0.5f, EffectiveVolume), 0f, 0f);
+        }
+        catch (NoAudioHardwareException)
+        {
+            _audioAvailable = false;
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"[Audio] Failed to play SFX '{filename}': {ex.Message}");
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Mute voting & volume
+    // ═══════════════════════════════════════════════════════════════════════
 
     /// <summary>Handle music mute voting.</summary>
     public void SetMuteVote(string clientId, bool mute)
@@ -210,8 +276,8 @@ public class AudioManager : IDisposable
         float vol = EffectiveVolume;
         try
         {
-            if (_bgReader != null)
-                _bgReader.Volume = vol;
+            if (_bgInstance != null)
+                _bgInstance.Volume = vol;
         }
         catch { }
     }
@@ -219,35 +285,10 @@ public class AudioManager : IDisposable
     public void Dispose()
     {
         StopBgMusic();
-    }
-}
-
-/// <summary>Simple WaveStream wrapper that loops playback.</summary>
-internal class LoopStream : WaveStream
-{
-    private readonly WaveStream _source;
-    public LoopStream(WaveStream source) { _source = source; }
-    public override WaveFormat WaveFormat => _source.WaveFormat;
-    public override long Length => _source.Length;
-    public override long Position
-    {
-        get => _source.Position;
-        set => _source.Position = value;
-    }
-
-    public override int Read(byte[] buffer, int offset, int count)
-    {
-        int totalRead = 0;
-        while (totalRead < count)
+        foreach (var sfx in _sfxCache.Values)
         {
-            int read = _source.Read(buffer, offset + totalRead, count - totalRead);
-            if (read == 0)
-            {
-                if (_source.Position == 0) break; // empty stream
-                _source.Position = 0;
-            }
-            totalRead += read;
+            try { sfx.Dispose(); } catch { }
         }
-        return totalRead;
+        _sfxCache.Clear();
     }
 }
